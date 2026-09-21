@@ -1,4 +1,18 @@
+/// <reference lib="dom" />
 import { contextBridge, ipcRenderer } from 'electron';
+
+// Sandboxed preloads cannot require local modules. Main supplies this public
+// preference through additionalArguments before any remote page script runs.
+try {
+  if (window.location.protocol === 'https:' || window.location.protocol === 'http:') {
+    const language = process.argv.find((arg) => arg.startsWith('--backspace-default-language='))?.split('=')[1];
+    if (language && window.localStorage.getItem('backspace-language') === null) {
+      window.localStorage.setItem('backspace-language', language);
+    }
+  }
+} catch {
+  // A blocked storage area must not prevent the desktop bridge from loading.
+}
 
 contextBridge.exposeInMainWorld('backspace', {
   // Platform info

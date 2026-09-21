@@ -10,6 +10,7 @@ import {
   screen,
   session,
   desktopCapturer,
+  dialog,
 } from 'electron';
 import path from 'path';
 import fs from 'fs';
@@ -19,10 +20,10 @@ import { startActivityDetection, stopActivityDetection, getCurrentActivity } fro
 import { KeybindManager } from './keybindManager';
 import { deriveStartMinimizedFromArgs, parseExecPathFromDesktopFile, shouldReapplyAppImage } from './autoLaunch';
 import {
-  loadInstanceUrl,
   saveInstanceUrl,
   clearInstanceUrl,
   getPickerPath,
+  getResolvedInstanceUrl,
 } from './instanceUrl';
 import { getUpdateCapability, isSandboxed } from './updateCapability';
 import { loadDismissedVersion, setDismissedVersion } from './updateDismissal';
@@ -58,6 +59,16 @@ import {
   type ScreenSharePickerMode,
 } from './screenSharePolicy';
 import { getDesktopLanguage, isDesktopLanguage, saveStoredLanguage, translateDesktop } from './l10n';
+import { DESKTOP_BUILD } from './buildConfig';
+
+function showManagedUpdateNotice(): void {
+  const language = getDesktopLanguage();
+  void dialog.showMessageBox({
+    type: 'info',
+    title: translateDesktop(language, 'update.managedTitle'),
+    message: translateDesktop(language, 'update.managedBody'),
+  });
+}
 
 // Override Electron's package.json-derived app name so userData lives at
 // "<appData>/Backspace" instead of leaking the monorepo's "@backspace/desktop"
@@ -100,7 +111,7 @@ const UPSTREAM_SOURCE_URL = 'https://github.com/TheZwiss/backspace';
  * Falls back to the upstream repo when no instance is loaded or the probe fails.
  */
 async function resolveSourceUrl(): Promise<string> {
-  let base: string | null = process.env.BACKSPACE_URL ?? loadInstanceUrl();
+  let base: string | null = getResolvedInstanceUrl();
   if (!base && mainWindow && !mainWindow.isDestroyed()) {
     const current = mainWindow.webContents.getURL();
     if (current.startsWith('http://') || current.startsWith('https://')) base = current;
@@ -378,6 +389,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      additionalArguments: [`--backspace-default-language=${getDesktopLanguage()}`],
     },
   });
 
@@ -392,18 +404,8 @@ function createWindow(): void {
   // URL resolution priority:
   // 1. BACKSPACE_URL env var (managed deployments)
   // 2. Saved instance URL from picker
-  // 3. No URL → show instance picker
-  const envUrl = process.env.BACKSPACE_URL;
-  if (envUrl) {
-    mainWindow.loadURL(envUrl);
-  } else {
-    const savedUrl = loadInstanceUrl();
-    if (savedUrl) {
-      mainWindow.loadURL(savedUrl);
-    } else {
-      mainWindow.loadFile(getPickerPath(), { query: { lang: getDesktopLanguage() } });
-    }
-  }
+  // 3. Public default for this distribution
+  mainWindow.loadURL(getResolvedInstanceUrl());
 
   mainWindow.once('ready-to-show', () => {
     // Hidden-launch detection. We pass `args: ['--hidden']` on all three platforms
@@ -642,7 +644,7 @@ function registerIpcHandlers(): void {
   });
 
   // Instance URL management
-  ipcMain.handle('get-instance-url', () => loadInstanceUrl());
+  ipcMain.handle('get-instance-url', () => getResolvedInstanceUrl());
 
   ipcMain.handle('set-instance-url', (_event, url: string) => {
     saveInstanceUrl(url);
@@ -676,6 +678,10 @@ function registerIpcHandlers(): void {
 
   // Auto-update IPC
   ipcMain.on('install-update', () => {
+    if (!DESKTOP_BUILD.updatesEnabled) {
+      showManagedUpdateNotice();
+      return;
+    }
     const store = getUpdateStore();
     const snapshot = store.get();
 
@@ -715,6 +721,10 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.on('check-for-updates', () => {
+    if (!DESKTOP_BUILD.updatesEnabled) {
+      showManagedUpdateNotice();
+      return;
+    }
     if (getUpdateCapability() === 'external') return;
     try {
       const { autoUpdater } = require('electron-updater');
@@ -741,6 +751,10 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.on('open-release-page', () => {
+    if (!DESKTOP_BUILD.updatesEnabled) {
+      showManagedUpdateNotice();
+      return;
+    }
     void shell.openExternal(RELEASES_URL);
   });
 
@@ -979,6 +993,10 @@ function notifyAboutUpdate(
 }
 
 function initAutoUpdater(): void {
+  if (!DESKTOP_BUILD.updatesEnabled) {
+    console.log('[update] disabled for this distribution; installers are supplied by the maintainer');
+    return;
+  }
   const capability = getUpdateCapability();
   const store = getUpdateStore();
 

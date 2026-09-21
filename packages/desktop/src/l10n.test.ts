@@ -21,15 +21,16 @@ describe('resolveDesktopLanguage', () => {
     expect(resolveDesktopLanguage('ru', 'de-DE')).toBe('ru');
   });
 
-  it('falls back to the OS locale mapped to its base language', () => {
-    expect(resolveDesktopLanguage(null, 'de-AT')).toBe('de');
-    expect(resolveDesktopLanguage('nonsense', 'ru-RU')).toBe('ru');
+  it('defaults to Chinese regardless of the OS locale', () => {
+    expect(resolveDesktopLanguage(null, 'de-AT')).toBe('zh');
+    expect(resolveDesktopLanguage('nonsense', 'ru-RU')).toBe('zh');
     expect(resolveDesktopLanguage(null, 'zh-CN')).toBe('zh');
+    expect(resolveDesktopLanguage(null, 'en-US')).toBe('zh');
   });
 
-  it('falls back to English when neither is shipped', () => {
-    expect(resolveDesktopLanguage(null, 'fr-FR')).toBe('en');
-    expect(resolveDesktopLanguage(null, '')).toBe('en');
+  it('defaults to Chinese for an unknown or missing locale', () => {
+    expect(resolveDesktopLanguage(null, 'fr-FR')).toBe('zh');
+    expect(resolveDesktopLanguage(null, '')).toBe('zh');
   });
 });
 

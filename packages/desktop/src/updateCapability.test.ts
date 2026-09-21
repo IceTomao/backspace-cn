@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { app } from 'electron';
+import { DESKTOP_BUILD } from './buildConfig';
 import {
   classifyDesignatedRequirement,
   macAppBundlePath,
@@ -12,6 +13,9 @@ import {
 // reachable in a plain Node test run, matching recovery.test.ts's pattern.
 vi.mock('electron', () => ({
   app: { isPackaged: true },
+}));
+vi.mock('./buildConfig', () => ({
+  DESKTOP_BUILD: { updatesEnabled: true },
 }));
 
 const mockedApp = app as unknown as { isPackaged: boolean };
@@ -133,6 +137,14 @@ describe('getUpdateCapability', () => {
     vi.unstubAllEnvs();
     resetUpdateCapabilityForTest();
     mockedApp.isPackaged = true;
+    DESKTOP_BUILD.updatesEnabled = true;
+  });
+
+  it('never enables in-place updates when the distribution disables updates', () => {
+    DESKTOP_BUILD.updatesEnabled = false;
+    withPlatform('win32', () => {
+      expect(getUpdateCapability()).toBe('manual');
+    });
   });
 
   it('is external inside Flatpak', () => {

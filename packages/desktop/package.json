@@ -13,6 +13,7 @@
   "desktopName": "io.github.TheZwiss.backspace.desktop",
   "scripts": {
     "build:ts": "tsc",
+    "build:win": "tsc && electron-builder --win nsis --x64 --publish never",
     "dev": "cp build/icon.icns $(find ../../node_modules -path '*/electron/dist/Electron.app/Contents/Resources/electron.icns' 2>/dev/null | head -1) 2>/dev/null; tsc && electron .",
     "build": "tsc && electron-builder",
     "build:all": "tsc && electron-builder --mac --win --linux --arm64 --x64",

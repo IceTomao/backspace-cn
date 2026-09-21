@@ -2,7 +2,8 @@ import { app, shell } from 'electron';
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron';
 import type { AppUpdater } from 'electron-updater';
 import path from 'path';
-import { loadInstanceUrl, clearInstanceUrl, getPickerPath } from './instanceUrl';
+import { getResolvedInstanceUrl, getPickerPath } from './instanceUrl';
+import { DESKTOP_BUILD } from './buildConfig';
 import { RELEASES_URL } from './updateStatus';
 import { getDesktopLanguage, translateDesktop, type DesktopLanguage } from './l10n';
 
@@ -28,6 +29,7 @@ export type UpdateState =
   | 'error';
 
 export interface RecoveryState {
+  updatesEnabled?: boolean;
   mode: 'normal' | 'recovery';
   reason: { code: RecoveryReasonCode; detail: string } | null;
   updateState: UpdateState;
@@ -37,6 +39,7 @@ export interface RecoveryState {
 }
 
 const INITIAL_STATE: RecoveryState = {
+  updatesEnabled: DESKTOP_BUILD.updatesEnabled,
   mode: 'normal',
   reason: null,
   updateState: 'idle',
@@ -119,6 +122,7 @@ function checkForUpdatesItem(
   click: () => void,
   language: DesktopLanguage,
 ): MenuItemConstructorOptions | null {
+  if (state.updatesEnabled === false) return null;
   const t = (key: Parameters<typeof translateDesktop>[1]) => translateDesktop(language, key);
   switch (state.updateState) {
     case 'external':
@@ -151,6 +155,7 @@ function updateActionItem(
   actions: Partial<MenuActions> | undefined,
   language: DesktopLanguage,
 ): MenuItemConstructorOptions | null {
+  if (state.updatesEnabled === false) return null;
   if (state.updateState === 'downloaded') {
     return {
       id: 'restart-to-install',
@@ -446,9 +451,11 @@ export function isValidRecoveryAction(action: unknown): action is RecoveryAction
 }
 
 export function handleRecoveryAction(action: RecoveryAction): void {
+  if (!DESKTOP_BUILD.updatesEnabled &&
+      (action === 'check-update' || action === 'install-update' || action === 'open-releases')) return;
   switch (action) {
     case 'reload': {
-      const url = loadInstanceUrl();
+      const url = getResolvedInstanceUrl();
       // Optimistic exit — clear recovery state BEFORE loading. If the load
       // fails, did-fail-load re-enters recovery. If it stalls, boot timer fires.
       recoveryStore.markRecoveryExited();

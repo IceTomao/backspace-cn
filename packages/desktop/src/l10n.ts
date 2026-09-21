@@ -5,7 +5,7 @@
  * The renderer owns the language choice and reports it over the
  * `set-language` IPC channel; main remembers it in userData so the tray is
  * right from the first paint on the next launch. Before the renderer has
- * ever said anything, the OS locale decides.
+ * ever said anything, the distribution defaults to Simplified Chinese.
  *
  * This is deliberately not i18next: the main process has under thirty
  * strings and no React, and pulling the library into the Electron bundle
@@ -15,6 +15,7 @@
 import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
+import { DESKTOP_BUILD } from './buildConfig';
 
 export type DesktopLanguage = 'en' | 'ru' | 'de' | 'zh';
 
@@ -37,6 +38,8 @@ const en = {
   'update.restartToInstall': 'Restart to Install Update',
   'update.downloadVersion': 'Download Backspace {version}…',
   'update.download': 'Download the Update…',
+  'update.managedTitle': 'Backspace CN updates',
+  'update.managedBody': 'Automatic updates are disabled for this Chinese edition. Contact the maintainer for a new installer.',
 } as const;
 
 export type DesktopStringKey = keyof typeof en;
@@ -60,6 +63,8 @@ const ru: Catalog = {
   'update.restartToInstall': 'Перезапустить для установки',
   'update.downloadVersion': 'Скачать Backspace {version}…',
   'update.download': 'Скачать обновление…',
+  'update.managedTitle': 'Обновления Backspace CN',
+  'update.managedBody': 'Автоматические обновления отключены. Новый установщик предоставляет сопровождающий этой сборки.',
 };
 
 const de: Catalog = {
@@ -79,6 +84,8 @@ const de: Catalog = {
   'update.restartToInstall': 'Neu starten und Update installieren',
   'update.downloadVersion': 'Backspace {version} herunterladen…',
   'update.download': 'Update herunterladen…',
+  'update.managedTitle': 'Backspace CN Updates',
+  'update.managedBody': 'Automatische Updates sind deaktiviert. Neue Installationspakete erhalten Sie vom Betreuer dieser Ausgabe.',
 };
 
 const zh: Catalog = {
@@ -98,6 +105,8 @@ const zh: Catalog = {
   'update.restartToInstall': '重启以安装更新',
   'update.downloadVersion': '下载 Backspace {version}…',
   'update.download': '下载更新…',
+  'update.managedTitle': 'Backspace 中文版更新',
+  'update.managedBody': '此中文版已关闭自动更新。需要升级时，请向维护者获取新版安装包。',
 };
 
 export const DESKTOP_CATALOGS: Record<DesktopLanguage, Catalog> = { en, ru, de, zh };
@@ -106,18 +115,12 @@ export function isDesktopLanguage(value: unknown): value is DesktopLanguage {
   return typeof value === 'string' && (DESKTOP_LANGUAGES as readonly string[]).includes(value);
 }
 
-/** `de-AT` → `de`; anything not shipped → null. Same rule as the web client. */
-function baseLanguage(tag: string): DesktopLanguage | null {
-  const base = tag.trim().toLowerCase().split('-')[0] ?? '';
-  return isDesktopLanguage(base) ? base : null;
-}
-
 /**
- * Stored renderer choice first, then the OS locale, then English.
+ * Stored renderer choice first, then this distribution's default.
  */
-export function resolveDesktopLanguage(stored: string | null, appLocale: string): DesktopLanguage {
+export function resolveDesktopLanguage(stored: string | null, _appLocale: string): DesktopLanguage {
   if (isDesktopLanguage(stored)) return stored;
-  return baseLanguage(appLocale) ?? 'en';
+  return DESKTOP_BUILD.defaultLanguage;
 }
 
 export function translateDesktop(
@@ -151,7 +154,7 @@ export function saveStoredLanguage(language: DesktopLanguage): void {
   fs.writeFileSync(getLanguagePath(), JSON.stringify({ language }));
 }
 
-/** The language for the current process: stored choice, else OS locale, else English. */
+/** The language for the current process: stored choice, else distribution default. */
 export function getDesktopLanguage(): DesktopLanguage {
   return resolveDesktopLanguage(loadStoredLanguage(), app.getLocale());
 }

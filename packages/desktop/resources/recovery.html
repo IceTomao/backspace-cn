@@ -157,7 +157,7 @@
 
     const $ = (id) => document.getElementById(id);
 
-    // Strings for the three shipped languages. The main process passes the
+    // The main process passes the stored language or distribution default.
     // language as ?lang= when it loads this page, because this page is shown
     // precisely when the renderer (and its catalogs) is unavailable. Keep in
     // step with packages/desktop/src/l10n.ts and the web `desktop` namespace.
@@ -228,6 +228,39 @@
         hintStalled: 'Приложение не загрузилось вовремя. Попробуйте перезагрузить его, а если не поможет, проверьте обновления.',
         hintGeneric: 'Что-то пошло не так. Попробуйте перезагрузить.',
       },
+      zh: {
+        title: 'Backspace 无法加载',
+        loading: '正在加载…',
+        reload: '重新加载',
+        restartToInstall: '重启以安装更新',
+        checkForUpdates: '检查更新',
+        checking: '正在检查…',
+        downloading: '正在下载更新…',
+        updateReady: '更新已就绪',
+        updateAvailable: '有可用更新',
+        updatesExternal: '更新由 Flatpak 管理',
+        changeInstance: '切换服务器',
+        openReleases: '打开版本发布页',
+        downloadVersion: '下载 Backspace {version}',
+        downloadUpdate: '下载更新',
+        diagnostics: '诊断信息',
+        quit: '退出 Backspace',
+        upToDate: '已是最新版本',
+        checkFailed: '更新检查失败',
+        bridgeUnavailable: '恢复功能不可用，请退出并重新安装 Backspace。',
+        stateLoadFailed: '无法读取恢复状态：{message}',
+        hintExternal: '请尝试重新加载或切换服务器。更新由 Flatpak 管理。',
+        hintLoadFailed: '无法连接服务器，请检查网络连接或尝试切换服务器。',
+        hintCrashReady: '应用发生错误，更新已就绪，请重启以安装。',
+        hintCrashManual: '应用发生错误，有新版本可用，请下载并重新安装。',
+        hintCrashDownloading: '应用发生错误，正在下载更新，请等待下载完成后重启。',
+        hintCrash: '应用发生错误，请尝试重新加载或检查更新。',
+        hintStalledReady: '应用未能完成加载，更新已就绪，请重启以安装。',
+        hintStalledManual: '应用未能完成加载，有新版本可用，请下载并重新安装。',
+        hintStalledDownloading: '应用未能完成加载，正在下载更新，请等待下载完成后重启。',
+        hintStalled: '应用加载超时，请尝试重新加载；若无效，请检查更新。',
+        hintGeneric: '加载发生错误，请尝试重新加载。',
+      },
       de: {
         title: 'Backspace konnte nicht geladen werden.',
         loading: 'Wird geladen…',
@@ -272,8 +305,20 @@
     for (const el of document.querySelectorAll('[data-i18n]')) {
       el.textContent = t(el.getAttribute('data-i18n'));
     }
+    document.title = t('title');
+    $('diagnostic').textContent = t('loading');
 
-    function hintFor(reasonCode, updateState) {
+    const MANAGED_HINTS = {
+      en: 'Try reloading or changing the server. New installers are supplied by the maintainer; automatic updates are disabled.',
+      zh: '请尝试重新加载或切换服务器。此中文版已关闭自动更新，新版安装包由维护者提供。',
+      ru: 'Перезагрузите приложение или смените сервер. Новый установщик предоставляет сопровождающий; автоматические обновления отключены.',
+      de: 'Lade neu oder wechsle den Server. Neue Installationspakete stellt der Betreuer bereit; automatische Updates sind deaktiviert.',
+    };
+
+    function hintFor(reasonCode, updateState, updatesEnabled) {
+      if (updatesEnabled === false) {
+        return (reasonCode === 'load-failed' ? t('hintLoadFailed') + ' ' : '') + (MANAGED_HINTS[LANG] || MANAGED_HINTS.en);
+      }
       if (updateState === 'external') return t('hintExternal');
       if (reasonCode === 'load-failed') return t('hintLoadFailed');
       if (reasonCode === 'render-gone' || reasonCode === 'unresponsive') {
@@ -332,38 +377,39 @@
 
     function render(state) {
       const reasonCode = state.reason?.code ?? null;
-      $('hint').textContent = hintFor(reasonCode, state.updateState);
+      const updatesEnabled = state.updatesEnabled !== false;
+      $('hint').textContent = hintFor(reasonCode, state.updateState, updatesEnabled);
 
       // Check for Updates button
       $('btn-check').textContent = checkButtonLabel(state.updateState);
       $('btn-check').disabled = !checkButtonEnabled(state.updateState);
-      $('btn-check').style.display = state.updateState === 'external' ? 'none' : '';
+      $('btn-check').style.display = !updatesEnabled || state.updateState === 'external' ? 'none' : '';
 
       // Restart visibility. Only ever shown when the update is genuinely staged
       // and installable, so this surface can never present a dead button.
-      $('btn-restart').style.display = state.updateState === 'downloaded' ? '' : 'none';
+      $('btn-restart').style.display = updatesEnabled && state.updateState === 'downloaded' ? '' : 'none';
 
       // Open Releases visibility. Shown after a failed update, and on builds
       // that cannot install in place, where downloading is the only real action.
       const manual = state.updateState === 'available-manual';
-      $('btn-releases').style.display = (state.updateState === 'error' || manual) ? '' : 'none';
+      $('btn-releases').style.display = updatesEnabled && (state.updateState === 'error' || manual) ? '' : 'none';
       $('btn-releases').textContent = manual
         ? (state.updateVersion ? t('downloadVersion', { version: state.updateVersion }) : t('downloadUpdate'))
         : t('openReleases');
 
       // Inline check result
       const cr = $('check-result');
-      cr.textContent = checkResultText(state.lastCheckResult);
+      cr.textContent = updatesEnabled ? checkResultText(state.lastCheckResult) : '';
       cr.className = 'check-result' + (state.lastCheckResult ? ' ' + state.lastCheckResult : '');
 
       // Diagnostic info
       const lines = [];
-      lines.push('Version: ' + cachedVersion);
-      if (state.reason) lines.push('Reason: ' + state.reason.code + ' (' + state.reason.detail + ')');
-      if (state.updateVersion) lines.push('Update version: ' + state.updateVersion);
+      lines.push((LANG === 'zh' ? '版本：' : 'Version: ') + cachedVersion);
+      if (state.reason) lines.push((LANG === 'zh' ? '原因：' : 'Reason: ') + state.reason.code + ' (' + state.reason.detail + ')');
+      if (state.updateVersion) lines.push((LANG === 'zh' ? '更新版本：' : 'Update version: ') + state.updateVersion);
       if (state.lastUpdateError) {
-        lines.push('Last update error: ' + state.lastUpdateError.message);
-        if (state.lastUpdateError.code) lines.push('Error code: ' + state.lastUpdateError.code);
+        lines.push((LANG === 'zh' ? '上次更新错误：' : 'Last update error: ') + state.lastUpdateError.message);
+        if (state.lastUpdateError.code) lines.push((LANG === 'zh' ? '错误代码：' : 'Error code: ') + state.lastUpdateError.code);
       }
       $('diagnostic').textContent = lines.join('\n');
     }

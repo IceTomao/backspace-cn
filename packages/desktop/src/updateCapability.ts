@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { spawnSync } from 'child_process';
 import path from 'path';
+import { DESKTOP_BUILD } from './buildConfig';
 
 /**
  * Whether this build can install its own updates.
@@ -145,6 +146,8 @@ let cached: UpdateCapability | null = null;
  * the day CI signs with a Developer ID, this returns `auto` with no code change.
  */
 export function getUpdateCapability(): UpdateCapability {
+  // Keep the existing renderer protocol; do not mislabel this as Flatpak.
+  if (!DESKTOP_BUILD.updatesEnabled) return 'manual';
   if (cached !== null) return cached;
 
   // Flatpak deployments are immutable. Updates are installed atomically by

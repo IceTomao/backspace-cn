@@ -10,12 +10,16 @@ productName: Backspace
 # Downloads table that .github/workflows/release.yml writes into the release
 # notes, the build list in packages/web/src/platform/desktopDownload.ts, and
 # the download table in README.md.
-artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+artifactName: "Backspace-CN-${version}-${os}-${arch}.${ext}"
 directories:
   output: dist-electron
 files:
   - dist/**/*
   - resources/**/*
+  - build/icon.png
+  - "!dist/**/*.test.*"
+  - "!**/.env*"
+  - "!**/*.db"
   # Exclude host-compiled native module artifacts from the asar.
   # electron-rebuild (postinstall) compiles uiohook-napi for the build machine,
   # creating build/Release/*.node. node-gyp-build checks build/ BEFORE prebuilds/,
@@ -35,10 +39,7 @@ npmRebuild: false
 # is a release-pipeline change that has to be checked on all six shipped artifacts.
 # See scripts/afterPack.js and docs/systems/desktop-security.md.
 afterPack: ./scripts/afterPack.js
-publish:
-  - provider: github
-    owner: TheZwiss
-    repo: backspace
+publish: null
 protocols:
   - name: Backspace
     schemes:
@@ -78,6 +79,10 @@ linux:
     - deb
   category: Network
 nsis:
+  language: "2052"
+  installerLanguages:
+    - zh_CN
+  unicode: true
   oneClick: false
   allowToChangeInstallationDirectory: true
   # One installer per architecture. With this unset, electron-builder builds a

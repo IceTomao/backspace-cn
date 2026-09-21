@@ -1,6 +1,11 @@
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import { resolveInstanceUrl } from './buildConfig';
+
+export function getResolvedInstanceUrl(): string {
+  return resolveInstanceUrl(process.env.BACKSPACE_URL, loadInstanceUrl());
+}
 
 export function getInstanceUrlPath(): string {
   return path.join(app.getPath('userData'), 'instance-url.json');

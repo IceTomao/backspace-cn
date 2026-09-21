@@ -305,9 +305,7 @@
   </div>
 
   <script>
-    // Strings for the three shipped languages. The main process passes the
-    // language as ?lang= when it loads this page; before the renderer has ever
-    // run, that is the OS locale. Keep in step with packages/desktop/src/l10n.ts.
+    // Main passes the stored language or distribution default as ?lang=.
     const STRINGS = {
       en: {
         welcomeTitle: 'Welcome to Backspace',
@@ -341,6 +339,22 @@
         errorNotBackspace: 'По этому адресу нет сервера Backspace.',
         errorOther: 'Не удалось подключиться: {message}',
       },
+      zh: {
+        welcomeTitle: '欢迎使用 Backspace',
+        welcomeSubtitle: '连接你的服务器',
+        switchTitle: '切换服务器',
+        switchSubtitle: '连接其他 Backspace 服务器，或取消以返回当前服务器。',
+        urlLabel: '服务器地址',
+        connect: '连接',
+        cancel: '取消',
+        connecting: '正在连接…',
+        errorEmpty: '请输入服务器地址',
+        errorTimeout: '连接超时，请检查地址后重试。',
+        errorUnreachable: '无法连接，请检查地址和网络后重试。',
+        errorStatus: '无法连接，服务器返回状态码 {status}。',
+        errorNotBackspace: '该地址不是 Backspace 服务器。',
+        errorOther: '无法连接：{message}',
+      },
       de: {
         welcomeTitle: 'Willkommen bei Backspace',
         welcomeSubtitle: 'Verbinde dich mit deiner Instanz',
@@ -368,6 +382,7 @@
     for (const el of document.querySelectorAll('[data-i18n]')) {
       el.textContent = t(el.getAttribute('data-i18n'));
     }
+    document.title = 'Backspace - ' + t('connect');
 
     const form = document.getElementById('picker-form');
     const input = document.getElementById('url-input');
@@ -425,6 +440,7 @@
         // first-run "welcome" framing.
         document.querySelector('.header h1').textContent = t('switchTitle');
         document.querySelector('.header p').textContent = t('switchSubtitle');
+        document.title = 'Backspace - ' + t('switchTitle');
       }
     }
     init();
