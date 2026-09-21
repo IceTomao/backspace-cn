@@ -1,0 +1,19 @@
+{
+  "transfers": {
+    "title": "文件传输",
+    "count_one": "{{count}} 个传输任务",
+    "count_other": "{{count}} 个传输任务",
+    "clearCompleted": "清除已完成任务",
+    "empty": "没有活动的传输。",
+    "status": {
+      "done": "完成",
+      "failed": "失败： {{reason}}",
+      "aborted": "已中止",
+      "progress": "{{loaded}}/{{total}}"
+    }
+  },
+  "crop": {
+    "title": "裁剪图像",
+    "applying": "正在应用……"
+  }
+}

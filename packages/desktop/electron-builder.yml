@@ -1,0 +1,88 @@
+appId: com.backspace.desktop
+productName: Backspace
+# Every release asset names its platform, so the GitHub asset list (which is
+# sorted by name and nothing else) groups by platform and reads on its own:
+# Backspace-1.4.0-win-x64.exe, -mac-arm64.dmg, -linux-x86_64.AppImage. The
+# architecture keeps electron-builder's per-format spelling: builder-util maps
+# x64 to `x86_64` for AppImage and `amd64` for deb, which are what those
+# formats' users expect, and leaves it `x64` elsewhere. Three other places
+# spell these names out by hand and have to move with this pattern: the
+# Downloads table that .github/workflows/release.yml writes into the release
+# notes, the build list in packages/web/src/platform/desktopDownload.ts, and
+# the download table in README.md.
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+directories:
+  output: dist-electron
+files:
+  - dist/**/*
+  - resources/**/*
+  # Exclude host-compiled native module artifacts from the asar.
+  # electron-rebuild (postinstall) compiles uiohook-napi for the build machine,
+  # creating build/Release/*.node. node-gyp-build checks build/ BEFORE prebuilds/,
+  # so if these directories enter the asar, the app crashes on every platform
+  # (including the build platform after afterPack removes the unpacked file).
+  - "!**/node_modules/uiohook-napi/build/**"
+  - "!**/node_modules/uiohook-napi/build.bak/**"
+  - "!**/node_modules/uiohook-napi/bin/**"
+asarUnpack:
+  - "**/*.node"
+npmRebuild: false
+# afterPack also flips Electron security fuses (RunAsNode, EnableNodeCliInspectArguments,
+# OnlyLoadAppFromAsar) via @electron/fuses, not via a top-level `electronFuses:` key here.
+# electron-builder 26 does support that key. It is not used because electron-builder runs
+# its own flip after the afterPack hook returns, and afterPack is where macSign.js seals
+# the macOS bundle, so the flip would land on an already-signed app. Switching to the key
+# is a release-pipeline change that has to be checked on all six shipped artifacts.
+# See scripts/afterPack.js and docs/systems/desktop-security.md.
+afterPack: ./scripts/afterPack.js
+publish:
+  - provider: github
+    owner: TheZwiss
+    repo: backspace
+protocols:
+  - name: Backspace
+    schemes:
+      - backspace
+mac:
+  category: public.app-category.social-networking
+  minimumSystemVersion: "12.0"
+  extendInfo:
+    NSAudioCaptureUsageDescription: "Backspace needs access to system audio to share sound during screen sharing."
+  # dmg only. The zip target exists for Squirrel.Mac auto-update, and these
+  # builds are ad-hoc signed, which the updater classifies as `manual`
+  # (src/updateCapability.ts): nothing on a Mac ever downloads the zip, so it
+  # was 250 MB of dead weight per release. The zip target comes back the day a
+  # Developer ID certificate makes in-place updates possible on macOS.
+  target:
+    - dmg
+win:
+  icon: ./build/icon.ico
+  target:
+    - nsis
+linux:
+  # electron-builder derives the Linux executable name from package.json `name`
+  # when this key is unset (LinuxPackager: `appInfo.sanitizedName.toLowerCase()`),
+  # and this package is named `@backspace/desktop`. Sanitising drops the slash and
+  # leaves `@backspacedesktop`. Version 26 added a whitelist check on that derived
+  # value in the AppImage target (`validateCriticalPathString`, which permits only
+  # letters, digits, dots, underscores, hyphens and spaces), so the leading `@` now
+  # aborts both Linux targets. Version 25 derived exactly the same name but never
+  # validated it, which is why 1.0.2 shipped a Linux executable genuinely called
+  # `@backspacedesktop`. Setting this key is therefore a rename, not a restoration.
+  # Keep the fuse-verification paths in .github/workflows/release.yml in step with
+  # it; nothing else couples them.
+  executableName: Backspace
+  icon: build/icons/
+  target:
+    - AppImage
+    - deb
+  category: Network
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # One installer per architecture. With this unset, electron-builder builds a
+  # combined x64+arm64 installer (twice the size) and, because artifactName
+  # carries ${arch}, the per-arch ones as well. electron-updater already picks
+  # the per-arch file by process.arch, and the Desktop tab in the web client
+  # picks by client hint, so the combined installer had no reader left.
+  buildUniversalInstaller: false

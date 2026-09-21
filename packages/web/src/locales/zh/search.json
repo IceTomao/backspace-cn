@@ -1,0 +1,34 @@
+{
+  "input": {
+    "placeholder": "搜索消息"
+  },
+  "filters": {
+    "toggle": "过滤器",
+    "from": {
+      "label": "从",
+      "placeholder": "用户名"
+    },
+    "has": {
+      "label": "包含",
+      "any": "任意内容",
+      "file": "文件",
+      "image": "上传图片",
+      "link": "链接"
+    },
+    "before": {
+      "label": "之前"
+    },
+    "after": {
+      "label": "之后"
+    }
+  },
+  "results": {
+    "empty": "未找到结果",
+    "hint": "键入以搜索此频道中的消息",
+    "count_one": "{{count}} 个结果",
+    "count_other": "{{count}}个结果",
+    "loadMore": "加载更多（剩余 {{remaining}} 个）",
+    "attachments_one": "{{count}} 个附件",
+    "attachments_other": "{{count}} 个附件"
+  }
+}

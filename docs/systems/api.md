@@ -1,0 +1,552 @@
+# REST API Reference
+
+Base: `/api`. Auth via `Authorization: Bearer <jwt>`. All responses JSON.
+Source files: `packages/server/src/routes/*.ts`
+
+---
+
+## Auth (`routes/auth.ts`) — public, rate-limited
+```
+POST /auth/register         { username, password, displayName?, avatarColor?, homeInstance?, homeUserId?, inviteToken? } → { token, user }
+GET  /auth/check-username    ?username= → { available, reason? }
+GET  /auth/check-invite      ?token=    → CheckInviteResponse
+POST /auth/login             { username, password } → { token, user }
+POST /auth/attach-proof      (JWT, rate-limited 5/15min)  { targetDomain } → { token }   (AttachProofResponse)
+```
+
+**`POST /auth/attach-proof`** — JWT-authenticated. Mints a one-time 256-bit token (`randomBytes(32).toString('hex')`) for the logged-in **native** user, stored in `federation_attach_proofs` bound to `{ homeUserId, targetDomain, expiresAt = now+60s }`; expired rows are janitored on each mint (the delete targets `expires_at < now`; a used-but-unexpired row lingers until it expires). The token is handed to the peer named by `targetDomain`, which redeems it via `POST /federation/verify-attach-proof` to re-attach the caller's detached account there. See `federation.md` "S2S Detached-Account Re-Attach Proof" and re-attach spec §3.1.
+
+**`POST /auth/login`** — request/response shape unchanged, but two internal controls from instance-epoch self-healing gate the flow: (1) an account with `federationHomeOrphaned = 1` (home instance factory-reset) is **detached** — a sovereign local account whose local password hash is the sole authority; it logs in normally with that local password (the detach pivot removed the old pre-verification freeze), and the flag's only login effect is to permanently disable self-heal (step 7); (2) for non-detached federated accounts, the password self-heal runs an **epoch guard** — it re-hashes the stale local password only if the home instance's authenticated epoch (`fetchPeerEpoch`) matches the trusted baseline, failing closed when the epoch differs or can't be determined. A detached account can be re-bound to the owner's new home identity via `POST /users/@me/reattach` (re-attach spec §3.2), which clears the flag and re-enables normal federated semantics. No wire-shape change. See `auth.md` §4.
+
+**`POST /auth/register` gating** — branches on whether `homeInstance` is set:
+- **Federated path** (`homeInstance` set): gated solely by `instance_settings.federatedRegistrationOpen`. `inviteToken` is ignored entirely (not validated, not consumed). 403 `Federated registration is closed on this instance` when closed. The endpoint is **create-only**: it always INSERTs a new row and returns `201`, and never binds the submitted credentials to an existing row — a relay-created stub (`passwordHash = '!federation-replicated'`) is never claimed here, whatever `homeUserId`/`homeInstance` the caller supplies. Stub merges happen only via the proof-gated `POST /users/@me/reattach`. Login is never blocked by this gate.
+- **Local path** (no `homeInstance`):
+  - When `registrationOpen` is true: `inviteToken` is silently ignored (no row touched, no `usedCount` increment).
+  - When `registrationOpen` is false: `inviteToken` is required. The token is pre-validated, then the user INSERT + `usedCount` increment + `invite_redemptions` row INSERT all run in a single transaction (`inviteService.redeemInvite`). 403 `Registration is closed. An invite is required.` (no token) or `Invalid or expired invite` (token rejected at any stage, including a concurrent-redemption race re-check inside the transaction).
+
+**`GET /auth/check-invite`** — public, rate-limited 30/min/IP. Always returns 200; the body discriminates:
+
+```typescript
+type CheckInviteResponse =
+  | { valid: true; name: string }            // active token; name surfaces for UX
+  | { valid: false; reason: 'expired' | 'exhausted' | 'invalid' };
+```
+
+`revoked`, malformed (non-22-char-base64url), and not-in-DB tokens all collapse to `'invalid'` (enumeration shield). `name` is returned **only** in the valid case.
+
+## Users (`routes/users.ts`) — auth required
+```
+GET    /users/@me                                        → { user }
+PATCH  /users/@me             { displayName?, avatar?, banner?, accentColor?, avatarColor?,
+                                bio?, customStatus?, status?, replicatedInstances?, homeUserId?,
+                                profileUpdatedAt?, discoverable?, showActivity? } → { user }
+POST   /users/@me/verify-password  { password }          → { valid }
+POST   /users/@me/change-password  { currentPassword?, newPassword } → { token }
+DELETE /users/@me             { password, username }      → { success }
+PUT    /users/@me/space-layout { items, folders, updatedAt? } → { items, folders, updatedAt }
+GET    /users/@me/federation-registry                    → { registry: FederationRegistryEntry[], updatedAt: number }
+PUT    /users/@me/federation-registry { registry, updatedAt } → { ok: true, updatedAt } (409 if not newer)
+POST   /users/@me/federation-credential { origin, markProvisioned? } → { origin, secret, provisioned }
+GET    /users/:id                                        → { user }
+GET    /users/:id/mutuals     ?homeUserId=               → { mutualFriends[], mutualSpaces[] }
+```
+
+**Write protection:** If the authenticated user is a replicated user (`homeInstance` is set **and** `federationHomeOrphaned !== 1`), the following fields are rejected with 403: `displayName`, `avatar`, `banner`, `accentColor`, `avatarColor`, `bio`. These fields are managed by the home instance via S2S relay. **Exception — detached accounts** (`federationHomeOrphaned === 1`): a federated account whose home instance was reset/lost is a sovereign local account with no home managing its profile, so it edits these durable fields locally like a native user (detach design §4.4). Detached edits are NOT relayed (the S2S profile-relay path stays gated on `!homeInstance`).
+
+**Self-view flag:** `GET /users/@me`, the login response, and the WS `ready` payload all sanitize the row with `isSelf=true` and include `federationHomeOrphaned: boolean` (detach design §4.7) — self-view only; it is never exposed to other users and never on the deleted/tombstone branch.
+
+**`POST /users/@me/federation-credential`:** get-or-create the per-remote credential this account's client presents when registering or logging in as itself on another instance. Scoped to `request.userId`; the secret is never derived from and never equal to the account password. See `auth.md` §5b and `client-federation.md` §1.
+
+- `origin` is canonicalized to `https://host[:port]` (lowercased, no path), so `orbit.example`, `orbit.example/`, and `https://Orbit.example` all address one row. Unparseable or non-http(s) values → **400**; our own origin → **400** (a credential is only ever for a remote).
+- **409** when the caller is a replicated federated account (`homeInstance` set and `federationHomeOrphaned !== 1`) — credentials are issued by the account's own home instance so exactly one secret exists per (user, remote). Detached accounts follow the LOCAL rule and DO get credentials.
+- Creation is `onConflictDoNothing` + re-read, i.e. **first-writer-wins**: a racing second call returns the stored secret rather than replacing it and locking the loser out of the remote account.
+- `markProvisioned: true` latches `provisionedAt` (set-once, never rotates the secret). `provisioned: false` means the remote account may still carry a credential this instance did not issue, and the client will rotate it the next time it holds a live session there.
+- Rows are deleted by `tombstoneUser` and by `POST /users/@me/federation-identity/delete` in `soft`/`full` mode (not `leave` — the remote account survives and keeps using the secret).
+
+## Spaces (`routes/spaces.ts`) — auth required
+```
+GET    /spaces                                                                 → { spaces[] }
+POST   /spaces                { name, icon?, description? }                    → { space }
+GET    /spaces/:id                                                             → { space, channels[], members[], roles[] }
+PATCH  /spaces/:id            { name?, icon?, banner?, description?, visibility?, avatarColor? } → { space }   [MANAGE_SPACE]
+DELETE /spaces/:id                                                             → { success }  [owner]
+POST   /spaces/:id/invite                                                      → { inviteCode }  [CREATE_INVITE]
+POST   /spaces/:id/join       { inviteCode }                                   → { space }
+POST   /spaces/join           { inviteCode }                                   → { space }
+GET    /spaces/invite/:code/preview                                            → invite preview
+PATCH  /spaces/:id/transfer-ownership  { newOwnerId }                          → { space }  [owner]
+```
+
+### Members
+```
+GET    /spaces/:id/members                               → { members[] }
+PATCH  /spaces/:id/members/:uid  { nickname?, roles? }   → { member }  [MANAGE_ROLES]
+DELETE /spaces/:id/members/:uid                          → { success }  [KICK_MEMBERS|self]
+```
+
+### Bans
+```
+GET    /spaces/:id/bans                                  → { bans[] }  [BAN_MEMBERS]
+POST   /spaces/:id/bans       { userId, reason? }        → { success }  [BAN_MEMBERS]
+DELETE /spaces/:id/bans/:uid                             → { success }  [BAN_MEMBERS]
+```
+
+### Roles
+```
+POST   /spaces/:id/roles              { name, color?, permissions? }              → { role }  [MANAGE_ROLES]
+PATCH  /spaces/:id/roles/:rid         { name?, color?, position?, permissions? }  → { role }  [MANAGE_ROLES]
+DELETE /spaces/:id/roles/:rid                                                     → { success }  [MANAGE_ROLES]
+POST   /spaces/:id/members/:uid/roles { roleId }                                 → { success }  [MANAGE_ROLES]
+DELETE /spaces/:id/members/:uid/roles/:rid                                        → { success }  [MANAGE_ROLES]
+```
+
+## Channels (`routes/channels.ts`) — auth required
+```
+GET    /spaces/:id/channels                              → { channels[] }  [VIEW_CHANNEL]
+POST   /spaces/:id/channels   { name, type?, topic?, categoryId? } → { channel }  [MANAGE_CHANNELS]
+PATCH  /channels/:id          { name?, type?, topic?, categoryId? } → { channel }  [MANAGE_CHANNELS]
+DELETE /channels/:id                                     → { success }  [MANAGE_CHANNELS]
+PATCH  /spaces/:id/channels/reorder  { order }           → reordered  [MANAGE_CHANNELS]
+```
+
+### Channel Overrides
+```
+GET    /channels/:id/overrides                                      → { overrides[] }  [MANAGE_CHANNELS]
+PUT    /channels/:id/overrides  { targetType, targetId, permissions } → { override }  [MANAGE_CHANNELS]
+DELETE /channels/:id/overrides/:targetType/:targetId                 → { success }  [MANAGE_CHANNELS]
+```
+
+### Categories
+```
+POST   /spaces/:id/categories        { name }              → { category }  [MANAGE_CHANNELS]
+PATCH  /categories/:id               { name?, position? }  → { category }  [MANAGE_CHANNELS]
+DELETE /categories/:id                                      → { success }  [MANAGE_CHANNELS]
+GET    /categories/:id/overrides                            → { overrides[] }  [MANAGE_ROLES]
+PUT    /categories/:id/overrides     { targetType, targetId, permissions } → { success }  [MANAGE_ROLES]
+DELETE /categories/:id/overrides/:tt/:tid                   → { success }  [MANAGE_ROLES]
+```
+
+## Messages (`routes/messages.ts`) — auth required
+```
+GET    /channels/:id/messages  ?before=&limit=50          → { messages[] }  [VIEW_CHANNEL+READ_MESSAGE_HISTORY]
+POST   /channels/:id/messages  { content, attachments?, replyToId? } → { message }  [SEND_MESSAGES, +ATTACH_FILES]
+PATCH  /messages/:id           { content }                → { message }  [author]
+DELETE /messages/:id                                      → { success }  [author|MANAGE_MESSAGES]
+```
+`replyToId` on POST must name a message in the same channel, otherwise `400 Invalid reply target` and nothing is inserted. See permissions.md, "Reply-target confinement".
+
+## DMs (`routes/dm.ts`) — auth required
+```
+POST   /dm                     { targetUserId, targetUsername? }     → { dmChannel }
+POST   /dm/group               { name, memberUserIds[] }            → { dmChannel }
+PATCH  /dm/:id                 { name?, icon? }                     → { id, name, icon, metadataUpdatedAt } [owner; group only]
+DELETE /dm/:id                                                      → { success } (soft-close)
+POST   /dm/:id/members         { userIds[] }                        → { dmChannel } [owner, max 10]
+DELETE /dm/:id/members                                              → { success } (leave)
+DELETE /dm/:id/members/:targetUserId  ?homeInstance=                → { success } [owner kick; cannot self-kick; group only; segment is homeUserId when ?homeInstance is set]
+POST   /dm/:id/transfer        { newOwnerId? | (homeUserId+homeInstance) } → { success } [owner; resolved member must be in channel; not self]
+GET    /dm/:id/messages        ?before=&limit=50                    → { messages[] }
+POST   /dm/:id/messages        { content, attachments?, replyToId? } → { message }
+PATCH  /dm/messages/:id        { content }                          → { message } [author]
+DELETE /dm/messages/:id                                             → { success } [author]
+```
+
+**`PATCH /dm/:id`** — Owner-only update of a group DM's `name` and `icon`. Either field may be omitted (no-op), null (clear), or set. Empty/whitespace name collapses to null. `icon` accepts a bare attachment filename owned by the caller (image/*, ≤ `GROUP_DM_ICON_MAX_BYTES`) or an absolute http(s) URL. No-op short-circuit when nothing actually changes — emits no system message and no federation relay. See `docs/systems/dm-system.md` "Group Metadata Update" for the full transaction, federation relay, and icon URL round-trip rules.
+
+**`DELETE /dm/:id/members/:targetUserId`** — Owner kicks a member from a group DM. The `:targetUserId` segment carries either a local user id on the owner's instance OR a federated home user id when the `?homeInstance=<origin>` query string is present (server resolves via `resolveOrCreateReplicatedUser` — same pattern as `POST /dm/:id/members`). Federated form is required for federated targets, because the client's cached user view returns the user's home id, not the owner instance's local replicated id. Reuses the leave path with `reason: 'kick'`; evicts the target from the DM voice room first. Sends `dm_channel_closed` to the kicked user. Receivers enforce `sourceInstance === ownerHomeInstance`; non-owner kicks reject as `unauthorized_source`.
+
+**`POST /dm/:id/transfer`** — Owner transfers ownership to another current member without leaving. Body accepts either a local id (`newOwnerId`) or a federated identity (`homeUserId` + `homeInstance`). When both forms are supplied, federated args take precedence. Server resolves via `resolveOrCreateReplicatedUser` before checking membership — mirrors `POST /dm/:id/members`. Updates `ownerId`, `ownerHomeUserId`, `ownerHomeInstance`; inserts an `owner_changed` system message; broadcasts `dm_owner_updated`; queues an `ownership_transfer` outbox event. Reuses the existing receiver path (`processOwnershipTransferEvent`) with no protocol changes.
+
+## Social (`routes/social.ts`) — auth required
+```
+GET    /social/friends                                    → { friends[] }
+GET    /social/requests                                   → { requests[] }
+POST   /social/requests        { username }               → { success, requestId }
+PATCH  /social/requests/:id    { status: 'accepted'|'declined' } → { request }
+DELETE /social/requests/:id                               → { success } (cancel, sender-only)
+DELETE /social/friends/:id                                → { success }
+GET    /social/discover        ?q=&limit=&offset=         → { users[], total }
+GET    /social/search          ?q=                        → { users[] }
+```
+
+### POST /api/social/requests — routing & error codes
+
+`body.username` may be `bare` (local), `bare@<own host>` (also routed local — server normalizes), or `bare@<remote host>` (federated branch). The client sends the trimmed handle verbatim; all parsing, routing, peering, and remote lookup are server-side.
+
+| HTTP | error code | When |
+|---|---|---|
+| 200 | (success, idempotent) | Same-direction pending request already exists; returns existing `requestId` |
+| 201 | (success, created) | New friend request created |
+| 400 | `username_required` | Missing/empty/non-string username |
+| 400 | `cannot_friend_self` | Looked-up identity matches sender |
+| 400 | `invalid_target_domain` | Scheme resolution failed (e.g., non-localhost HTTP target when our scheme is HTTPS) |
+| 403 | `peer_rejected` | Remote instance has rejected federation; admin must intervene |
+| 403 | `not_authoritative_for_sender` | Caller is a federated (replicated) user; should not have reached here |
+| 404 | `user_not_found` | Remote lookup returned 404 (no such user, or tombstoned) |
+| 409 | `already_friends` | Friendship row already exists |
+| 409 | `peer_pending_approval` | Remote admin needs to approve the peering relationship |
+| 409 | `peer_pending_local_admin` | Local instance has `autoAcceptPeering=0` and the user attempted to friend-add a never-peered remote target. The user's own admin must approve before any traffic reaches the wire. Distinct from `peer_pending_approval` (remote admin must approve). See [federation.md → Outbound Peering Gate](federation.md#outbound-peering-gate). |
+| 409 | `peer_pending` | Peer handshake in flight |
+| 409 | `incoming_request_exists` | Opposite-direction pending request exists; response includes `requestId` for deep-link |
+| 429 | `lookup_rate_limited` | Remote `/users/lookup` returned 429; `Retry-After` header forwarded |
+| 503 | `peer_unreachable` | Remote instance unreachable (network/timeout/lookup-unreachable) |
+
+## Search (`routes/search.ts`) — auth required
+```
+GET /channels/:id/search         ?q=&from=&has=&before=&after=&offset=&limit= → { results[], totalCount }  [VIEW_CHANNEL]
+GET /channels/:id/messages/around ?messageId=&limit=                           → { messages[] }
+GET /dm/:id/search               ?q=&from=&has=&before=&after=&offset=&limit= → { results[], totalCount }
+GET /dm/:id/messages/around      ?messageId=&limit=                           → { messages[] }
+```
+has: `file`|`image`|`link`
+
+## Explore (`routes/explore.ts`) — auth required
+```
+GET    /spaces/explore                   ?q=&limit=&offset=  → { spaces[], total, totalAll, discoveryEnabled }
+POST   /spaces/:id/public-join                               → { space }
+POST   /spaces/:id/request-join          { message? }        → { request }
+GET    /spaces/:id/join-requests         ?status=            → { requests[] }  [MANAGE_SPACE]
+PATCH  /spaces/:id/join-requests/:rid    { action }          → { request }  [MANAGE_SPACE]
+GET    /users/@me/join-requests          ?status=            → { requests[] }
+```
+
+## Uploads (`routes/files.ts`, `routes/uploads.ts`)
+
+### Tus Upload Endpoints
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| POST | `/api/files/` | JWT | Create resumable upload. Returns `Location` (upload URL) and `Upload-Expires`. |
+| HEAD | `/api/files/:uploadId` | JWT (ownership) | Probe `Upload-Offset` for resume. |
+| PATCH | `/api/files/:uploadId` | JWT (ownership) | Append bytes at offset. |
+| DELETE | `/api/files/:uploadId` | JWT (ownership) | Abort. |
+
+The final PATCH that completes an upload returns the `Attachment` JSON in its response body. See `docs/systems/uploads.md` for the full pipeline (PRE_CREATE / PRE_PATCH / POST_FINISH hooks, storage layout, janitor).
+
+### File Serving
+```
+GET  /uploads/:filename  (public, supports Range) → file stream
+```
+
+## GIF (`routes/gif.ts`) — auth required
+```
+GET /gif/enabled                         → { enabled }
+GET /gif/trending   ?limit=&pos=         → { results[], next }
+GET /gif/search     ?q=&limit=&pos=      → { results[], next }
+```
+Backend: Klipy API (requires `gifApiKey` in instance_settings)
+
+## Voice (`routes/livekit.ts`) — auth required
+```
+POST /livekit/token  { channelId | dmChannelId } → { token, url }
+```
+Permissions checked: CONNECT, SPEAK, STREAM (space channels). DM calls: always full grants.
+
+## Instance (`routes/instance.ts`) — public
+```
+GET /instance/info → { name, version, registrationOpen, federatedRegistrationOpen, instanceId, sourceCodeUrl, commit }
+```
+`federatedRegistrationOpen` is a UX hint consumed by the Connections add-instance pre-flight (see `client-federation.md`). The 403 from `POST /auth/register` remains the security boundary.
+
+`instanceId` (`InstanceInfoResponse.instanceId`, `string`) is this instance's persistent **epoch** — the incarnation UUID minted once by `ensureDefaults` and stable across restarts (see `database.md → Instance Settings`). It is served here (unauthenticated, credential-free) purely as a **detection** signal: `probePeerReachable` reads it to observe that a peer behind a known origin has been factory-reset (a changed epoch). It is **never** written to a peer's trusted baseline from this channel — only the authenticated `/federation/epoch`, relay envelope, and handshake do that. See `federation.md` "Instance Epoch".
+
+`sourceCodeUrl` (`string`) and `commit` (`string | null`) implement the **AGPL-3.0 § 13 network-use source offer**: every network user (and federated peer) can obtain the Corresponding Source of the exact version this instance is running. `sourceCodeUrl` comes from `config.sourceCodeUrl` (env `BACKSPACE_SOURCE_URL`, default `https://github.com/TheZwiss/backspace`) — operators who modify Backspace MUST set it to their fork's source. `commit` comes from `config.commit` (env `BACKSPACE_COMMIT`, injected at Docker build via `deploy.sh --build-arg`; `null` in local dev). The web client surfaces `sourceCodeUrl`/`version` via the `SourceCodeLink` component on settings sidebars and the pre-auth login/register pages; the desktop app exposes it via the tray + app menus ("Source code (AGPL)") and the native About panel.
+
+## Settings (`routes/settings.ts`)
+```
+GET   /settings/streaming    (auth)        → { streamingLimits }
+PATCH /settings/streaming    (admin)       → { streamingLimits }
+GET   /settings/instance     (admin)       → { instanceName, registrationOpen, federatedRegistrationOpen, discoveryEnabled, ... }
+PATCH /settings/instance     (admin)       { instanceName?, registrationOpen?, federatedRegistrationOpen?,
+                                             discoveryEnabled?, gifApiKey?, maxUploadSizeMb?,
+                                             federationRelayEnabled?, federationRelayTtlDays? } → { settings }
+```
+`registrationOpen` and `federatedRegistrationOpen` are **independent** toggles. PATCH validates `federatedRegistrationOpen` is `boolean` if provided; rejects 400 otherwise. `registrationOpen` is stored as a nullable column (null = fall back to `config.registrationOpen` env default); `federatedRegistrationOpen` is NOT NULL with default 1.
+
+## Admin (`routes/admin.ts`) — admin required
+```
+GET    /admin/storage/stats                                → StorageStats
+GET    /admin/storage/orphans                              → { orphans[] }
+POST   /admin/storage/cleanup        { dryRun? }           → CleanupResult
+POST   /admin/storage/cleanup-media  { maxAgeDays, dryRun? } → CleanupResult
+GET    /admin/users  ?q=&page=&pageSize=&showDeleted=&homeInstance=&role=&joinedAfter=&joinedBefore=&sort= → AdminUserListResponse
+GET    /admin/users/instances                              → distinct home instance domains
+PATCH  /admin/users/:id/role         { isAdmin }           → AdminUser
+POST   /admin/users/:id/reset-password                     → { temporaryPassword }
+DELETE /admin/users/:id                                    → { success }
+```
+
+## Admin: Instance Updates (`routes/adminUpdates.ts`) — admin required
+```
+GET    /admin/instance/update-status  ?refresh=true    → InstanceUpdateStatus
+```
+
+Read-only. There is deliberately no endpoint that applies an update: doing so from
+inside the container needs `/var/run/docker.sock` mounted, which is host root.
+See [admin.md](admin.md) for the full rationale and [deployment.md](deployment.md)
+for `./update.sh`, which the panel points at instead.
+
+The GitHub lookup runs only on this request path, never on a timer, and is cached
+6h (failures for a tenth of that). `?refresh=true` bypasses the cache for an
+explicit re-check but cannot bypass `BACKSPACE_UPDATE_CHECK=false`, which makes
+the endpoint return `checkEnabled: false, reason: 'disabled'` without opening a
+socket. Every network failure is soft: `state: 'unknown'` with a `reason`, never a
+5xx, so the panel always reports the running version.
+
+## Admin: Telemetry (`routes/adminTelemetry.ts`) - admin required
+```
+GET    /admin/telemetry              → TelemetryStatus
+PUT    /admin/telemetry              { enabled: boolean } → TelemetryStatus
+GET    /admin/telemetry/preview      → TelemetryPayload
+```
+
+The opt-in daily usage report. `TelemetryStatus` is `{ enabled: boolean | null,
+id: string | null, lastDay: string | null, lastError: { day, status } | null,
+askDue: boolean }`, where `enabled: null` means the instance was never asked and
+`askDue` says whether the admin should see the ask now (always while never
+answered, never after a yes, and after a no again from the next minor release
+on; telemetry.md §7). All three routes are home-origin only.
+
+`PUT` requires `enabled` to be a boolean and returns 400 `validation_failed` for
+anything else (`"yes"`, `1`, a missing field). It is the only HTTP writer of the
+five `instance_settings` telemetry columns (the reporter records what it sent
+and `install.sh` can set the switch, both through the same `telemetry/state.ts`
+rules); the general settings PATCH never touches them. Enabling mints a `telemetry_id` if the instance never had one; disabling keeps
+the id, so a later re-enable reports under the same id, and stamps
+`telemetry_declined_version` with the running server version. Neither branch touches
+`telemetry_last_day`, which the reporter owns, so a toggle never costs a ping
+and never repeats one; both clear the pending error. Enabling an instance that is already on changes
+nothing. The id is never rotated.
+
+`GET /preview` returns the exact payload a ping would carry right now, built by
+the same function the reporter uses. While reporting is off `instance` is the
+literal string `preview`: an instance that was never on has no id and none is
+minted to render a preview, and one that was on keeps its id but does not show
+it next to "Off". The route writes nothing in either state.
+
+See [telemetry.md](telemetry.md) for the field semantics, the rounding rule and
+what is never sent.
+
+## Admin: Invite Management (`routes/invites.ts`) — admin required
+
+All endpoints sit behind `[authenticate, requireAdmin]`. Mutating endpoints wrap their read-modify-write in a SQLite transaction with an in-txn re-fetch + status re-derive; any state mismatch returns 409. Service layer: `packages/server/src/utils/inviteService.ts` (`InviteValidationError` → 400, `InviteNotFoundError` → 404, `InviteStateConflictError` → 409).
+
+```
+POST   /admin/invites                       { name, maxUses, expiresAt }              → InviteLinkSummary  (201)
+GET    /admin/invites              ?status=active|archived (default: active)          → { invites: InviteLinkSummary[] }
+PATCH  /admin/invites/:id                   { name?, maxUses?, expiresAt? }           → InviteLinkSummary
+POST   /admin/invites/:id/revoke                                                       → { invite: InviteLinkSummary }
+POST   /admin/invites/:id/reinstate         { maxUses?, expiresAt? }                  → { invite: InviteLinkSummary, tokenRotated: boolean }
+DELETE /admin/invites/:id                                                              → { success: true }
+GET    /admin/invites/:id/redemptions                                                  → { redemptions: InviteRedemption[] }
+```
+
+**`POST /admin/invites`** — `name` 1-64 chars trimmed; `maxUses` null (unlimited) or positive integer; `expiresAt` null (never) or epoch ms strictly greater than `Date.now()`. 400 on shape violation.
+
+**`GET /admin/invites?status=`** — `active` returns rows whose derived status is `active`; `archived` returns `expired | exhausted | revoked`. Sort `createdAt DESC`. Joins `users` to surface `createdByUsername` (`'Deleted User'` if creator's `isDeleted = 1`).
+
+**`PATCH /admin/invites/:id`** — partial body. 400 if `maxUses` is a positive integer less than the current `usedCount` (would retroactively exhaust — admin should revoke instead). 409 if the invite is currently `revoked` (status conflict — reinstate first).
+
+**`POST /admin/invites/:id/revoke`** — sets `revokedAt = Date.now()`. 409 if already revoked.
+
+**`POST /admin/invites/:id/reinstate`** — branches on the row's pre-reinstate derived status:
+- **Path A — was `revoked`**: rotates the token (`crypto.randomBytes(16).toString('base64url')`), clears `revokedAt`, applies any provided `maxUses`/`expiresAt` overrides. Response includes `tokenRotated: true`. 400 if the resulting row would still derive non-`active` (caller must bump enough).
+- **Path B — was `expired` or `exhausted`**: token preserved. Applies overrides. Response `tokenRotated: false`. 400 same rule.
+- **Path C — already `active`**: 409 "Invite is already active." Pure no-op rejection.
+
+**`DELETE /admin/invites/:id`** — hard-delete. CASCADE removes all `invite_redemptions` rows for this invite. Allowed in any status. 404 if not found.
+
+**`GET /admin/invites/:id/redemptions`** — sort `redeemedAt DESC`. Each row includes the registration-moment snapshot (`registrantUsername`) plus the live joined state (`currentUsername` / `isDeleted`) so the UI can render `alice (now Deleted User)` for renamed/tombstoned users.
+
+```typescript
+type InviteLinkSummary = {
+  id: string;
+  token: string;
+  name: string;
+  status: 'active' | 'expired' | 'exhausted' | 'revoked';  // derived
+  maxUses: number | null;
+  usedCount: number;
+  expiresAt: number | null;
+  revokedAt: number | null;
+  createdBy: string;
+  createdByUsername: string | null;  // 'Deleted User' if creator tombstoned
+  createdAt: number;
+  lastRedeemedAt: number | null;  // epoch ms of most recent redemption; null when usedCount = 0
+  url: string;  // server-built `https://<host>/register?invite=<token>` — clients MUST NOT assemble
+};
+
+type InviteRedemption = {
+  id: string;
+  userId: string | null;       // null only on hard-delete (defensive — tombstone keeps row)
+  registrantUsername: string;  // snapshot at registration moment
+  currentUsername: string | null;
+  isDeleted: boolean;
+  redeemedAt: number;
+};
+```
+
+## Federation (`routes/federation.ts`)
+```
+POST   /federation/peer/initiate   (admin)     { remoteOrigin }                    → { peer, verified } (200) | 409 { code:'PEER_EXISTS_RESET_REQUIRED' }
+POST   /federation/peer/accept     (public, IP rate-limited 10/min) { sourceOrigin, challenge, hmacSecret, instanceName?, instanceId?, approvalToken? } → { accepted:true, instanceName, instanceId } (200) | queued (202 + { approvalToken }) | 409 { accepted:false, code:'PEER_EXISTS_RESET_REQUIRED', instanceName, instanceId }
+GET    /federation/peers           (admin)                                          → { peers[] } (no secrets; each peer carries needsAttentionReason)
+GET    /federation/reset-events     (admin)                                          → FederationResetEventsResponse
+POST   /federation/reset-events/acknowledge (admin)  { origin }                      → { success } (200) | 400 missing origin | 404 unknown origin
+DELETE /federation/peers/:id       (admin)                                          → { success } + outbox cleanup
+POST   /federation/relay           (HMAC-signed S2S)  FederationRelayRequest (+ sourceInstanceId?) → { accepted[], rejected[] }
+POST   /federation/sync            (HMAC-signed S2S)  { sinceTimestamp, limit?, dmChannelId?, federatedId?, contextType? } → { events[], hasMore, checkpoint }
+POST   /federation/users/lookup    (HMAC-signed S2S, rate-limited 60/min/peer)  { username }  → { found, user? }
+POST   /federation/epoch           (HMAC-signed S2S, HMAC-signed response)  {}  → { instanceId }
+POST   /federation/verify-attach-proof (HMAC-signed S2S, HMAC-signed response, rate-limited 60/min/peer)  { token } → { valid:true, homeUserId, username } | { valid:false }
+POST   /users/@me/reattach         (JWT as detached account, rate-limited 5/15min)  { token } → { success:true, user } (ReattachResponse) | 400/401/403/404/409
+```
+
+**`POST /api/federation/peer/accept`** — public, IP-rate-limited. Optional `approvalToken` (64-hex) on the request body proves mutual admin approval; required to promote an `awaiting_approval` row to `active` when the receiver has `autoAcceptPeering=0`. The receiver returns it in the 202 body when queueing the request for admin review (`{ queued: true, message, approvalToken }`); the initiator stores it and the receiver's `/approve` later forwards it back. See `federation.md` §1 "Approval Token Verification" for the full lifecycle and threat model.
+
+**Handshake epoch exchange.** The handshake carries the **instance epoch** bidirectionally, mirroring `instanceName`: the request body's `instanceId` is the initiator's epoch (written to `federation_peers.peer_instance_id` on every authenticated activation path), and the 200 response body's `instanceId` is the responder's epoch. Older peers omit the field; the column stays `null` until the epoch-refresh/relay backstop fills it. Both are authenticated baselines — never overwritten by the unauthenticated `/instance/info` probe. **`FederationRelayRequest.sourceInstanceId`** stamps the sender's current epoch on every relay; because the whole body is HMAC-verified, a valid relay authentically carries the sender's incarnation id and populates `peer_instance_id` when null (fast-path baseline). See `federation.md` "Instance Epoch".
+
+**Trust re-establishment (verify-before-activate).** `/peer/initiate` no longer treats any `response.ok` as success. On remote 200 it performs a signed `fetchPeerEpoch` (`POST /federation/epoch`) round-trip to PROVE the responder adopted the negotiated secret, then either activates (`200 { peer, verified: true }`, storing the cryptographically-verified epoch as `peer_instance_id`) or parks the peer in `needs_attention`/`repeer_incomplete` (`200 { peer, verified: false }`). On remote `409 PEER_EXISTS_RESET_REQUIRED` it deletes its pending row and returns `409 { code: 'PEER_EXISTS_RESET_REQUIRED' }`. `/peer/accept` returns that same `409 { accepted: false, code: 'PEER_EXISTS_RESET_REQUIRED', instanceName, instanceId }` for an existing `active`/`needs_attention` row (honest refusal — anti-hijack guard unchanged, never adopts the caller's secret) instead of the old false `200 { accepted: true }`. The handshake `sourceOrigin` is `getOurOrigin()` (honors `PUBLIC_ORIGIN`), so it matches the `X-Federation-Origin` used for all S2S auth. See `federation.md` "Trust re-establishment contract".
+
+**`GET /api/federation/reset-events`** — admin-only, read-only. Backs the "Reset cleanup" admin surface (instance-epoch self-healing §6.4). Returns the durable `federation_reset_events` journal, each row augmented with the origin's current orphaned real accounts (`federationHomeOrphaned = 1`) for disposition:
+
+```typescript
+type FederationOrphanedAccount = {
+  id: string;
+  username: string;            // preserved original handle (detach spec); legacy rows may carry '!orphaned:{uid}@domain'
+  displayName: string | null;
+  avatarColor: string | null;
+  ownedSpaces: { id: string; name: string }[];
+  spaceMemberCount: number;    // # spaces the account is a member of
+  messageCount: number;        // # space messages authored
+};
+type FederationResetEvent = {
+  origin: string; deadEpoch: string; newEpoch: string | null;
+  detectedAt: number; resolvedAt: number | null; acknowledgedAt: number | null;
+  stubCount: number; orphanedAccountCount: number;
+  orphanedAccounts: FederationOrphanedAccount[];
+};
+type FederationResetEventsResponse = { events: FederationResetEvent[] };
+```
+
+**`POST /api/federation/reset-events/acknowledge`** — admin-only, no S2S. Body `{ origin }`: `400` if missing, `404` if no journal row for that origin, else stamps `acknowledged_at = Date.now()` **only if currently null** (idempotent — a second call keeps the original timestamp) and returns `{ success: true }`. Lets the admin banner be dismissed server-side (Task 7) instead of client-only state; purely informational, detached accounts stay detached (detach spec §4.6).
+
+Disposition actions reuse existing endpoints (no new mutating routes): one-click Re-peer = `POST /peers/:id/reset` → `POST /peer/initiate`; full-purge Remove = `DELETE /api/admin/users/:id` (owns-spaces → transfer first). **`needsAttentionReason`** (`'auth_failures' | 'peer_reset_detected' | 'repeer_incomplete' | null`) is now included on each `GET /federation/peers` peer object so the client can raise the persistent Reset-cleanup banner only for reset-detected peers and surface an "incomplete Re-peer" warning for `repeer_incomplete`. See `federation.md` "Instance Epoch" and `client-federation.md` §8.
+
+**`POST /api/federation/users/lookup`** — HMAC-authenticated S2S endpoint. Resolves a username on this instance to its canonical `(homeUserId, profile snapshot)`. Used by the cross-instance friend-add flow on the sender's home server before queuing a `friend_request_create` event. Responds to native, non-deleted users only; ignores `discoverable`. Returns `{ found: false, code: 'user_not_found' }` for stubs, tombstoned users, or unknown handles. See `federation.md` §1 "S2S User Lookup" for the full contract.
+
+**`POST /api/users/@me/reattach`** — the owner-initiated detached-account re-attach (re-attach spec §3.2). JWT-authenticated as the detached account but registered in `routes/federation.ts` (consumes the peer HMAC channel + profile machinery). Body `{ token }` (64-hex; else 400). Re-binds the sovereign detached row to the owner's new home identity **only** when both proofs hold: the session IS the detached account AND the token verifies with the home peer over signed S2S (`POST /federation/verify-attach-proof`). Guards: non-detached/native → 403; missing/tombstoned session → 404 (already 401'd at `authenticate`); home not an active peer → 409; proof invalid → 401; new identity held by a **non-stub** local account → 409. On success: merges any pre-existing replicated stub for the new identity into the detached row (repoint+dedupe every `users.id` FK a DM/friend replica can hold, then delete the stub), sets `home_user_id`/`federation_home_orphaned=0`, adopts the new home username base if it differs (collision-suffix), nulls `profile_updated_at`, pulls+applies the home profile (best-effort), and broadcasts `user_updated`. The paired mint endpoint is `POST /api/auth/attach-proof` (see Auth). See `federation.md` "Peer-Side Re-Attach" and re-attach spec §3.2–3.3.
+
+**`POST /api/federation/verify-attach-proof`** — HMAC-authenticated S2S endpoint on the home instance that redeems a one-time attach-proof token (single-use, bound to the calling peer's domain, HMAC-signed fail-closed response). See `federation.md` "S2S Detached-Account Re-Attach Proof".
+
+**`POST /api/federation/epoch`** — HMAC-authenticated S2S endpoint returning this instance's persistent epoch (`{ instanceId }`). The **request** is HMAC-signed (only a peer holding the shared secret may call it; unknown/revoked peers → 403, bad signature → 401, missing headers → 400) **and the response body is HMAC-signed** with the same secret (`X-Federation-Signature/Timestamp/Nonce` response headers), so the caller can verify the epoch before writing it as the peer's trusted baseline (`federation_peers.peer_instance_id`). The value is already public via `/instance/info`; signing is for baseline-integrity, not confidentiality. Caller: `fetchPeerEpoch(peer)` (`utils/federationEpoch.ts`), which fails safe — 404 (not-yet-upgraded peer), bad/absent response signature, or network/timeout all return `null` (retry next tick). Populates the epoch baseline deterministically via the bounded periodic epoch-refresh. See `federation.md` "Instance Epoch" §3.2.
+
+### Federation Peering Approval Queue
+
+Inbound + outbound peering approval queue (`autoAcceptPeering=0`). See [federation.md → Peer Approval Queue](federation.md#peer-approval-queue) and [federation.md → Outbound Peering Gate](federation.md#outbound-peering-gate).
+
+```
+GET  /federation/approval-requests              (admin)            → { requests: ApprovalRequestSummary[] }
+POST /federation/approval-requests/:id/approve  (admin)            → { success, peerStatus?, peer? }
+POST /federation/approval-requests/:id/deny     (admin)            → { success }
+```
+
+**`ApprovalRequestSummary` shape:**
+
+```typescript
+type ApprovalRequestSummary = {
+  id: string;
+  direction: 'inbound' | 'outbound';
+  origin: string;
+  instanceName: string | null;
+  requestedAt: number;
+  expiresAt: number;
+  // Outbound rows ONLY — inbound rows OMIT this field entirely (it is absent, not null and not []).
+  subscribers?: ApprovalRequestSubscriberSummary[];
+};
+
+type ApprovalRequestSubscriberSummary = {
+  id: string;
+  userId: string;
+  username: string;
+  triggerReason: 'friend_add' | 'space_join' | 'direct_message';
+  triggerTarget: string;
+  createdAt: number;
+};
+```
+
+**`POST /approval-requests/:id/approve`** — direction-branched.
+- **Inbound** — existing behavior preserved verbatim (creates / upserts a local `federation_peers` row with status `pending`, sends `/peer/accept` to origin forwarding the stored `approvalToken`, deletes the queue row regardless of whether the result is `active` (200) or `awaiting_approval` (202)).
+- **Outbound** — generates a fresh HMAC, sends `/peer/accept` to the origin (no token; we are the initiator).
+  - On 200 → peer becomes `active`. `onPeerActivated` runs: fans out `kind='approved'` notifications to subscribers and cascade-deletes the queue row. The handler does NOT duplicate this cleanup.
+  - On 202 → peer transitions to `awaiting_approval`, captures the returned `approvalToken`, and the queue row + subscribers are LEFT INTACT for the eventual remote-admin approval. `onPeerActivated` is NOT called yet.
+  - On 4xx/5xx/network → the peer row is cleaned up; the queue row is LEFT INTACT so the admin can retry. Response status mirrors the wire failure (`502`/`503`/`504`).
+- **Response body:** `{ success, peerStatus?: 'active' | 'awaiting_approval', peer? }` for outbound; `{ success }` for inbound.
+
+**`POST /approval-requests/:id/deny`** — direction-branched.
+- **Inbound** — existing behavior preserved (sends signed `/peer/denied` to origin, upserts a local `rejected` `federation_peers` row, deletes the queue row).
+- **Outbound** — fans out `kind='denied'` notifications to all `peer_approval_subscribers` of the queue row, then cascade-deletes the parent (no remote network call). Broadcasts `federation_peers_changed` to admins so the queue UI refreshes.
+
+### Federation Peering Subscriptions (user-facing)
+
+```
+GET    /federation/peering-subscriptions     (auth)   → { subscriptions: PeeringSubscriptionSummary[] }
+DELETE /federation/peering-subscriptions/:id (auth)   → { success }
+```
+
+User-facing surface for the rows in `peer_approval_subscribers` belonging to the calling user. GET joins the parent `peer_approval_requests` row to include peer origin/instance metadata.
+
+```typescript
+type PeeringSubscriptionSummary = {
+  id: string;
+  requestId: string;
+  peerOrigin: string;
+  peerInstanceName: string | null;
+  triggerReason: 'friend_add' | 'space_join' | 'direct_message';
+  triggerTarget: string;
+  createdAt: number;
+};
+```
+
+**`DELETE /peering-subscriptions/:id`:**
+- 404 if the subscriber row doesn't exist.
+- 403 if the row belongs to a different user.
+- On success: deletes the subscriber row; if it was the last subscriber for the parent, cascade-deletes the parent (admin's queue row disappears too). No `peer_approval_notifications` row is created (the user took the action; they know).
+- Broadcasts `peering_subscription_changed` to the calling user (multi-tab refresh) and `federation_peers_changed` to admins if the parent was deleted.
+
+### Federation Peering Notifications (user-facing)
+
+```
+GET  /federation/peering-notifications        (auth)  ?unread=1?  → { notifications: PeeringNotificationSummary[] }
+POST /federation/peering-notifications/:id/read   (auth)         → { success }
+POST /federation/peering-notifications/read-all   (auth)         → { success, count }
+```
+
+User-facing terminal-state notifications for peering events. GET orders DESC by `createdAt`; `?unread=1` filters to `readAt IS NULL`.
+
+```typescript
+type PeeringNotificationSummary = {
+  id: string;
+  kind: 'approved' | 'denied' | 'expired';
+  peerOrigin: string;
+  triggerReason: 'friend_add' | 'space_join' | 'direct_message';
+  triggerTarget: string;
+  createdAt: number;
+  readAt: number | null;
+};
+```
+
+**`POST /:id/read`** — sets `readAt = Date.now()` for the calling user's notification (404 / 403 on miss / mismatch).
+**`POST /read-all`** — marks all of the calling user's unread notifications as read; returns `{ success, count }` where `count` is the number of rows updated.
+
+## Utilities (`routes/utils.ts`) — auth required
+```
+GET /utils/metadata  ?url= → { title?, description?, image?, siteName? }
+GET /health          (public) → { status: 'ok', timestamp }
+```
+
+## Security reporting (`routes/cspReport.ts`), public
+```
+POST /csp-report     (no auth) -> 204
+```
+
+**`POST /api/csp-report`** is the Content Security Policy violation sink named by the policy's `report-uri` and `report-to`. Unauthenticated on purpose: a violation can happen on the login screen before any token exists. It registers content-type parsers for `application/csp-report` and `application/reports+json` in addition to the built-in `application/json`. Fastify ships parsers for neither of the first two and would otherwise answer 415, leaving an empty report log that looks exactly like a clean policy. It answers `204` to everything, including a malformed body, because a browser cannot act on an error and would only retry. It reads at most 16 KB off the wire and logs at most 4096 characters per report at `warn` level with the message `CSP violation reported`. Registered after `@fastify/rate-limit` so the shared 200/minute limit applies; that ordering is load-bearing. See `docs/systems/web-security.md`.

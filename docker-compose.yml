@@ -1,0 +1,94 @@
+# ============================================================
+# Backspace — All-in-one production deployment
+# ============================================================
+# Run ./install.sh for first-time setup, or configure manually:
+#   1. Copy .env.example to .env and fill in values
+#   2. Generate livekit.yaml (if enabling voice)
+#   3. docker compose up -d --build
+# ============================================================
+
+services:
+  # ── Backspace application server ──────────────────────────
+  backspace:
+    # Prebuilt multi-arch image on GHCR (published by .github/workflows/
+    # docker-publish.yml). `docker compose pull` / install.sh's default path
+    # fetches this so weak/ARM hosts skip the heavy local build. Both `image:`
+    # and `build:` are declared: if the image isn't present locally and can't be
+    # pulled, `docker compose up --build` (install.sh's fallback, and deploy.sh)
+    # builds from source instead and tags the result under this same ref.
+    # Override the tag with BACKSPACE_IMAGE_TAG in .env (defaults to `latest`).
+    image: ${BACKSPACE_IMAGE:-ghcr.io/thezwiss/backspace}:${BACKSPACE_IMAGE_TAG:-latest}
+    build:
+      context: .
+      args:
+        # AGPL-3.0 § 13: bake the running build's git commit into the image so
+        # /api/instance/info advertises the exact version. deploy.sh exports
+        # BACKSPACE_COMMIT before `docker compose build`; empty when unset.
+        BACKSPACE_COMMIT: ${BACKSPACE_COMMIT:-}
+    container_name: backspace
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DB_PATH=/app/data/backspace.db
+      - UPLOAD_DIR=/app/data/uploads
+      # Fail fast with a clear message if the secret is missing/empty, instead of
+      # letting the container boot-crash on every `restart: unless-stopped` cycle
+      # (a silent loop that only shows up in `docker compose logs backspace`).
+      # install.sh generates this before bringing the stack up; this guard only
+      # bites the manual `cp .env.example .env && docker compose up` path.
+      - "JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in .env - generate one with: openssl rand -hex 32}"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:' + (process.env.PORT || 3000) + '/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Caddy reverse proxy (auto-HTTPS) ─────────────────────
+  caddy:
+    image: caddy:2.11.1-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:?Set DOMAIN in .env}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - internal
+    depends_on:
+      backspace:
+        condition: service_healthy
+
+  # ── LiveKit voice/video server ────────────────────────────
+  # Activated by COMPOSE_PROFILES=voice in .env
+  livekit:
+    image: livekit/livekit-server:v1.9.11
+    container_name: livekit
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    command: --config /etc/livekit.yaml
+    profiles:
+      - voice
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,523 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useSpaceStore } from '../../../stores/spaceStore';
+import { useUIStore } from '../../../stores/uiStore';
+import { api, HttpError } from '../../../api/client';
+import { PermissionBits, stringToPermissions, permissionsToString } from '../../../utils/permissions';
+import { usePermissionNames, type PermissionKey } from '../../ui/OverrideEntry';
+import { describeError } from '../../../i18n/errors';
+import type { Role } from '@backspace/shared';
+
+// ─── Permission display groups ─────────────────────────────────────────────
+
+interface PermDef {
+  bit: bigint;
+  key: PermissionKey;
+}
+
+type PermissionGroupId = 'general' | 'text' | 'voice';
+
+const PERMISSION_GROUPS: { id: PermissionGroupId; perms: PermDef[] }[] = [
+  {
+    id: 'general',
+    perms: [
+      { bit: PermissionBits.ADMINISTRATOR, key: 'ADMINISTRATOR' },
+      { bit: PermissionBits.VIEW_CHANNEL, key: 'VIEW_CHANNEL' },
+      { bit: PermissionBits.MANAGE_CHANNELS, key: 'MANAGE_CHANNELS' },
+      { bit: PermissionBits.MANAGE_ROLES, key: 'MANAGE_ROLES' },
+      { bit: PermissionBits.MANAGE_SPACE, key: 'MANAGE_SPACE' },
+      { bit: PermissionBits.CREATE_INVITE, key: 'CREATE_INVITE' },
+      { bit: PermissionBits.KICK_MEMBERS, key: 'KICK_MEMBERS' },
+      { bit: PermissionBits.BAN_MEMBERS, key: 'BAN_MEMBERS' },
+    ],
+  },
+  {
+    id: 'text',
+    perms: [
+      { bit: PermissionBits.SEND_MESSAGES, key: 'SEND_MESSAGES' },
+      { bit: PermissionBits.MANAGE_MESSAGES, key: 'MANAGE_MESSAGES' },
+      { bit: PermissionBits.ATTACH_FILES, key: 'ATTACH_FILES' },
+      { bit: PermissionBits.READ_MESSAGE_HISTORY, key: 'READ_MESSAGE_HISTORY' },
+      { bit: PermissionBits.ADD_REACTIONS, key: 'ADD_REACTIONS' },
+    ],
+  },
+  {
+    id: 'voice',
+    perms: [
+      { bit: PermissionBits.CONNECT, key: 'CONNECT' },
+      { bit: PermissionBits.SPEAK, key: 'SPEAK' },
+      { bit: PermissionBits.MUTE_MEMBERS, key: 'MUTE_MEMBERS' },
+      { bit: PermissionBits.DEAFEN_MEMBERS, key: 'DEAFEN_MEMBERS' },
+      { bit: PermissionBits.MOVE_MEMBERS, key: 'MOVE_MEMBERS' },
+      { bit: PermissionBits.DISCONNECT_MEMBERS, key: 'DISCONNECT_MEMBERS' },
+      { bit: PermissionBits.STREAM, key: 'STREAM' },
+    ],
+  },
+];
+
+const PRESET_COLORS = [
+  '#b9bbbe', '#a5f3c4', '#ffc9a9', '#c4b5fd', '#93c5fd',
+  '#fbbf24', '#fda4af', '#f87171', '#60a5fa', '#34d399',
+];
+
+/** Auto-increment a base name ("Foo" → "Foo 2" → "Foo 3") to avoid uniqueness conflicts. */
+function getUniqueRoleName(baseName: string, existingRoles: Role[]): string {
+  const existingNames = new Set(existingRoles.map((r) => r.name.toLowerCase()));
+  let candidateName = baseName;
+  let counter = 2;
+  while (existingNames.has(candidateName.toLowerCase())) {
+    candidateName = `${baseName} ${counter}`;
+    counter++;
+  }
+  return candidateName;
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
+
+interface RolesPanelProps {
+  spaceId: string;
+}
+
+export function RolesPanel({ spaceId }: RolesPanelProps) {
+  const { t } = useTranslation(['spaces', 'common']);
+  const roles = useSpaceStore((s) => s.roles);
+  const loadSpaceDetail = useSpaceStore((s) => s.loadSpaceDetail);
+
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [isNewRole, setIsNewRole] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+
+  // Sort: non-everyone roles by position desc, @everyone always last
+  const sortedRoles = [...roles].sort((a, b) => {
+    const aIsEveryone = a.id === spaceId;
+    const bIsEveryone = b.id === spaceId;
+    if (aIsEveryone) return 1;
+    if (bIsEveryone) return -1;
+    return b.position - a.position;
+  });
+
+  const handleCreateRole = async () => {
+    setCreating(true);
+    setError('');
+    try {
+      const uniqueName = getUniqueRoleName(t('spaces:roles.defaultName'), roles);
+      const newRole = await api.roles.create(spaceId, { name: uniqueName });
+      await loadSpaceDetail(spaceId);
+      setIsNewRole(true);
+      setEditingRoleId(newRole.id);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  if (editingRoleId) {
+    const role = roles.find((r) => r.id === editingRoleId);
+    if (!role) {
+      setEditingRoleId(null);
+      return null;
+    }
+    return (
+      <RoleEditView
+        key={editingRoleId}
+        role={role}
+        spaceId={spaceId}
+        isNew={isNewRole}
+        onBack={() => { setIsNewRole(false); setEditingRoleId(null); }}
+        onDeleted={() => { setIsNewRole(false); setEditingRoleId(null); }}
+        onCopied={(newRoleId) => { setIsNewRole(true); setEditingRoleId(newRoleId); }}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <h2 className="text-lg font-semibold text-txt-primary mb-6">{t('spaces:roles.title')}</h2>
+      {error && (
+        <div className="p-2 bg-accent-rose/10 border border-accent-rose/30 rounded text-txt-danger text-sm">{error}</div>
+      )}
+
+      <div className="sticky top-0 z-10 pointer-events-none pb-3">
+        <button
+          onClick={handleCreateRole}
+          disabled={creating}
+          className="glass-bubble rounded-full px-3 py-1.5 flex items-center gap-1.5 text-sm text-txt-primary hover:text-txt-secondary transition-colors pointer-events-auto disabled:opacity-50"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          {creating ? t('spaces:roles.creating') : t('spaces:roles.create')}
+        </button>
+      </div>
+
+      <div>
+        <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">{t('spaces:roles.listHeading')}</div>
+        <p className="text-xs text-txt-tertiary mb-2">{t('spaces:roles.description')}</p>
+        <div className="rounded-lg bg-white/[0.02] p-2">
+          <div className="space-y-0.5">
+            {sortedRoles.map((role) => {
+              const isEveryone = role.id === spaceId;
+              return (
+                <button
+                  key={role.id}
+                  onClick={() => { setIsNewRole(false); setEditingRoleId(role.id); }}
+                  className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-interactive-hover transition-colors text-left group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className="w-3 h-3 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: role.color }}
+                    />
+                    <span className="text-sm text-txt-primary truncate">
+                      {/* i18n-check: allow-literal — @everyone is the role's identifier, not a phrase */}
+                      {isEveryone ? '@everyone' : role.name}
+                    </span>
+                  </div>
+                  <svg
+                    className="w-4 h-4 text-txt-tertiary group-hover:text-txt-secondary transition-colors flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Role Edit View ─────────────────────────────────────────────────────────
+
+interface RoleEditViewProps {
+  role: Role;
+  spaceId: string;
+  isNew?: boolean;
+  onBack: () => void;
+  onDeleted: () => void;
+  onCopied: (newRoleId: string) => void;
+}
+
+function RoleEditView({ role, spaceId, isNew, onBack, onDeleted, onCopied }: RoleEditViewProps) {
+  const { t } = useTranslation(['spaces', 'common']);
+  const permissionNames = usePermissionNames();
+  const loadSpaceDetail = useSpaceStore((s) => s.loadSpaceDetail);
+  const roles = useSpaceStore((s) => s.roles);
+  const isEveryone = role.id === spaceId;
+
+  const [draftName, setDraftName] = useState(role.name);
+  const [nameError, setNameError] = useState('');
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isEveryone && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.select();
+    }
+  }, []);
+
+  const validateName = (name: string): string => {
+    const trimmed = name.trim();
+    if (!trimmed) return t('spaces:roles.nameEmpty');
+    const isDuplicate = roles.some(
+      (r) => r.id !== role.id && r.name.toLowerCase() === trimmed.toLowerCase()
+    );
+    return isDuplicate ? t('spaces:roles.nameDuplicate') : '';
+  };
+
+  const [draftColor, setDraftColor] = useState(role.color);
+  const [draftPermissions, setDraftPermissions] = useState<bigint>(
+    stringToPermissions(role.permissions)
+  );
+  const addToast = useUIStore((s) => s.addToast);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const hasNameChange = !isEveryone && draftName.trim() !== role.name;
+  const hasColorChange = !isEveryone && draftColor !== role.color;
+  const hasPermChange = permissionsToString(draftPermissions) !== (role.permissions ?? '0');
+  const hasChanges = hasNameChange || hasColorChange || hasPermChange;
+
+  const togglePermission = (bit: bigint) => {
+    setDraftPermissions((prev) => (prev & bit) !== 0n ? prev & ~bit : prev | bit);
+  };
+
+  const handleSave = async () => {
+    setConfirmDelete(false);
+    setSaving(true);
+    setSaveError('');
+    try {
+      const data: { name?: string; color?: string; permissions?: string } = {};
+      if (hasNameChange) data.name = draftName.trim();
+      if (hasColorChange) data.color = draftColor;
+      if (hasPermChange) data.permissions = permissionsToString(draftPermissions);
+      await api.roles.update(spaceId, role.id, data);
+      await loadSpaceDetail(spaceId);
+      addToast(t('spaces:roles.saved'), 'success', 2000);
+    } catch (err) {
+      // A duplicate name belongs on the name field, not in the save banner.
+      if (err instanceof HttpError && err.code === 'role_name_taken') {
+        setNameError(t('spaces:roles.nameDuplicate'));
+      } else {
+        setSaveError(describeError(err));
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDiscard = () => {
+    setDraftName(role.name);
+    setDraftColor(role.color);
+    setDraftPermissions(stringToPermissions(role.permissions));
+    setConfirmDelete(false);
+    setSaveError('');
+    setNameError('');
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setDeleting(true);
+    setSaveError('');
+    try {
+      await api.roles.delete(spaceId, role.id);
+      await loadSpaceDetail(spaceId);
+      onDeleted();
+    } catch (err) {
+      setSaveError(describeError(err));
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const [copying, setCopying] = useState(false);
+
+  const handleCopy = async () => {
+    setCopying(true);
+    setSaveError('');
+    try {
+      const uniqueName = getUniqueRoleName(t('spaces:roles.copyName', { name: role.name }), roles);
+      const newRole = await api.roles.create(spaceId, {
+        name: uniqueName,
+        color: role.color,
+        permissions: role.permissions ?? undefined,
+      });
+      await loadSpaceDetail(spaceId);
+      onCopied(newRole.id);
+    } catch (err) {
+      setSaveError(describeError(err));
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  const groupTitle = (id: PermissionGroupId): string => {
+    switch (id) {
+      case 'general': return t('spaces:roles.groups.general');
+      case 'text': return t('spaces:roles.groups.text');
+      case 'voice': return t('spaces:roles.groups.voice');
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Back button */}
+      <div className="sticky top-0 z-10 pointer-events-none pb-3">
+        <button
+          onClick={onBack}
+          className="glass-bubble rounded-full px-3 py-1.5 flex items-center gap-1 text-sm text-txt-tertiary hover:text-txt-secondary transition-colors pointer-events-auto"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          {t('spaces:roles.backToList')}
+        </button>
+      </div>
+
+      {isNew && !hasChanges && (
+        <div className="p-2 bg-status-online/10 border border-status-online/30 rounded text-status-online text-sm">
+          {t('spaces:roles.created')}
+        </div>
+      )}
+
+      {/* Identity card (Name + Color — not shown for @everyone) */}
+      {!isEveryone && (
+        <div>
+          <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">{t('spaces:roles.identity')}</div>
+          <div className="rounded-lg bg-white/[0.02] p-3.5 space-y-4">
+            <div>
+              <label className="block text-xs text-txt-secondary mb-1.5">
+                {t('spaces:roles.nameLabel')}
+              </label>
+              <input
+                ref={nameInputRef}
+                type="text"
+                value={draftName}
+                onChange={(e) => {
+                  setDraftName(e.target.value);
+                  setNameError(validateName(e.target.value));
+                }}
+                onBlur={() => setNameError(validateName(draftName))}
+                className={`input-standard w-full${nameError ? ' ring-2 ring-accent-rose' : ''}`}
+              />
+              {nameError && (
+                <p className="text-xs text-txt-danger mt-1">{nameError}</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs text-txt-secondary mb-1.5">
+                {t('spaces:roles.colorLabel')}
+              </label>
+              <div className="flex items-center gap-2 flex-wrap">
+                {PRESET_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setDraftColor(c)}
+                    className={`w-7 h-7 rounded-full border-2 transition-all ${
+                      draftColor === c ? 'border-white scale-110' : 'border-transparent hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+                <label className="relative w-7 h-7 rounded-full border-2 border-border-subtle hover:border-accent-primary transition-colors cursor-pointer overflow-hidden">
+                  <input
+                    type="color"
+                    value={draftColor}
+                    onChange={(e) => setDraftColor(e.target.value)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <div className="w-full h-full rounded-full bg-gradient-to-br from-red-400 via-green-400 to-blue-400" />
+                </label>
+                <input
+                  type="text"
+                  value={draftColor}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (/^#[0-9a-fA-F]{0,6}$/.test(v)) setDraftColor(v);
+                  }}
+                  className="input-standard w-20 px-2 py-1 text-xs font-mono"
+                  maxLength={7}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Permission groups — each gets its own section card */}
+      {PERMISSION_GROUPS.map((group) => (
+        <div key={group.id}>
+          <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">
+            {groupTitle(group.id)}
+          </div>
+          <div className="rounded-lg bg-white/[0.02] p-3.5">
+            <div className="space-y-1">
+              {group.perms.map((perm) => {
+                const isAdminBit = perm.bit === PermissionBits.ADMINISTRATOR;
+                const hasAdmin = (draftPermissions & PermissionBits.ADMINISTRATOR) !== 0n;
+                const isOn = isAdminBit ? hasAdmin : hasAdmin || (draftPermissions & perm.bit) !== 0n;
+                const isInherited = !isAdminBit && hasAdmin;
+                return (
+                  <label
+                    key={perm.key}
+                    className={`flex items-center justify-between py-1.5 px-2 rounded cursor-pointer group/perm ${
+                      isInherited ? 'opacity-50 cursor-default' : 'hover:bg-interactive-hover'
+                    }`}
+                  >
+                    <span className={`text-sm ${isAdminBit ? 'text-txt-danger font-medium' : 'text-txt-primary'}`}>
+                      {permissionNames[perm.key]}
+                    </span>
+                    <div
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (!isInherited) togglePermission(perm.bit);
+                      }}
+                      className={`relative w-9 h-5 rounded-full transition-colors ${
+                        isInherited ? 'cursor-default' : 'cursor-pointer'
+                      } ${isOn ? 'bg-accent-primary' : 'bg-interactive-muted'}`}
+                    >
+                      <div
+                        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                          isOn ? 'translate-x-4' : 'translate-x-0.5'
+                        }`}
+                      />
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {saveError && (
+        <div className="p-2 bg-accent-rose/10 border border-accent-rose/30 rounded text-txt-danger text-sm">{saveError}</div>
+      )}
+      <div className="sticky bottom-0 z-10 pointer-events-none">
+          <div className="flex justify-center pt-3 pb-1">
+            <div className={`glass-bubble rounded-full px-4 py-2 flex items-center gap-2 pointer-events-auto${
+              isEveryone ? ' animate-slide-up' : ''
+            }`}>
+              {hasChanges && (
+                <>
+                  <button
+                    onClick={handleDiscard}
+                    className="px-3 py-1 text-sm text-txt-tertiary hover:text-txt-secondary transition-colors"
+                  >
+                    {t('spaces:settings.discardChanges')}
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving || (!isEveryone && !draftName.trim()) || !!nameError}
+                    className="px-3 py-1.5 bg-accent-primary hover:bg-accent-primary/80 text-white text-sm font-medium rounded-full transition-colors disabled:opacity-50"
+                  >
+                    {saving ? t('common:states.saving') : t('common:actions.save')}
+                  </button>
+                </>
+              )}
+              {hasChanges && (
+                <div className="w-px h-5 bg-white/10" />
+              )}
+              <button
+                onClick={handleCopy}
+                disabled={copying}
+                className="px-3 py-1.5 text-sm font-medium rounded-full text-txt-secondary hover:bg-interactive-hover transition-colors disabled:opacity-50"
+              >
+                {copying ? t('spaces:roles.copying') : t('spaces:roles.copy')}
+              </button>
+              {!isEveryone && (
+                <>
+                  <div className="w-px h-5 bg-white/10" />
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-full transition-colors disabled:opacity-50 ${
+                      confirmDelete
+                        ? 'bg-accent-rose/15 text-accent-rose'
+                        : 'text-accent-rose hover:bg-accent-rose/10'
+                    }`}
+                  >
+                    {deleting ? t('spaces:roles.deleting') : confirmDelete ? t('spaces:roles.confirmDelete') : t('spaces:roles.delete')}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+    </div>
+  );
+}

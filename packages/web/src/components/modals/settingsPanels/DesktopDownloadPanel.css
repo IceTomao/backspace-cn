@@ -1,0 +1,38 @@
+/* ── DESKTOP DOWNLOAD PANEL ──
+ * Only the things Tailwind cannot express here live in this file.
+ *
+ * The panel is a column inside the settings modal, and the modal's width does
+ * not track the viewport: at 100% interface scale it is a fixed content column,
+ * and on mobile it fills a phone. A viewport breakpoint (`sm:`) would therefore
+ * flip the tiles to two columns while the column is still narrow, so the layout
+ * asks the panel's own width instead. Tailwind 3 in this repo has no container
+ * query plugin (see packages/web/tailwind.config.js), hence the plain CSS.
+ */
+
+.ddl-panel {
+  container-type: inline-size;
+}
+
+/* Two quiet tiles side by side. They stretch to a common height; each one's
+   content flows from its top, so the spare height falls to the bottom of
+   whichever tile has less to say. */
+.ddl-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+/* The unsupported-platform case offers all three platforms, stacked at every
+   width: the three have different controls (a link, a picker and a link, two
+   pickers and a link), so a row layout cannot line their right-hand sides up. */
+.ddl-tiles--stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Below this the two tiles cannot hold a picker row and a name on one line. */
+@container (max-width: 560px) {
+  .ddl-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

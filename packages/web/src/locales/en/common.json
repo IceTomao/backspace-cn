@@ -1,0 +1,136 @@
+{
+  "appName": "Backspace",
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "copy": "Copy",
+    "copied": "Copied",
+    "retry": "Retry",
+    "back": "Back",
+    "done": "Done",
+    "edit": "Edit",
+    "remove": "Remove",
+    "add": "Add",
+    "apply": "Apply",
+    "reset": "Reset",
+    "continue": "Continue",
+    "dismiss": "Dismiss",
+    "ok": "OK",
+    "search": "Search",
+    "clear": "Clear",
+    "change": "Change",
+    "refresh": "Refresh",
+    "openLink": "Open link",
+    "tryAgain": "Try again",
+    "reply": "Reply",
+    "addReaction": "Add reaction",
+    "share": "Share",
+    "accept": "Accept",
+    "decline": "Decline",
+    "pause": "Pause",
+    "resume": "Resume",
+    "abort": "Abort",
+    "dismissAll": "Dismiss all",
+    "filter": "Filter",
+    "sort": "Sort",
+    "sortBy": "Sort by",
+    "leave": "Leave",
+    "invitePeople": "Invite People",
+    "previous": "Previous",
+    "next": "Next",
+    "preview": "Preview",
+    "logIn": "Log In"
+  },
+  "states": {
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "unknown": "Unknown",
+    "none": "None",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "on": "On",
+    "off": "Off",
+    "yes": "Yes",
+    "no": "No",
+    "optional": "Optional",
+    "required": "Required",
+    "default": "Default",
+    "recommended": "Recommended",
+    "online": "Online",
+    "idle": "Idle",
+    "doNotDisturb": "Do Not Disturb",
+    "offline": "Offline",
+    "loadingSettings": "Loading settings…",
+    "settingsSaved": "Settings saved",
+    "saveFailed": "Failed to save",
+    "scanning": "Scanning…",
+    "pleaseWait": "Please wait…"
+  },
+  "labels": {
+    "username": "Username",
+    "password": "Password",
+    "displayName": "Display Name",
+    "friends": "Friends",
+    "members": "Members",
+    "settings": "Settings",
+    "dangerZone": "Danger Zone",
+    "searchMembers": "Search members…",
+    "noMembersFound": "No members found",
+    "or": "or",
+    "nameAZ": "Name (A-Z)"
+  },
+  "time": {
+    "today": "Today at {{time}}",
+    "yesterday": "Yesterday at {{time}}",
+    "never": "Never",
+    "justNow": "Just now",
+    "minutesShort": "{{minutes}}m",
+    "hoursMinutesShort": "{{hours}}h {{minutes}}m",
+    "elapsed": "{{duration}} elapsed"
+  },
+  "units": {
+    "ms": "{{value}} ms",
+    "percent": "{{value}}%",
+    "kbps": "{{value}} kbps",
+    "mbps": "{{value}} Mbps"
+  },
+  "colors": {
+    "mint": "Mint",
+    "sky": "Sky",
+    "lavender": "Lavender",
+    "coral": "Coral",
+    "rose": "Rose",
+    "teal": "Teal",
+    "amber": "Amber",
+    "peach": "Peach"
+  },
+  "language": {
+    "label": "Language",
+    "description": "Menus, buttons and system messages appear in this language. Messages from other people stay as they were written."
+  },
+  "crash": {
+    "title": "Something went wrong",
+    "reload": "Reload Page",
+    "details": "Error details"
+  },
+  "app": {
+    "loading": "Loading Backspace"
+  },
+  "chrome": {
+    "toggleMemberList": "Toggle Member List",
+    "closeSettings": "Close settings"
+  },
+  "sourceCode": {
+    "label": "Source code (AGPL)",
+    "labelWithBuild": "Source code (AGPL) · {{build}}",
+    "title": "View the source code of the version this instance is running (AGPL-3.0)"
+  },
+  "devices": {
+    "newAudioInput": "{{label}} detected. Choose it in Voice settings to switch.",
+    "unnamedAudioInput": "New audio device"
+  }
+}

@@ -1,0 +1,249 @@
+{
+  "chatPanel": {
+    "title": "Chat",
+    "close": "Close Chat"
+  },
+  "badges": {
+    "mutedNoPermission": "Muted (No Speak Permission)",
+    "spaceMuted": "Space Muted",
+    "mutedSpaceDeafened": "Muted (Space Deafened)",
+    "spaceDeafened": "Space Deafened",
+    "locallyMuted": "Locally Muted",
+    "live": "LIVE",
+    "you": "(you)"
+  },
+  "moderation": {
+    "spaceMute": "Space Mute",
+    "spaceUnmute": "Space Unmute",
+    "spaceDeafen": "Space Deafen",
+    "spaceUndeafen": "Space Undeafen",
+    "disconnect": "Disconnect",
+    "moveTo": "Move to"
+  },
+  "participantMenu": {
+    "watchCamera": "Watch Camera",
+    "stopWatchingCamera": "Stop Watching Camera",
+    "muteUser": "Mute User",
+    "userVolume": "User Volume"
+  },
+  "incomingCall": {
+    "status": "Incoming Voice Call..."
+  },
+  "grid": {
+    "waitingForOthers": "Waiting for others to join...",
+    "returnToGridHint": "Click to return to grid view",
+    "backToGrid": "Back to grid view",
+    "gridButton": "Grid",
+    "showMembers": "Show Members",
+    "hideMembers": "Hide Members"
+  },
+  "connectionInfo": {
+    "title": "Connection Info",
+    "notConnected": "Not connected",
+    "gathering": "Gathering stats...",
+    "section": {
+      "network": "Network",
+      "audio": "Audio",
+      "video": "Video"
+    },
+    "network": {
+      "ping": "Ping",
+      "packetLoss": "Packet Loss",
+      "jitter": "Jitter",
+      "server": "Server",
+      "protocol": "Protocol"
+    },
+    "video": {
+      "requestedCodec": "Requested codec",
+      "negotiatedCodec": "Negotiated codec",
+      "encoderImplementation": "Encoder implementation",
+      "qpDelta": "QP sum delta",
+      "nackDelta": "NACK delta",
+      "pliDelta": "PLI delta"
+    },
+    "source": {
+      "microphone": "Microphone",
+      "camera": "Camera",
+      "screen": "Screen",
+      "screenAudio": "Screen Audio",
+      "unknown": "Unknown"
+    },
+    "remoteParticipant": "Remote"
+  },
+  "screenPicker": {
+    "title": "Share Your Screen",
+    "tabs": {
+      "screens": "Screens",
+      "windows": "Windows"
+    },
+    "searchWindows": "Search windows...",
+    "noWindowsMatch": "No windows match your search",
+    "noScreens": "No screens available",
+    "noWindows": "No windows available",
+    "loadingSources": "Looking for screens and windows…",
+    "chooseTitle": "Choose what to share",
+    "chooseHint": "Your browser will ask which screen, window or tab to share.",
+    "chooseHintSystem": "Your system will ask which screen or window to share.",
+    "choose": "Choose",
+    "chooseAgain": "Choose something else",
+    "preview": "Preview",
+    "audioNeedsRepick": "The system audio setting applies once you choose again.",
+    "cancelled": "Nothing was chosen.",
+    "unsupported": "This browser can't share your screen.",
+    "captureFailed": "The capture could not be started.",
+    "startFailed": "The stream could not be started.",
+    "audioCaptureFailed": "Could not start the capture with system audio. Turn off system audio if your system does not support it.",
+    "start": "Start stream",
+    "subtitle": "Pick what to share, tune the quality, then start.",
+    "stageIdle": "Nothing selected yet",
+    "stageReady": "Ready to go live",
+    "permissionHintMac": "macOS blocks screen capture until Backspace has Screen Recording permission. Grant it in System Settings → Privacy & Security → Screen Recording, then try again.",
+    "retrySources": "Try again",
+    "kind": {
+      "monitor": "Screen",
+      "window": "Window"
+    }
+  },
+  "streamSettings": {
+    "title": "Stream Settings",
+    "resolution": "Resolution",
+    "frameRate": "Frame Rate",
+    "contentMode": "Content Mode",
+    "mode": {
+      "gaming": "Gaming",
+      "text": "Text"
+    },
+    "codec": "Codec",
+    "codecOption": {
+      "vp9": "VP9",
+      "h264": "H264"
+    },
+    "bitrate": "Bitrate",
+    "custom": "Custom",
+    "auto": "Auto",
+    "customBitrateDisabled": "Custom bitrate disabled by administrator",
+    "systemAudio": "System Audio",
+    "chromeEchoNote": "Chrome can exclude Backspace audio when the capture type supports it",
+    "electronWindowsAudioNote": "Windows loopback may capture call audio when restrictOwnAudio is unsupported",
+    "electronMacAudioNote": "macOS 13+ requires Screen & System Audio Recording permission",
+    "electronLinuxAudioNote": "Linux requires PulseAudio compatibility; Backspace audio may also be captured",
+    "systemAudioStartFailed": "Could not start the stream with system audio. Disable Share system audio if this platform does not support it.",
+    "softwareH264Fallback": "Hardware H264 encoding is unavailable. Software OpenH264 is in use; VP9 may perform better.",
+    "degradation": {
+      "maintainResolution": "hold resolution",
+      "maintainFramerate": "hold framerate",
+      "balanced": "balanced"
+    },
+    "summary": "{{bitrate}} · {{degradation}}"
+  },
+  "stream": {
+    "quality": "Stream Quality",
+    "qualityValue": "{{height}}p {{fps}}fps",
+    "volume": "Stream Volume",
+    "attenuation": "Stream Attenuation",
+    "attenuationStrength": "Attenuation Strength",
+    "stop": "Stop Streaming",
+    "change": "Change Stream",
+    "stopWatching": "Stop Watching",
+    "watch": "Watch Stream",
+    "watchShort": "Watch",
+    "mute": "Mute Stream",
+    "isStreaming": "{{name}} is streaming"
+  },
+  "streamDiagnostics": {
+    "publisherNetwork": "The streamer's network is unstable",
+    "publisherCpu": "The streamer's computer cannot encode video fast enough",
+    "viewerNetwork": "Your connection is unstable",
+    "reconnecting": "Connection lost — reconnecting…",
+    "unknown": "The connection is unstable; the affected side could not be determined"
+  },
+  "voiceDiagnostics": {
+    "selfNetwork": "Your connection is unstable",
+    "participantNetwork": "{{name}} has an unstable connection",
+    "reconnecting": "Connection to the voice server was interrupted — reconnecting…"
+  },
+  "channelDuration": "Channel active for {{duration}}",
+  "controls": {
+    "spaceMutedSelfMuted": "Space Muted (self-muted)",
+    "unmuteShortcut": "Unmute (M)",
+    "muteShortcut": "Mute (M)",
+    "undeafenShortcut": "Undeafen (D)",
+    "deafenShortcut": "Deafen (D)",
+    "unmute": "Unmute",
+    "mute": "Mute",
+    "undeafen": "Undeafen",
+    "deafen": "Deafen",
+    "cameraOff": "Turn Off Camera",
+    "cameraOn": "Turn On Camera",
+    "stopSharing": "Stop Sharing",
+    "shareScreen": "Share Screen",
+    "shareOptions": "Screen Share Options",
+    "toggleChat": "Toggle Chat",
+    "exitFullscreen": "Exit Fullscreen (Esc)",
+    "fullscreen": "Fullscreen",
+    "disconnect": "Disconnect",
+    "connectionInfo": "Connection Info",
+    "noiseSuppressionOff": "Disable AI Noise Suppression",
+    "noiseSuppressionOn": "Enable AI Noise Suppression"
+  },
+  "status": {
+    "dmCall": "DM Call",
+    "voiceChannel": "Voice Channel",
+    "voiceCall": "Voice Call",
+    "connectionFailed": "Connection Failed",
+    "connected": "Voice Connected",
+    "connecting": "Connecting...",
+    "reconnecting": "Reconnecting…",
+    "disconnected": "Disconnected",
+    "connectionLost": "Connection lost. Try again.",
+    "retry": "Retry"
+  },
+  "camera": {
+    "auto": "Auto",
+    "autoSystemDefault": "Auto (system default)",
+    "selected": "Selected camera",
+    "fallbackName": "Camera {{index}}",
+    "select": "Select camera",
+    "switch": "Switch camera",
+    "turnOn": "Turn camera on",
+    "turnOff": "Turn camera off"
+  },
+  "joinSheet": {
+    "peopleInVoice_one": "{{count}} Person in Voice",
+    "peopleInVoice_other": "{{count}} People in Voice",
+    "switchNotice": "You'll leave <current>{{current}}</current> and join <target>{{target}}</target>",
+    "checkingCamera": "Checking camera…",
+    "tapToPreview": "Tap to preview camera",
+    "cameraDenied": "Camera permission denied.",
+    "stopPreview": "Stop preview",
+    "enablePreview": "Enable camera preview",
+    "previewError": {
+      "inUse": "Camera is in use by another application.",
+      "unavailable": "Selected camera is unavailable.",
+      "notFound": "No camera detected.",
+      "failed": "Could not start camera preview."
+    },
+    "empty": {
+      "title": "No one is in this channel yet.",
+      "hint": "Be the first to join!"
+    },
+    "unmuteMicrophone": "Unmute microphone",
+    "muteMicrophone": "Mute microphone",
+    "switchChannel": "Switch Channel",
+    "join": "Join Voice"
+  },
+  "mobileCall": {
+    "collapse": "Collapse call",
+    "connectedCount_one": "{{count}} connected",
+    "connectedCount_other": "{{count}} connected",
+    "viewMembers": "View members",
+    "micDenied": {
+      "title": "Microphone access denied",
+      "description": "You're listening only — others can't hear you.",
+      "allow": "Allow microphone"
+    },
+    "shareScreen": "Share screen",
+    "stopSharingScreen": "Stop sharing screen",
+    "disconnect": "Disconnect from call"
+  }
+}

@@ -1,0 +1,608 @@
+# Voice, Video & Calls System
+
+Source files:
+- Server: `routes/livekit.ts`, `ws/handler.ts`, `ws/events.ts`
+- Client: `hooks/useLiveKit.ts`, `stores/voiceStore.ts`, `utils/voice.ts`, `utils/voiceActions.ts`, `utils/screenShare.ts`
+- Shared: `packages/shared/src/constants.ts` (bitrate matrix, resolutions)
+- Audio: `audio/AudioManager.ts`, `audio/SpeakingDetector.ts`
+
+---
+
+## Voice Channel Join Flow
+
+1. Client sends `voice_join { channelId }` via WS
+2. Server checks CONNECT permission, enforces one-room-per-user
+3. Server loads voice restrictions from DB (space mute/deafen)
+4. Server broadcasts `voice_state_update { action: 'join', channelElapsedSeconds }` to space. `channelElapsedSeconds` is the whole occupied duration computed by the server, so client/server clock skew cannot change the channel timer; the client advances it from receipt time on one shared, visibility-aware one-second beat. The duration survives participant joins and reconnect grace, and resets when the last participant leaves.
+5. Client calls `POST /api/livekit/token { channelId }` → gets JWT + LiveKit URL
+6. Client connects to LiveKit room with token
+
+### Voice presence bootstrap on mid-session space join
+
+A client learns who is sitting in a space's voice channels from the WS `ready`
+payload at connect time. Joining a space *without reloading* therefore needs the
+same bootstrap for the new space, or its voice channels render empty until a
+refresh. The server pushes a scoped `space_voice_state` snapshot from
+`ConnectionManager.addUserSpace` (the single join chokepoint), built by
+`buildSpaceVoiceState(spaceId, userId)` — the same VIEW_CHANNEL-filtered helper
+that feeds `ready`. The client applies it via `utils/voiceStateSync.applySpaceVoiceState`.
+See `docs/systems/websocket.md` → "Mid-session space join" for the full rationale
+(single ordered channel, no snapshot-vs-stream race).
+
+### Microphone pre-arm (iOS user-gesture discipline)
+
+`utils/voice.joinVoiceChannel` fires `AudioContext.resume()` and `AudioManager.setInputDevice(inputDeviceId)` (which ends in `getUserMedia({audio:…})`) **synchronously inside** the click handler, before the `connectFn(channelId)` call. iOS Safari only surfaces the microphone permission prompt when `getUserMedia` is invoked from inside an active user-gesture; the original flow only acquired the mic in `useLiveKit`'s `syncMic` effect, which fires AFTER `room.connect()` resolves (token fetch + WS handshake) — many awaits past the gesture window. iOS PWA standalone is especially strict and would silently never surface the prompt; the user would see "Waiting for others to join…" indefinitely until they locked/unlocked the device (which iOS treats as a fresh activation).
+
+Pre-arm is fire-and-forget: the mic acquisition runs in parallel with the LiveKit handshake, and `AudioManager.inputSwitchChain`'s serialization guarantees `useLiveKit.syncMic`'s subsequent call short-circuits on the already-acquired `currentStream` (no double prompt, no second `getUserMedia`).
+
+### Listener mode (`micPermissionDenied`)
+
+When the user denies the prompt (or has previously denied at the OS level), the pre-arm's `setInputDevice` rejects with `NotAllowedError`. The `voiceStore.micPermissionDenied` flag is set to `true` and the LiveKit connect proceeds anyway — the user appears in the voice channel as a connected participant who can hear others but has no microphone publication. `useLiveKit.syncMic` checks the flag at the top of its body and skips the publish branch entirely.
+
+The flag clears via:
+- `requestMicPermission()` (in `utils/voice.ts`) — must be called from a user-gesture handler (button click). Clears `AudioManager.inputDenialError` cache, calls `setInputDevice` from a fresh activation. On success, sets `micPermissionDenied=false` and `useLiveKit.syncMic` re-fires (dep on `micPermissionDenied`) to publish the freshly acquired track.
+- `voiceStore.leaveVoice()` / `handleForceDisconnect()` / `resetSession()` / `reset()` — flag resets so the next join attempts a fresh prompt.
+
+UI affordances:
+- **Mobile (`MobileVoiceFullScreen`):** banner below the header reads "Microphone access denied — You're listening only". A right-aligned "Allow microphone" button calls `requestMicPermission()`.
+- **Desktop (`VoiceControlBar`):** *(Future)* — same listener-mode state needs a parity affordance. Desktop is unaffected by the iOS gesture-window bug in practice (browsers there prompt on `getUserMedia` regardless of activation state), but if a desktop user denies the prompt, the same flow applies.
+
+`AudioManager.inputDenialError` caches the most recent `NotAllowedError`. Subsequent `setInputDevice` calls re-throw the cached error rather than firing a second `getUserMedia` — iOS otherwise would queue a second prompt that has lost its activation, leading to a silent hang. Cleared by `AudioManager.clearInputDenial()` (called from `joinVoiceChannel`'s pre-arm and from `requestMicPermission`).
+
+**Token grants (space channels):**
+- SPEAK → can publish MICROPHONE + CAMERA
+- STREAM → can publish SCREEN_SHARE + SCREEN_SHARE_AUDIO
+- Missing permission → grant excludes those sources
+
+**Token grants (DM calls):** Always full (canSpeak=true, canStream=true)
+
+**Identity format:** `{userId}:{username}`, TTL: 1 hour, Room: `{channelId}` or `dm-{dmChannelId}`
+
+**Multi-tab:** Each user has one `voiceWs` binding. New tab → old socket gets `voice_disconnected { reason: 'displaced' }`
+
+**Transient reconnects:** Closing the voice-owning WebSocket starts a 60-second
+server grace period instead of immediately removing the participant. A
+`voice_join` for a space session, or `voice_status` for a DM call (which has no
+`voice_join` event), received from the replacement socket rebinds the existing
+session without a leave/join broadcast. A status message alone cannot claim a
+space voice session from an ordinary second tab. Explicit leave, moderator
+disconnect, displacement, and rejected joins remain terminal and clean up
+immediately — a join refused for the room the user is still holding ends that
+session on the spot rather than letting it idle out the grace period.
+
+On the client, a LiveKit disconnect is terminal only for `DUPLICATE_IDENTITY`,
+`PARTICIPANT_REMOVED` and `ROOM_DELETED`. Every other reason keeps
+`currentVoiceChannelId` so the session can be resumed, and surfaces a Retry
+action (`VoiceControls` on desktop, `MobileVoiceMiniBar` on mobile). Because the
+channel ID outlives the connection, `joinVoiceChannel` treats re-selecting the
+current channel as a reconnect whenever `voiceConnectionStatus` is
+`disconnected`, and as a no-op otherwise.
+
+---
+
+## DM Call State Machine
+
+States: `ringing` → `active` → destroyed
+
+| Event | Action | State |
+|-------|--------|-------|
+| `dm_call_start` | Room created, caller bound, 60s timeout starts | ringing |
+| `dm_call_incoming` | Broadcast to DM members (excludes caller) | ringing |
+| `dm_call_accept` | First accept: ringing→active. Late joins welcome (group DM) | active |
+| `dm_call_reject` | Room destroyed, caller unbound | — |
+| `dm_call_end` | All participants unbound, room destroyed | — |
+| Timeout (60s) | Auto-cleanup if still ringing, broadcast `dm_call_ended` | — |
+
+**Edge cases:**
+- Starting new call cancels any other ringing calls by same caller
+- Socket close during ringing → auto-cleanup
+- Participants drop to 0 in active state → room destroyed
+
+---
+
+## Federated DM Calls
+
+DM calls work across federated instances. The caller's instance hosts the LiveKit room; remote clients connect to it directly. Call signaling is relayed to ALL active federation peers via synchronous HTTP POST (not the outbox worker). This ensures calls ring on every instance where a participant is connected, even if the DM is local-only on the caller's instance.
+
+### Universal Relay
+
+All `dm_call_*` signaling events (`start`, `accept`, `reject`, `end`) are relayed to every active federation peer in parallel. Each `sendCallRelay` call has a 10-second HTTP timeout. This bypasses the outbox worker — call signaling is latency-sensitive.
+
+**Auto-peering at send time.** If the target origin has no active peer record, `sendCallRelay` races an `ensurePeered` handshake against a 3 s deadline (`CALL_PEERING_TIMEOUT_MS`). On success the relay POSTs normally; on timeout it returns `peer_transient_failure` without aborting the background handshake, so a subsequent attempt typically succeeds. Typing (`sendTypingRelay`) passes `peeringTimeoutMs: 0` — the POST is skipped for non-active peers and a warm-up `ensurePeered` runs in the background.
+
+**Call relay failure surface.** Every `dm_call_{start,accept,reject,end}` relay is failure-aware. On failure the originating server emits a `dm_call_undeliverable` event with a `phase` discriminator identifying which action failed. Client copy is phase-specific; state rollback depends on the phase.
+
+| `phase` | `terminal` | Emitted when | Client action |
+|---------|------------|--------------|---------------|
+| `start` | true | No plausible recipient after targeted-peer fan-out; ring room destroyed. | Clear `outgoingCall`, disconnect LK, warning toast. |
+| `start` | false | Some targeted peers failed but reachable recipients remain; ring continues. | Keep state; info toast. |
+| `accept` | true | Acceptor's B→host relay failed; optimistic state is rolled back on B. | Clear `activeDmCall` + `incomingCall`, disconnect LK, warning toast. |
+| `accept` | false | Host → peer fan-out of accept failed; local host call continues. | No state change; info toast. |
+| `reject` | false | Rejector's relay to host failed OR host's fan-out after a local reject failed; state already cleared. | No state change; info toast. |
+| `end` | false | Ender's relay to host failed OR host's fan-out after a local end failed; state already cleared. | No state change; info toast. |
+| `host_unreachable` | true | A FederatedCallEntry's `federatedCallHost` peer transitions out of `active`, OR the 30s sentinel detects a non-active host for an existing entry. | Clear `activeDmCall` + `incomingCall`, disconnect LK, warning toast (*"Call ended — {label} became unreachable."*). |
+| `no_recipient` | true | Remote returned 200 but had no reachable recipient (Path A: all members offline; Path B: zero participant matches). Caller fast-fails within the relay round-trip; ring room destroyed. | Clear `outgoingCall`, disconnect LK, warning toast (*"{peerLabel} couldn't ring anyone."*). Folds into multi-failure info copy when not the sole failure. |
+
+**Accept-rollback semantics.** `handleDmCallAccept` Path 2 transitions the `FederatedCallEntry` to active and broadcasts `dm_call_accepted` optimistically so the acceptor's UI flips immediately. If the B→host relay fails, the server clears the entry, fans `dm_call_undeliverable { phase: 'accept', terminal: true }` out to all ringed users on B (via `sendToFederatedCallUsers`), and the client tears its call state back down.
+
+**Reject / end are optimistic.** Local state is cleared before the relay is awaited because the user's intent is to terminate. If the relay fails, the originator receives an informational `dm_call_undeliverable { terminal: false }` so they know remote peers may briefly display stale state; no local rollback.
+
+**Ring-timeout fan-out.** When the host's 60 s ringing timeout fires without an accept, `dm_call_end` is fanned out to all remote peers so stranded Path-A/B ringees on other instances exit their ring state instead of lingering. Registered via `connectionManager.setRingTimeoutFanoutHook` from the WS events module.
+
+**Remaining edge.** When a non-host participant ends an active call and the relay to the host fails, the host's `activeDmCall` marker lingers until manual end — LK `ParticipantDisconnected` tears down the voice UI but does not clear the DM-call marker on the host side. This is the caller-side mirror of the remote-participant problem and is not covered by the Remote-Participant Host Unreachable Eviction mechanism above (which only reasons about FederatedCallEntry state). Tracked separately.
+
+### Remote-Participant Host Unreachable Eviction
+
+When a FederatedCallEntry's `federatedCallHost` becomes unreachable (peer status transitions to `unreachable`, `needs_attention`, `rejected`, or `revoked`), the entry owner evicts the stranded state and notifies its local ringed users with `dm_call_undeliverable { phase: 'host_unreachable', terminal: true }`. Two signals drive the eviction:
+
+1. **Fast path (`onPeerDeactivated` hook):** every peer-status transition out of `active` invokes `ConnectionManager.evictFederatedCallsForHost(peerOrigin, ...)`. Call sites are listed in the `onPeerDeactivated` docstring (audit via `grep onPeerDeactivated(`).
+2. **Backstop (30s sentinel):** `runFederatedCallSentinelTick` in `federationWorker.ts` iterates active entries, looks up each distinct `federatedCallHost`'s current peer status, and evicts non-active matches.
+
+Typical eviction latency is ~90s (time for outbox traffic to fail the unreachable threshold + one sentinel tick). Worst case on an idle instance with no outbox traffic is ~15.5min (health-check cadence + sentinel).
+
+Covers the ringing and active states on the remote-participant side. The caller-side mirror — host's own `activeDmCall` lingering when its LK room empties silently — is a separate, documented out-of-scope edge.
+
+### Dual-Path Processing
+
+When a peer instance receives a call relay, it uses one of two delivery paths:
+
+| Path | Condition | Delivery |
+|------|-----------|----------|
+| **A** | DM exists on the receiving instance | Look up `dm_members` for the local `dmChannelId` and deliver to connected members |
+| **B** | DM does not exist on the receiving instance | Match participants by `homeUserId + homeInstance` identity against connected WebSocket users |
+
+Path B enables calls to ring for federated users even when no local DM channel has been created yet (e.g., first contact via a federated call).
+
+### FederatedCallEntry
+
+The in-memory call state (`FederatedCallEntry`) is keyed by `federatedId` (not `dmChannelId`):
+
+- `dmChannelId` is **nullable** — null for Path B scenarios where no local DM channel exists
+- `ringedUserIds` tracks all users who were notified of the incoming call, used for end-call cleanup
+- `callerId`, `callerHomeUserId`, `callerHomeInstance` identify the caller across instances
+
+### Late-Bind dmChannelId
+
+When `findOrCreateDmChannel` creates a local DM channel during an active federated call (e.g., the first message arrives while a call is ringing), it binds the `dmChannelId` on the existing `FederatedCallEntry`. This transitions the call from Path B to Path A delivery without interrupting the call.
+
+### Token Generation & Room Identity
+
+**Token generation:** `generateFederatedCallToken(federatedId, homeUserId, displayName)` in `routes/livekit.ts` issues 5-minute tokens scoped to the `federatedId` room (not the local `dmChannelId`). Grants full DM permissions (mic, camera, screen share, subscribe, data channel).
+
+**Token audience (`sendFederatedCallStart`, `ws/events.ts`).** These tokens are bearer credentials for the call room, so each `dm_call_start` relay is built per recipient and carries tokens **only for the DM members that recipient homes**. Consequences:
+
+- A DM whose members are all local produces **no relay at all** — the function returns before any token is minted. Peers never learn that a purely local call happened.
+- Only instances that home a DM member are contacted. An active peer with no party to the DM receives nothing.
+- The caller's own token is never relayed (the caller joins via `POST /api/livekit/token`; both inbound paths in `routes/federation/events/calls.ts` skip the caller anyway), and no peer receives a token minted for a member homed on a different instance.
+- On the receiving side, both Path A and Path B skip a local member for whom the host sent no token instead of dispatching a `dm_call_incoming` with an unusable token. A local member homed on a third instance — a client-federation connection — is rung by their own home instance, which is the one the host minted their token for.
+- `participants` stays the complete roster: it is non-secret and Path B needs it for identity matching.
+
+**LiveKit URL:** The relay sends `config.livekit.url` (e.g., `wss://nova.ddns.net/livekit`). Must be `wss://`, not `https://` — the LiveKit SDK requires a WebSocket URL.
+
+**Token endpoint:** `POST /api/livekit/token` uses `federatedId` as the room name when the DM channel has a `federatedId` set, ensuring both instances join the same LiveKit room.
+
+**Identity format:**
+- Federated calls: `${homeUserId}:${displayName}` — stable across all instances
+- Local calls: `${userId}:${username}` — unchanged
+
+**Client identity resolution:** For federated calls, the client splits the LiveKit participant identity on `:` and matches `homeUserId` against the DM member list (which stores `homeUserId` for all members). This resolves the correct display name and avatar regardless of which instance the participant is on.
+
+### Client-Side Call Routing
+
+**`callOrigin`:** Set to the WS origin that delivered the `dm_call_incoming` event (the home instance), NOT the call host URL. Accept/reject/end route through this WS. The home instance's server finds the `FederatedCallEntry` and relays to the host via S2S HTTP. This is reliable regardless of whether the client has a multi-instance WS to the host.
+
+**`handleAccept`:** Sets `activeDmCall` and clears `incomingCall` directly in the click handler — does not wait for the server's `dm_call_accepted` response (races with `connectFn`'s async AudioContext resume).
+
+**Passive ready handler:** On page refresh/restart, the ready payload includes active calls but the client does NOT auto-connect to LiveKit. Users must re-accept. This prevents identity slot wars when the same user has multiple sessions.
+
+**A DM call has no `currentVoiceChannelId` (space↔DM are mutually exclusive).** Entering a space channel clears `activeDmCall` (`setCurrentVoiceChannel`); entering a DM call must clear `currentVoiceChannelId`. The latter is done by `clearSpaceVoiceForDmCall()` (`utils/voice.ts`), invoked synchronously at the top of `connect()` when `isDm`. Without it, `VoiceChannel` renders the occupant list for `currentVoiceChannelId` from the **live LiveKit participants**, so a lingering space `currentVoiceChannelId` maps the DM call's participants onto the old space channel — the caller/acceptor appears to still be sitting in it. The server already drops the user from the space room (`dm_call_start` / `dm_call_accept` → `leaveCurrentRoom` → `broadcastRoomLeave`), so this is a client-state fix; it also optimistically removes self from the old channel's `voiceUsers` for an immediate sidebar update. Regression test: `utils/clearSpaceVoiceForDmCall.test.ts`.
+
+**Caller connect guard.** In `dm_call_accepted`, the caller connects to the DM room gated on `wasOutgoingCall` (only the initiating session ever sets `outgoingCall`) — **not** on `!isLiveKitConnected`. A caller already sitting in a space voice channel is LiveKit-connected; gating on that would skip the DM connect and strand them in the space channel. `connect()` de-dupes an already-connected same room, so `wasOutgoingCall` alone is sufficient.
+
+**DM-call teardown never disconnects a space connection (`teardownDmCall`).** The `dm_call_ended` / `dm_call_rejected` / terminal `dm_call_undeliverable` handlers all route through `teardownDmCall()` (`useWebSocket.ts`), which clears the call UI/federation state and tears down LiveKit **only when `currentVoiceChannelId` is null**. `disconnectFn()` tears down whatever room is active, and a space channel and a DM call are mutually exclusive (`setCurrentVoiceChannel` clears `activeDmCall`). The load-bearing case: when the **last** participant in a DM call joins a space voice channel, their post-connect `voice_join` empties the server-side DM room, so `broadcastRoomLeave` (`events.ts`) broadcasts `dm_call_ended` back to every DM member — including them. Without the guard, that echo would `disconnectFn()` the space room they just connected to, stranding the UI on "Connecting…" until a manual rejoin. The first participant to leave is unaffected (room still occupied → no `dm_call_ended`). Regression test: `hooks/teardownDmCall.test.ts`.
+
+### SoundController Federation Awareness
+
+The `SoundController` uses `isSelf(id)` which checks against BOTH `currentUser.id` (local snowflake) and `currentUser.homeUserId` (federated home ID). In federated calls, `updateParticipants` resolves identity to the local snowflake when `activeDmCall` is set, but reverts to raw `homeUserId` when it's cleared during disconnect. Both formats must be recognized as "self" to prevent phantom join/leave sounds.
+
+**Disconnect teardown:** `roomRef` is set to `null` before calling `destroyRoom()`. This prevents `ParticipantDisconnected` events (fired during teardown) from triggering `updateParticipants`, which would cause `user_leave` sounds for departing participants alongside the disconnect sound.
+
+**Sound effects.** The full system-sound inventory and trigger map lives in
+`docs/systems/sounds.md`. This includes the `stream_watch` data-channel
+protocol used for viewer detection (mirroring the existing `deafen`
+data-channel ping receiver in `handleDataReceived`).
+
+---
+
+## Voice Moderation
+
+Three independent muting mechanisms:
+
+### 1. User Self-Mute/Deafen
+- Client toggles in `voiceStore`
+- Broadcasts via `voice_status` WS event
+- If also space-muted, remains effectively muted
+
+### 2. Space Mute/Deafen (moderator, persisted)
+- Requires MUTE_MEMBERS / DEAFEN_MEMBERS permission
+- Stored in `voice_restrictions` table (survives reconnect)
+- In-memory: `spaceMutedUsers` / `spaceDeafenedUsers` sets (`"spaceId:userId"` keys)
+- On voice_join: restrictions loaded from DB into memory
+- Broadcasts `voice_space_muted` / `voice_space_deafened` to all space members
+
+### 3. Permission Mute (automatic, ephemeral)
+- Triggered when user loses SPEAK permission (role update)
+- `checkVoicePermissions(spaceId)` re-evaluates all users in space voice
+- NOT persisted — derived from role permissions on demand
+- Broadcasts `voice_permission_muted`
+
+**Effective state:** `effectiveMuted = isMuted || spaceMuted || permissionMuted`
+
+### Move & Disconnect
+- `voice_move`: Requires MOVE_MEMBERS. Same space only. Preserves voice status.
+- `voice_disconnect`: Requires DISCONNECT_MEMBERS. Full teardown.
+
+---
+
+## Screen Sharing
+
+### Resolution & Framerate Options
+```
+Standard resolutions: 540, 720, 1080, 1440, 2160 (+ 'native')
+Standard framerates: 30, 45, 60, 75, 90, 120
+Width map: 540→960, 720→1280, 1080→1920, 1440→2560, 2160→3840
+```
+
+### VP9 Bitrate Matrix (kbps)
+```
+       30    45    60    75    90    120
+540:  1500  2000  2500  2800  3200  4000
+720:  3000  3500  4000  4500  5000  6000
+1080: 6000  7000  8000  9000  10000 12000
+1440: 10000 12000 14000 16000 18000 22000
+2160: 20000 24000 28000 32000 38000 45000
+```
+
+### Config Object
+```typescript
+ScreenShareConfig {
+  height: number | 'native',       // Resolution or capture at display res
+  fps: number,                     // 30-120
+  mode: 'gaming' | 'text',         // Content hint and degradation priority
+  customBitrateKbps: number | null, // Admin override (if allowed)
+  shareAudio: boolean,              // System audio loopback (see Platform Support below)
+  codec: 'vp9' | 'h264'             // Persisted codec preference
+}
+```
+
+### Build Pipeline (`buildScreenShareOptions()`)
+1. Resolve bitrate from matrix (custom > override > default > native estimate)
+2. Clamp to instance limits (minBitrateKbps, maxBitrateKbps)
+3. Select the persisted codec: VP9 (default) or H.264
+4. Configure a VP8 simulcast backup at reduced framerate/bitrate; room dynacast pauses it when no subscriber needs it
+5. Content hint: `'detail'` (text) or `'motion'` (gaming)
+6. Degradation preference: preserve resolution for text, balanced for gaming
+
+### Native Mode
+- Captures at display's full resolution
+- Snaps to nearest known tier for bitrate lookup
+- Scales proportionally: `baseKbps * (capturedPixels / knownPixels) * (fps / knownFps)`
+
+### Codec and sender parameters
+- H.264 uses an SDP profile override only during its publish negotiation; the
+  hook is removed in `finally` so later camera or microphone negotiations are
+  unaffected.
+- Selecting H.264 does not guarantee hardware encoding. The negotiated codec
+  and `encoderImplementation` reported by WebRTC stats are shown in the
+  connection inspector. If Chromium reports the OpenH264 software fallback,
+  the publisher also receives a localized warning. Requested publication state
+  is tracked separately from the codec confirmed by outbound stats, so codec
+  changes can be serialized without presenting the requested value as a
+  negotiated result. Stats inspection retries briefly while the sender or
+  encoder implementation is still unavailable.
+- Sender parameters set the chosen bitrate ceiling and framerate with high
+  priority. Application starts immediately, retries at bounded intervals until
+  a real `RTCRtpSender` encoding is available, and always re-asserts the values
+  at 5 seconds after Chromium's bandwidth estimate converges. The same bounded
+  scheduler runs after LiveKit reconnects and screen-track restarts, where the
+  sender may again be temporarily absent or expose a placeholder encoding.
+  Capture constraints are applied once per scheduler run rather than on every
+  sender retry. The non-standard
+  `minBitrate` member was removed because Chromium discarded it during WebIDL
+  dictionary conversion; it never enforced a bitrate floor.
+
+### Instance-Level Limits (admin-configured)
+- `allowedResolutions`, `allowedFramerates` (CSV in instance_settings)
+- `maxResolution`, `maxFramerate`, `maxBitrateKbps`, `minBitrateKbps`
+- `allowCustomBitrate` toggle
+- `bitrateMatrixOverrides` (JSON sparse overrides)
+
+### Start flow — `ScreenShareSetup` (stage, then publish)
+
+Every screen share starts from one screen, `ScreenShareSetup` (mounted once in `App.tsx`, opened through `screenShareSetupStore`). The control-bar button, the keybind, the mobile call screen and "Change stream" on the local tile all open it; nothing calls capture directly.
+
+The pipeline in `utils/screenShare.ts` is **stage → publish**:
+
+| Step | Function | What happens |
+|------|----------|--------------|
+| Stage | `stageScreenCapture()` | `getDisplayMedia()` with constraints built from `screenShareConfig`. Returns a live but **unpublished** `MediaStream`, previewed in the setup screen. Browsers open their native prompt here, so it must run inside a click. |
+| Tune | `applyStagedCaptureConfig(stream)` | Re-applies resolution/frame rate/content hint to the staged track when the config changes. Local only, no SFU renegotiation — the reason quality can be adjusted after picking. |
+| Publish | `publishScreenShare(room, stream)` | `publishTrack()` for the video track (source `ScreenShare`; codec, `screenShareEncoding`, dynacast-managed VP8 simulcast backup) and the audio track if present (source `ScreenShareAudio`; high-quality stereo music preset). Sets `isScreenSharing`, retries sender parameters until the sender is ready, and re-asserts them after bandwidth estimation converges. |
+| Cancel | `stopStagedCapture(stream)` | Stops the staged tracks. Closing the setup screen never sends a frame. |
+
+The card is a fixed, near-viewport `glass-modal` surface (viewport width minus 6 rem, capped at `max-w-6xl`, 88 % of the app-scaled height) so the layout never jumps with its content. Where the app lists sources, a segmented control under the header switches **Screens / Windows** (with a window search field on the Windows tab). Browsers and system-picker mode have no such control: their picker decides, and the stage reports what came back instead. The source area is a **stage**: the app's thumbnail grid, or in browsers and system-picker mode an empty stage (monitor illustration, "Choose screen" button) that becomes the full-size live preview once staged.
+
+**What was captured.** The ready bar's kind and name come *only* from a tile the app enumerated and the user clicked (`isScreen` → "Screen" / "Window", plus the source name). Nothing is read off the captured track: `MediaTrackSettings.displaySurface` looks like the right source for this and is not — Firefox omits it, and Electron on a Wayland portal session reports `window` for a whole monitor — and Firefox's `track.label` names a monitor after picking a window there. A confidently wrong label is worse than none, so browser and portal captures show the plain "Ready to go live" and let the live preview, which is the ground truth everywhere, speak for itself.
+
+The quality panel is a **drawer** that slides in over the stage from the right with a scrim. It opens from the **Stream settings** button in the footer's action pill (icon + label, icon-only on phones, next to Cancel / Start) or from the footer summary line; its own close button, the scrim, and Escape (before the screen) close it. It starts collapsed on every open.
+
+Source picking differs by platform, the rest of the screen is identical (drawer, summary + Cancel/Start in the footer):
+
+- **Electron, current desktop:** the renderer lists sources up front via `getScreenSources()` (IPC `get-screen-sources`). Clicking a tile sends `preselectScreenSource(id, shareAudio)` (IPC `screen-share-preselect`) and then calls `getDisplayMedia()`; the main process's display-media handler answers from the preselection without prompting. Double-click on the staged tile starts.
+
+  One source is staged on open without being asked, chosen by `pickAutoStageSource()` (`utils/screenShareSources.ts`): the source shared last time if it is still in the list, otherwise the machine's only screen, otherwise nothing. `voiceStore.lastScreenShareSourceId` is persisted and written on a successful **Start**, not on a pick, so a capture the user backed out of is not what comes up next time; a browser or portal capture has no id of ours and stores `null`. Screen ids (`screen:0:0`) survive a restart, window ids (`window:12345:0`) are session handles and stop matching, which is the fallback rather than a failure. A remembered window switches the grid to the Windows tab so the highlight sits where the preview does. Staging publishes nothing, so this costs the user only the preview being ready.
+- **Electron, older desktop (no `getScreenSources`):** the "Choose" card calls `getDisplayMedia()`; the main process pushes its source list (`onScreenShareSources`) and the grid appears inline; a tile click answers the in-flight request with `selectScreenSource(id)`. Kept because the desktop app loads whatever web client its instance serves, so version skew in both directions is real.
+- **Electron, system picker (`getScreenSharePickerMode()` → `'system'`, i.e. a Wayland session):** the compositor's screencast portal picks. Listing sources would open the portal on every open, so nothing is enumerated; the "Choose" card (hint: "Your system will ask…") calls `getDisplayMedia()`, the main process enumerates inside the request, the portal returns the single chosen screen or window, and main answers with it directly (no one-tile grid). The renderer sends `setScreenShareAudioPreference(shareAudio)` ahead of the request since no tile carries it. One source per share is inherent to the portal; there is no app-wide grant.
+- **Browser:** the "Choose" card calls `getDisplayMedia()` and the browser's prompt does the picking. Chrome and Firefox show their "sharing" banner from this moment even though nothing is published until Start.
+
+A `shareAudio` change after staging cannot be applied to the held stream (audio is decided at capture); the screen shows a note and the user re-picks. Codec changes while live go through `republishScreenShare(room)`: the same `MediaStreamTrack` is unpublished and published again under the new options, so no re-capture and no second prompt. `handleScreenShareUnpublished` ignores the unpublish that this swap emits.
+
+**Who broadcasts the stop.** `voice_status` is what carries `isScreenSharing` to clients that are not in the LiveKit room (`MobileSpacesScreen`, `MobileVoiceJoinSheet` read `wsStatus?.isScreenSharing`), so every stop has to emit it or a stale "sharing" indicator stays up. `stopScreenShare()` and `handleScreenShareUnpublished()` each call `broadcastVoiceStatus()` themselves rather than leaving it to their callers, which covers all four routes: the control-bar button, the stream-tile "Stop Streaming" item, `changeScreenShare()`, and the OS/browser stop bar arriving via `RoomEvent.LocalTrackUnpublished`. Callers must not repeat it.
+
+Exactly one broadcast per stop. `unpublishTrack` emits `LocalTrackUnpublished` *synchronously*, so an explicit stop reaches `handleScreenShareUnpublished()` in the middle of `stopScreenShare()`; a `_stopping` flag makes the handler defer to the caller, the same way `_republishing` makes it ignore a codec swap. Unpublishing is per publication rather than per loop, so a throw on the video track cannot leave the screen-share audio published after `isScreenSharing` has already gone false. A republish whose fresh publish fails broadcasts too — the swap suppressed the handler and a publish that never landed emits no rollback event, so nothing else would. All three are pinned by `utils/screenShare.stopPaths.test.ts`.
+
+`useLiveKit` also drops the local stream from the watched set on `LocalTrackUnpublished`, and that half honours `isScreenShareRepublishing()` as well, or a codec toggle makes your own tile flicker (only `LocalTrackPublished` puts it back).
+
+`StreamQualityControls` is the shared quality panel (resolution, frame rate, content mode, codec, bitrate, system audio, plus the admin-limit clamp effect); `ScreenShareSetup` and `ScreenShareSettingsPopover` both render it.
+
+### Control-bar entry point (`VoiceControlBar`, `VoiceControls`)
+
+The screen-share button is the **only** control-bar entry to screen sharing and its settings; there is no separate "video quality" button. Its behaviour depends on `voiceStore.isScreenSharing`:
+
+| State | Click |
+|-------|-------|
+| Not sharing | `handleScreenShareAction()` → `openScreenShareSetup()` → the setup screen above |
+| Sharing | Toggles `ScreenShareSettingsPopover` anchored to the button, rendered with `onStopSharing` |
+
+`ScreenShareSettingsPopover` takes an optional `onStopSharing` callback. When present it appends a full-width `bg-accent-rose` "Stop Sharing" button below the stats footer; the control bars pass it (they have no other stop control), while the local `StreamTile` context menu omits it because it already carries its own "Stop Streaming" item. Quality changes made from the popover apply mid-stream through the `screenShareConfig` effect in `useLiveKit` (constraints + overdrive re-applied; a codec change republishes).
+
+Both control bars close the menu whenever `isScreenSharing` drops to `false`, so a share ended elsewhere (the OS "Stop sharing" bar, `handleScreenShareUnpublished`, the keybind) never leaves a stale popover anchored to the button. The popover's click-outside listener ignores `mousedown` on its own anchor; the anchor's click handler is the sole owner of the open/close toggle (`ConnectionInfoPopover` follows the same contract).
+
+### System Audio Loopback (`shareAudio`)
+
+The "System audio" toggle in the quality panel adds an audio track to the screen-share publication. `stageScreenCapture` calls `navigator.mediaDevices.getDisplayMedia` directly (not through LiveKit) with constraints from `buildCaptureConstraints`, which include `restrictOwnAudio: true` when the toggle is on and `audio: false` when it is off. In Electron, the `setDisplayMediaRequestHandler` callback (`packages/desktop/src/main.ts`) returns `audio: 'loopback'` to opt into Chromium's system-audio loopback path.
+
+Electron 43.4+ honors `restrictOwnAudio` in this custom-handler path and selects loopback excluding the app's own playback on macOS and Windows. Linux keeps its existing loopback path; this Electron fix does not add own-audio exclusion there. Older Electron versions ignored the constraint ([electron/electron#52427](https://github.com/electron/electron/issues/52427), fixed by [#52455](https://github.com/electron/electron/pull/52455), with the 43.4.0 backport in [#52533](https://github.com/electron/electron/pull/52533)). The existing stereo capture and disabled voice processing remain unchanged; both display and window selections use the same request.
+
+Own-audio exclusion applies to all audio played by Backspace, including remote voices, notification sounds, and in-app YouTube, Vimeo, or Spotify embeds. On macOS and Windows, viewers no longer hear those embeds through a system-audio share, unlike in Backspace 1.1.2; play the media in a separate application when its audio needs to be shared.
+
+**External audio routing.** A third-party audio router can replay call audio through a different process, outside Backspace's own-audio exclusion. If viewers still hear themselves, check this route as well as the capture settings. On macOS with SoundSource, add Backspace to **Settings → Audio → Excluded Applications** to bypass SoundSource processing of Backspace; see the [SoundSource manual](https://rogueamoeba.com/support/manuals/soundsource/?page=settings). Own-audio exclusion does not guarantee removal of copies replayed by external audio routers.
+
+| Platform | Mechanism | Notes |
+|----------|-----------|-------|
+| Browser (Chrome/Edge) | `getDisplayMedia({ audio: true })` | Tab/window/system audio per the user's pick |
+| Electron / Windows | Chromium native loopback | Works out of the box |
+| Electron / macOS 13+ | CoreAudio Tap (Catap) | Requires `NSAudioCaptureUsageDescription` (set by `packages/desktop/electron-builder.yml#mac.extendInfo`) |
+| Electron / Linux | PulseAudio loopback | **Requires** the `PulseaudioLoopbackForScreenShare` Chromium feature flag — enabled at startup in `main.ts` for Linux. Works on PulseAudio and on PipeWire systems with the `pipewire-pulse` compat layer. PipeWire-only systems without pulse compat will fail. |
+
+**Failure handling.** When loopback is not supported, Chromium rejects the entire `getDisplayMedia` request — the source-picker selection has already been consumed, so silently retrying without audio would re-prompt the picker. `stageScreenCapture` (`utils/screenShare.ts`) instead surfaces a warning toast directing the user to turn off system audio if their system does not support loopback. We do **not** auto-mutate the user's `shareAudio` preference.
+
+---
+
+## Mobile Voice Rendering
+
+Mobile (`MobileVoiceFullScreen`) renders the **same** `VoiceGrid` component as desktop. There is no mobile-specific tile component — the rendering, attach/detach, adaptive-stream subscription, focused-publisher layout, and context menus all come from the shared `VoiceGrid` / `VoiceUser` / `StreamTile` pipeline. The only mobile-specific addition is auto-focus on the first live screen-share publication (so phone users don't have to discover tap-to-focus).
+
+See `docs/systems/mobile-ui.md` → "MobileVoiceFullScreen" for the auto-focus state machine, control-bar wiring, and layout sizing.
+
+**Why the shared component path matters.**
+
+- Local camera preview: `VoiceUser` attaches the local participant's `videoTrack` to a `<video muted>`. Mobile gets the self-preview "for free".
+- Remote cameras: `Track.attach(videoEl)` registers the element with LiveKit's `RemoteVideoTrack` adaptive-stream observer, so the SFU automatically picks the appropriate simulcast layer based on the painted tile size on the phone. No mobile-specific bitrate clamp is needed.
+- Screen-share: `StreamTile` lazily subscribes via `setStreamSubscription` only after the user taps "Watch Stream" (or auto-focus does so on mobile, which currently still requires the user to tap the in-tile "Watch Stream" CTA — auto-focus only sets the focused publisher; it does not auto-subscribe to bandwidth-heavy screen-share tracks).
+- Mute / deafen / speaking-ring overlays, watch/unwatch controls, local mute, volume sliders — identical between mobile and desktop.
+
+**Screen-share button wiring on mobile.** `MobileVoiceFullScreen`'s screen-share button calls `handleScreenShareAction()` from `utils/voiceActions`, **not** `voiceStore.toggleScreenShare`. The store action only flips the `isScreenSharing` boolean and never captures anything. The canonical `handleScreenShareAction` is shared with desktop's `VoiceControlBar` and the keybind manager; idle it opens `ScreenShareSetup`, live it calls `stopScreenShare(room)`, which broadcasts the new voice status itself. iOS Safari does not support `getDisplayMedia` (the call rejects); this is a platform limitation. Android Chrome supports it and works.
+
+---
+
+## Voice Fullscreen
+
+The fullscreen toggle in `VoiceControlBar` flips the `voiceFullscreen` flag in `uiStore`; an effect in `MainContent.tsx` enters/exits the browser's Fullscreen API on `voiceContainerRef`. A second effect listens to `fullscreenchange` and reflects the actual document fullscreen element back into the store, so pressing Esc or system-level fullscreen-exit keeps state in sync. `voiceChatOpen && !voiceFullscreen` hides the side chat panel while fullscreen is active.
+
+**Fullscreen chrome:** the channel header and call controls are positioned over the video instead of reserving rows. Their overlay bands use `pointer-events: none`, and only the actual buttons opt back into hit testing, so transparent chrome never steals tile or Grid-button clicks. The header actions leave the top-right Grid corner clear.
+
+Both overlays are revealed by **pointer movement** and hidden again after `POINTER_REVEAL_IDLE_MS` (2.5 s) of stillness, via `hooks/usePointerReveal`. `MainContent` owns that state — it holds `voiceContainerRef`, which is the element the pointer moves over — and passes it to `VoiceControlBar` as `revealed`.
+
+This deliberately is **not** `group-hover/voice`, which is what it was until the idle behaviour was added. Hover is geometric: it asks whether the pointer is inside the box. Fullscreen makes `group/voice` the whole viewport, so hover is true wherever the pointer is, both overlays sat at `opacity-100` permanently, and the header band covered the top of the stream with no way to dismiss it short of moving the pointer out of the window. Idle is a question about time and needs a timer.
+
+An overlay carrying `data-voice-chrome` (the `VOICE_CHROME_ATTR` export) holds the reveal open while the pointer rests on it, so stopping on a button to aim does not pull it away. Because the bands are `pointer-events: none`, this only ever matches through the buttons that opt back in — resting over the transparent part of a band still times out, which is correct. An open screen-share menu pins the control bar for the same reason, since its popover hangs off it.
+
+The docked (non-fullscreen) layout keeps plain `group-hover/voice` and ignores `revealed`. There hover is the right model: the voice surface is a panel with sidebars beside it, so leaving it is something the pointer can actually do. Devices without hover or with any coarse pointer (including hybrid touch laptops) keep both overlays visible in either layout, and `focus-within` keeps them reachable by keyboard.
+
+**Cross-browser API fallback.** iOS Safari (and iPadOS pre-16.4) does not implement the standard `Element.requestFullscreen()` on generic elements, so the enter-fullscreen effect probes for the API in this order:
+
+1. `el.requestFullscreen()` — standard
+2. `el.webkitRequestFullscreen()` — older WebKit (some iPads, older Safari)
+3. Silent fall-through — pure iPhone Safari has neither API on a `<div>` (only `HTMLVideoElement.webkitEnterFullscreen()` works, which we cannot use for the multi-tile voice container)
+
+When neither native API is available the effect returns without throwing; the `voiceFullscreen` flag still applies `h-screen` to `voiceContainerRef`, which acts as the in-page maximize fallback (chat panel hides, header fades, control bar stays). The exit path mirrors this with `document.exitFullscreen()` → `document.webkitExitFullscreen()` → no-op. Both paths are wrapped in try/catch so a Promise rejection (e.g. user cancels via Esc mid-transition) does not surface as an unhandled error. The `fullscreenchange` listener is registered for both `fullscreenchange` and `webkitfullscreenchange`. Before this fallback, calling the missing API directly threw `TypeError: requestFullscreen is not a function` on iPhone Safari, which surfaced as a full-screen error overlay when an iPhone user crossed the 768 px desktop breakpoint in landscape mode.
+
+**Overlay portals:** While fullscreen is active the browser's Fullscreen API renders only descendants of `voiceContainerRef`. Every overlay reachable during a call (context menus on `StreamTile`/`VoiceUser`/`VoiceChannel`, tooltips on the control bar, `ConnectionInfoPopover`, `ScreenShareSettingsPopover`, `ConfirmDialog` invoked from voice context-menu actions, and `ScreenShareSetup`) portals through `usePortalContainer()` so it lands inside the fullscreen element. Adding new overlays that can be opened from inside the call must follow the same contract — see `docs/systems/design-system.md` Surface Material Tiers.
+
+---
+
+## Audio Processing
+
+| Feature | Default | User Control | Notes |
+|---------|---------|-------------|-------|
+| Echo Cancellation | on | yes | Stays on during screen share (Chrome AEC handles it) |
+| Noise Suppression | overridden | — | Managed by RNNoise state |
+| Auto Gain Control | on | yes | |
+| RNNoise (ML) | on | yes | When enabled: browser NS forced off |
+
+**Audio constraints applied to mic track:**
+```typescript
+{
+  echoCancellation: userSetting,     // stays on during screen share
+  noiseSuppression: rnnoiseEnabled ? false : userSetting,
+  autoGainControl: userSetting,
+}
+```
+
+**Screen share audio (when enabled):**
+```typescript
+{
+  restrictOwnAudio: true,    // Own-playback exclusion where supported; Electron 43.4+
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 2             // Stereo
+}
+```
+
+Capture was already unprocessed stereo. LiveKit infers stereo from
+`channelCount: 2` and disables DTX and RED for stereo tracks; the explicit
+`forceStereo: true`, `dtx: false`, and `red: false` publication options preserve
+that behavior visibly. The functional change is the preset upgrade from
+`AudioPresets.music` (48 kbps) to `AudioPresets.musicHighQualityStereo`
+(128 kbps), approximately 80 kbps more for a screen share carrying audio.
+
+**Persistence:** `voiceStore` with Zustand localStorage. Keys: `echoCancellation`, `autoGainControl`, `rnnoiseEnabled`, `screenShareConfig`.
+
+**Diagnostics polling:** `VoiceGrid` owns one `useTrackStats` poller for all
+visible/observed stream tiles. The poll interval is 2 s (raised from 1 s when
+the poller became shared), so the connection inspector refreshes at that rate
+and the health debounce below spans roughly six seconds of degradation. Tiles consume the shared snapshot and apply the
+three-bad-sample / five-stable-second debounce independently, avoiding a full
+PeerConnection scan per tile. The connection inspector may start one additional
+poller only while it is open. Publisher CPU attribution is available on the
+publisher from outbound stats; viewers receive the publisher's LiveKit
+connection-quality signal but cannot infer a remote encoder's CPU limitation.
+
+**Camera preset:** 1280x720, 2Mbps, 30fps, H.264
+
+### Capture lifecycle on leave — `AudioManager.releaseInputStream()`
+
+The published mic track is a *clone* of `AudioManager`'s `MediaStreamAudioDestinationNode` output, so `Room.disconnect()` stops that clone but never the upstream `getUserMedia` capture (`AudioManager.currentStream`) that feeds the Web Audio graph. Without an explicit release, the browser tab and OS keep the microphone flagged in-use after the user leaves the call.
+
+`AudioManager.releaseInputStream()` closes that gap: it disconnects `inputSource`, detaches each capture track's `onended` handler and `.stop()`s it, nulls `currentStream`, resets `currentInputDeviceId` to `'default'`, and bumps `streamGeneration` so the next join re-acquires instead of short-circuiting. The `AudioContext` and master bus are left intact so sound effects keep working.
+
+`useLiveKit` calls it on explicit leave, a terminal `RoomEvent.Disconnected` from the current room (including an unspecified reason), a failed connection, and hook unmount. Leave and unmount release even before a room exists, covering the pre-arm/token-fetch interval. Explicit leave releases **before** awaiting SDK teardown, and late teardown cannot clear a newer connection's state.
+
+Channel switches detach the old room reference before calling `room.disconnect()` and deliberately **keep capture warm** for the immediate rejoin. Old room events are ignored; releasing there would defeat the `joinVoiceChannel` mic pre-arm and risk the iOS gesture-window hang. Temporary reconnecting events do not release capture.
+
+A separate input-release generation invalidates acquisitions queued or in flight before leave. Queued jobs are skipped; a late `getUserMedia` result is stopped immediately rather than attached to the graph. A stale denial is not cached for the next call. The browser permission prompt itself cannot be cancelled. New requests after release remain valid and reuse the existing serialized acquisition chain. The mic synchronization effect checks room identity and cleanup after awaits so an abandoned effect cannot reacquire or republish after leaving.
+
+---
+
+## Audio Device Selection (Microphone & Speakers)
+
+Users pick mic and speaker devices in two surfaces:
+1. **User Settings → Voice & Video** (`AudioInputSection.tsx`, `AudioOutputSection.tsx`) — full picker with input volume, live level meter, output volume, and a "Play test sound" button.
+2. **Bottom-left UserArea quick popups** (`ChannelSidebar.tsx UserAreaPanel`) — opened by the caret buttons next to mute (input picker) and deafen (output picker). Same picker UX, more compact.
+
+Both surfaces are backed by the shared `useAudioDevices()` hook. The store fields `inputDeviceId` and `outputDeviceId` (both `string`, default `'default'`) are persisted in `voiceStore`.
+
+### `useAudioDevices()` hook (canonical enumeration)
+- Mirrors `VideoSection.tsx`'s permission/enumeration/devicechange pattern.
+- Mount-time probe: `navigator.permissions.query({ name: 'microphone' })`. **Never auto-fires `getUserMedia`** — that requires an explicit user gesture via the returned `requestPermission()`.
+- States: `unknown` → `granted` | `prompt` | `denied`. Lists are populated only in `granted`.
+- Refreshes both `inputs` and `outputs` on every `devicechange` event.
+- Output devices are gated behind microphone permission (no separate output permission exists in browsers).
+- Returns `inputLabels` / `outputLabels` maps with disambiguation suffixes for duplicate names (e.g. `"USB Audio (1)"`, `"USB Audio (2)"`).
+
+### Output routing — `AudioContext.setSinkId`
+All audio (remote voice, screen-share audio, sound effects) flows through `AudioManager`'s master bus → `AudioContext.destination`. Output device switching is therefore done via `AudioContext.setSinkId(deviceId)`, NOT via LiveKit's `switchActiveDevice('audiooutput')` (which targets `<audio>` elements that are killed by `AppLayout`'s MutationObserver). Safari < 17 lacks `setSinkId` on AudioContext — `AudioOutputSection` detects this (once a real context exists) and falls back to OS default with an explanatory note.
+
+**Mobile platforms with no per-element output routing (iOS Safari):** `AudioOutputSection` feature-detects `'setSinkId' in HTMLMediaElement.prototype` at module load (cached). When false, the entire section is hidden — no header, no fallback copy. iOS users adjust audio routing via OS controls (Bluetooth menu, Control Center) and do not expect per-app output selection. Android Chrome ≥ 110 supports `setSinkId` and renders the picker normally. The detection runs before any hooks via an outer wrapper (`AudioOutputSection` → early-return-`null` → `AudioOutputSectionInner`) so the inner component's hook order remains stable.
+
+### Touch-close on device pickers
+The Audio Input, Audio Output, and Video device dropdowns (`AudioInputSection.tsx`, `AudioOutputSection.tsx`, `VideoSection.tsx`) all listen for both `mousedown` AND `touchstart` (`{ passive: true }`) when implementing click-outside-to-close. iOS Safari does not synthesize `mousedown` reliably from a single tap; without the `touchstart` listener, mobile users would have to tap twice to dismiss an open popover.
+
+### Input pipeline — republish, never `switchActiveDevice`
+Input device changes flow through `AudioManager.setInputDevice(deviceId)` (serialized chain). The `useLiveKit syncMic` effect detects the bumped stream generation and unpublishes/republishes via `getFreshTrack()`. This asymmetry vs. the camera (which uses `room.switchActiveDevice('videoinput', …)`) is intentional and documented under "Architectural asymmetry" below — the published mic track is the output of a Web Audio graph (RNNoise, gain, AEC), not a raw `getUserMedia` track.
+
+### Hot-plug seamlessness
+The global `devicechange` handler in `AppLayout.tsx` does four things on every event:
+1. **Prune** persisted IDs that no longer exist (`pruneStaleDevices`).
+2. **Re-acquire** the live mic stream when `inputDeviceId === 'default'` AND `AudioManager.hasActiveStream()`. Chromium does NOT migrate an existing `getUserMedia` track to the new OS-default — calling `setInputDevice('default')` triggers a fresh `getUserMedia` which picks up the new default; `syncMic` then republishes.
+3. **Re-apply** `setSinkId('')` when `outputDeviceId === 'default'`, for the analogous reason.
+4. **Toast** on a *new* `audioinput` group appearing (debounced 1s, deduped by `groupId` for 30s). Removals do not toast — the user already knows they unplugged it. Toast is informational ("AirPods Pro detected — choose it in Voice settings to switch") — never auto-switches; auto-switch would be a privacy/UX regression for users who deliberately keep a non-default device selected.
+
+### Mic-track-loss recovery
+The published mic track is a *clone* of `AudioManager`'s `MediaStreamAudioDestinationNode` output (see `getFreshTrack()`), and a destination-node track does not end on upstream loss — it just outputs silence. So the published track's `onended` is the wrong signal. Instead, `AudioManager` installs `onended` on every track of the upstream `getUserMedia` stream and exposes a subscription API:
+
+- `AudioManager.onInputTrackEnded(cb)` — subscribers receive a `'unplug' | 'revoke' | 'unknown'` reason hint and probe `getUserMedia` themselves to classify.
+- Deliberate replacements (`setInputDevice`, `setRnnoiseEnabled`, `setVoiceProcessing` re-init) detach the per-track listener BEFORE calling `.stop()` and null `currentStream` immediately, so subscribers are never notified for non-loss events. A surviving listener (e.g. attached by a future external caller) bails via the `currentStream !== capturedStream` identity check.
+
+`useLiveKit` subscribes to this signal whenever a room is connected, captures `subscriberRoom = roomRef.current`, and on emission:
+1. Bail if the room has been replaced.
+2. Probe `getUserMedia({audio:{deviceId}})` to classify:
+   - Probe succeeds → `setInputDevice(deviceId)` to re-acquire AND call `republishMicrophone(subscriberRoom, lastMicGenRef)` directly (the syncMic dep array does not include `streamGeneration`, so we cannot rely on it to re-fire).
+   - `NotAllowedError` → `"Microphone permission was revoked"` (warning toast).
+   - `NotFoundError` with non-default device → set store to `'default'` and toast `"Microphone disconnected — switched to system default"`. The store change triggers `syncMic`, which re-acquires + republishes via the shared helper.
+   - `NotFoundError` on default → `"Microphone disconnected"`.
+   - Other → `"Microphone could not be restored"`.
+
+`republishMicrophone` is a module-level helper extracted from `syncMic` so both the normal device-change path and the recovery path share the staleness-check / unpublish / `getFreshTrack` / publish flow.
+
+### Privacy gate — never auto-fire `getUserMedia`
+The `useAudioDevices` hook only calls `getUserMedia` from the explicit `requestPermission()` action. The previous `ChannelSidebar.UserAreaPanel.loadDevices` implementation fired `getUserMedia({audio:true})` on every panel open as long as no `AudioContext` existed — which flashed the mic indicator even when permission had been previously granted in another session. That probe has been removed.
+
+### Resolved-default hint
+When `inputDeviceId === 'default'` and a stream is active, `AudioInputSection` shows a `Currently using: <label>` subline by reading `AudioManager.getCurrentInputDeviceId()` and looking up the label in `inputLabels`. This makes the "default → which device?" indirection visible to the user.
+
+---
+
+## Camera Device Selection
+
+Users pick a camera in **User Settings → Voice & Video → Video**. Selection is persisted in `voiceStore.cameraDeviceId` (`string | null`; `null` = "let LiveKit/browser auto-pick on next fresh enable").
+
+### Store field
+- `cameraDeviceId: string | null` — persisted via `partialize`. No persist-version bump was needed when it was added: the existing merge `{ ...currentState, ...persistedState }` hydrates absent keys from `initialState` automatically.
+- Sister action: `pruneStaleDevices()` — sweeps mic, speaker, and camera persisted IDs, resetting any that aren't present in `enumerateDevices()`. Skips a kind whose enumerated set has no non-empty deviceIds (Firefox/Safari pre-permission obscures IDs and we cannot distinguish stale from obscured). Called from `AppLayout` mount and on every `devicechange` event.
+
+### Camera enable path (canonical)
+`utils/voiceActions.handleCameraAction()` is the **sole** camera-toggle path — voice-bar button, mobile button, and keybind all call it. It applies `CAMERA_PRESET` (720p30 H.264) and injects `cameraDeviceId` into `VideoCaptureOptions.deviceId` when non-null.
+
+### Hot-swap mid-call
+`useLiveKit`'s `syncCamera` effect watches `cameraDeviceId`, `isCameraOn`, `isConnected`. When the published track's actual `getSettings().deviceId` differs from the store target (and target is non-null), it calls `room.switchActiveDevice('videoinput', targetId)` — an in-place source swap, no re-publish. Failure path: try to restore the previous deviceId in store (if its track is still live), else disable the camera entirely; toast `"Could not switch camera"`. The `null` ("Auto") target is intentionally a no-op: no force-switch of an already-live publication.
+
+`isConnected` here is strictly `state === ConnectionState.Connected` (`useLiveKit.ts`). Do **not** broaden it to include `Reconnecting` without revisiting the effect — `switchActiveDevice` against a reconnecting room would fail.
+
+### Track-end detection
+On `RoomEvent.LocalTrackPublished` for the camera, the underlying `MediaStreamTrack` gets an `onended` listener. When it fires:
+1. If `consumeIntentionalCameraOff()` returns true (user clicked the camera off; flag was set in `handleCameraAction`'s disable branch), bail — no probe, no toast.
+2. Else re-probe `getUserMedia({video:{deviceId}})` to distinguish causes: `NotAllowedError` → `"Camera permission was revoked"` (macOS Privacy revoke); `NotFoundError` → `"Camera disconnected"` (unplug); other → `"Camera unavailable"`.
+3. Tear down camera state via the unified path: `markIntentionalCameraOff()` → `setCameraEnabled(false)` → `isCameraOn = false` → `broadcastVoiceStatus()` → toast.
+
+The `_intentionalCameraOff` module-level flag in `voiceActions.ts` is the gate. Producers: `handleCameraAction` disable branch, `syncCamera` rollback, the track-end handler's own teardown. Consumer: the track-end handler.
+
+### Two-mode preview (in `VideoSection.tsx`)
+| Mode | Triggered when | Source |
+|---|---|---|
+| In-call | An LK camera publication exists | Attach the LK `MediaStreamTrack` to the preview `<video>` |
+| Pre-call | No room or no publication | Open a `getUserMedia({ video: { deviceId } })` stream for the selected device |
+
+Mode is reactive on `isCameraOn` changes. Pre-call streams stop on tab hide (`visibilitychange`), modal close, panel switch, and component unmount; in-call attaches detach the same way but the LK track keeps running.
+
+**Privacy: dormant-by-default.** The pre-call mode never auto-starts. On section mount, `navigator.permissions.query({ name: 'camera' as PermissionName })` reports the permission state without firing the camera. The preview tile is dormant (placeholder + "Click to test camera" overlay) until the user explicitly clicks it, or until the prompt-state CTA button triggers `getUserMedia` (which both grants permission and opens preview in one step). Rationale: macOS holds the camera LED on for ~2s after release, so any incidental `getUserMedia` call (probe, transient mount) flashes the LED — a privacy/UX defect. The only entry points to `getUserMedia` are explicit user gestures: dormant-tile click, prompt CTA, "Try again" in the denied banner, and dropdown change while preview is already running.
+
+### Mobile pre-join preview (in `MobileVoiceJoinSheet.tsx`)
+The mobile bottom-sheet voice-join flow exposes the same dormant-by-default camera preview pattern as `VideoSection`'s pre-call mode. When the user taps a voice channel on `MobileSpacesScreen`, the join sheet opens with a 16:9 preview tile. The tile starts dormant ("Tap to preview camera") — never auto-fires `getUserMedia`. Tapping the tile, the prompt-state CTA, or "Try again" after a denial calls `getUserMedia({ video: { deviceId: ... } })` with the user's persisted `cameraDeviceId` from `voiceStore`.
+
+Lifecycle is hard-bound to the sheet:
+- **Arm:** explicit user tap inside the sheet (any of the entry-point buttons).
+- **Disarm:** sheet close (any path: backdrop tap, close button, channel switch, Join Voice tap which transitions to the in-call flow). The single source of truth for "camera off when sheet closes" is the cleanup effect on the component's unmount — the parent (`MobileSpacesScreen`) removes the sheet, the cleanup runs `stopPreview()`, and tracks are stopped + `srcObject` cleared.
+- **Tab-hide:** matches `VideoSection` — release on `visibilitychange === 'hidden'`, no auto-resume; user must re-tap.
+- **Camera switch:** when multiple cameras are present, a picker overlay in the bottom-left of the tile lets the user swap. The picker is gated on `permState === 'granted' && cameraDevices.length > 1` so it doesn't appear for single-camera devices. Switching cameras while preview is running re-opens `getUserMedia` for the new `deviceId`; `cameraDeviceId` is shared with `voiceStore` so the selection persists into the call.
+  - **Picker popup is portaled to `document.body`.** The trigger button sits inside the `aspect-video overflow-hidden` preview tile, but the dropdown list is rendered as a `position: fixed` element via `createPortal` so it can extend above the tile. Position is captured from the trigger's `getBoundingClientRect()` (re-captured on `resize` / capturing `scroll`) and pinned via `bottom = window.innerHeight - rect.top + 4` so the popup expands upward. The list has `max-height: min(50vh, 320px)`, `overflow-y: auto`, and `-webkit-overflow-scrolling: touch` so every entry stays reachable on a long device list. Click-outside dismissal listens for both `mousedown` and `touchstart`, and excludes both the anchor and the portaled popup (the popup is not a DOM descendant of the anchor since it lives in `document.body`).
+
+The `<video>` element is set up identically to `VideoSection` for iOS Safari compatibility: `autoPlay playsInline muted` attributes on the element, `srcObject` set after the `await getUserMedia`, and a defensive `videoEl.play().catch(() => {})`. iOS Safari requires `autoPlay` because the user-gesture context expires across the await — `play()` alone fails silently.
+
+### Architectural asymmetry: mic republishes, camera switches
+Mic publishes the output of a Web Audio graph (RNNoise, gain, AEC) — `LocalParticipant.switchActiveDevice` cannot operate on it because the published track is a `MediaStreamAudioDestinationNode.stream`'s track, not a raw mic track. Mic device changes therefore unpublish/republish via `AudioManager.getFreshTrack()`. Camera publishes the raw `getUserMedia` track and uses `switchActiveDevice` for in-place swaps. **Do not unify.**
+
+### Federation
+No federation work. The LK room is at the host instance; remote peers connect to it directly. `switchActiveDevice` is room-internal and works regardless of where the room lives.

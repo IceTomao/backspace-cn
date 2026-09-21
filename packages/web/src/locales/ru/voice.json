@@ -1,0 +1,253 @@
+{
+  "chatPanel": {
+    "title": "Чат",
+    "close": "Закрыть чат"
+  },
+  "badges": {
+    "mutedNoPermission": "Микрофон отключён (нет права говорить)",
+    "spaceMuted": "Микрофон отключён в пространстве",
+    "mutedSpaceDeafened": "Микрофон отключён (звук отключён в пространстве)",
+    "spaceDeafened": "Звук отключён в пространстве",
+    "locallyMuted": "Звук отключён локально",
+    "live": "В ЭФИРЕ",
+    "you": "(вы)"
+  },
+  "moderation": {
+    "spaceMute": "Отключить микрофон в пространстве",
+    "spaceUnmute": "Включить микрофон в пространстве",
+    "spaceDeafen": "Отключить звук в пространстве",
+    "spaceUndeafen": "Включить звук в пространстве",
+    "disconnect": "Отключить",
+    "moveTo": "Переместить в"
+  },
+  "participantMenu": {
+    "watchCamera": "Смотреть камеру",
+    "stopWatchingCamera": "Не смотреть камеру",
+    "muteUser": "Заглушить пользователя",
+    "userVolume": "Громкость пользователя"
+  },
+  "incomingCall": {
+    "status": "Входящий голосовой звонок…"
+  },
+  "grid": {
+    "waitingForOthers": "Ждём, пока присоединятся другие…",
+    "returnToGridHint": "Нажмите, чтобы вернуться к сетке",
+    "backToGrid": "Вернуться к сетке",
+    "gridButton": "Сетка",
+    "showMembers": "Показать участников",
+    "hideMembers": "Скрыть участников"
+  },
+  "connectionInfo": {
+    "title": "Сведения о соединении",
+    "notConnected": "Нет подключения",
+    "gathering": "Сбор статистики…",
+    "section": {
+      "network": "Сеть",
+      "audio": "Аудио",
+      "video": "Видео"
+    },
+    "network": {
+      "ping": "Пинг",
+      "packetLoss": "Потеря пакетов",
+      "jitter": "Джиттер",
+      "server": "Сервер",
+      "protocol": "Протокол"
+    },
+    "video": {
+      "requestedCodec": "Запрошенный кодек",
+      "negotiatedCodec": "Согласованный кодек",
+      "encoderImplementation": "Кодировщик",
+      "qpDelta": "Изменение суммы QP",
+      "nackDelta": "Изменение NACK",
+      "pliDelta": "Изменение PLI"
+    },
+    "source": {
+      "microphone": "Микрофон",
+      "camera": "Камера",
+      "screen": "Экран",
+      "screenAudio": "Звук экрана",
+      "unknown": "Неизвестно"
+    },
+    "remoteParticipant": "Удалённый"
+  },
+  "screenPicker": {
+    "title": "Демонстрация экрана",
+    "tabs": {
+      "screens": "Экраны",
+      "windows": "Окна"
+    },
+    "searchWindows": "Поиск окон…",
+    "noWindowsMatch": "Нет окон по вашему запросу",
+    "noScreens": "Нет доступных экранов",
+    "noWindows": "Нет доступных окон",
+    "loadingSources": "Ищем экраны и окна…",
+    "chooseTitle": "Выберите, что показать",
+    "chooseHint": "Браузер спросит, какой экран, окно или вкладку показать.",
+    "chooseHintSystem": "Система спросит, какой экран или окно показать.",
+    "choose": "Выбрать",
+    "chooseAgain": "Выбрать другое",
+    "preview": "Предпросмотр",
+    "audioNeedsRepick": "Настройка системного звука применится после повторного выбора.",
+    "cancelled": "Ничего не выбрано.",
+    "unsupported": "Этот браузер не может показать ваш экран.",
+    "captureFailed": "Не удалось начать захват.",
+    "startFailed": "Не удалось запустить трансляцию.",
+    "audioCaptureFailed": "Не удалось начать захват с системным звуком. Отключите системный звук, если система его не поддерживает.",
+    "start": "Начать трансляцию",
+    "subtitle": "Выберите, что показать, настройте качество и начните.",
+    "stageIdle": "Пока ничего не выбрано",
+    "stageReady": "Готово к запуску",
+    "permissionHintMac": "macOS не разрешает захват экрана, пока у Backspace нет доступа. Выдайте его в Системных настройках → Конфиденциальность и безопасность → Запись экрана и повторите попытку.",
+    "retrySources": "Повторить",
+    "kind": {
+      "monitor": "Экран",
+      "window": "Окно"
+    }
+  },
+  "streamSettings": {
+    "title": "Настройки трансляции",
+    "resolution": "Разрешение",
+    "frameRate": "Частота кадров",
+    "contentMode": "Тип контента",
+    "mode": {
+      "gaming": "Игры",
+      "text": "Текст"
+    },
+    "codec": "Кодек",
+    "codecOption": {
+      "vp9": "VP9",
+      "h264": "H264"
+    },
+    "bitrate": "Битрейт",
+    "custom": "Вручную",
+    "auto": "Авто",
+    "customBitrateDisabled": "Пользовательский битрейт отключён администратором",
+    "systemAudio": "Системный звук",
+    "chromeEchoNote": "Chrome может исключить звук Backspace, если это поддерживает выбранный тип захвата",
+    "electronWindowsAudioNote": "Windows loopback может захватить звук звонка, если restrictOwnAudio не поддерживается",
+    "electronMacAudioNote": "На macOS 13+ требуется разрешение на запись экрана и системного звука",
+    "electronLinuxAudioNote": "В Linux требуется совместимость с PulseAudio; звук Backspace также может попасть в трансляцию",
+    "systemAudioStartFailed": "Не удалось запустить трансляцию с системным звуком. Отключите системный звук, если платформа его не поддерживает.",
+    "softwareH264Fallback": "Аппаратное кодирование H264 недоступно. Используется программный OpenH264; VP9 может работать быстрее.",
+    "degradation": {
+      "maintainResolution": "приоритет разрешения",
+      "maintainFramerate": "приоритет частоты кадров",
+      "balanced": "сбалансировано"
+    },
+    "summary": "{{bitrate}} · {{degradation}}"
+  },
+  "stream": {
+    "quality": "Качество трансляции",
+    "qualityValue": "{{height}}p {{fps}} к/с",
+    "volume": "Громкость трансляции",
+    "attenuation": "Приглушение трансляции",
+    "attenuationStrength": "Сила приглушения",
+    "stop": "Остановить трансляцию",
+    "change": "Сменить трансляцию",
+    "stopWatching": "Прекратить просмотр",
+    "watch": "Смотреть трансляцию",
+    "watchShort": "Смотреть",
+    "mute": "Заглушить трансляцию",
+    "isStreaming": "{{name}} ведёт трансляцию"
+  },
+  "streamDiagnostics": {
+    "publisherNetwork": "Нестабильная сеть у транслирующего",
+    "publisherCpu": "Компьютер транслирующего не успевает кодировать видео",
+    "viewerNetwork": "Нестабильное соединение у вас",
+    "reconnecting": "Соединение потеряно — переподключение…",
+    "unknown": "Соединение нестабильно; точную сторону определить не удалось"
+  },
+  "voiceDiagnostics": {
+    "selfNetwork": "Нестабильное соединение у вас",
+    "participantNetwork": "Нестабильная сеть у {{name}}",
+    "reconnecting": "Связь с голосовым сервером прервана — переподключение…"
+  },
+  "channelDuration": "Канал активен {{duration}}",
+  "controls": {
+    "spaceMutedSelfMuted": "Микрофон отключён в пространстве и у вас",
+    "unmuteShortcut": "Включить микрофон (M)",
+    "muteShortcut": "Отключить микрофон (M)",
+    "undeafenShortcut": "Включить звук (D)",
+    "deafenShortcut": "Отключить звук (D)",
+    "unmute": "Включить микрофон",
+    "mute": "Отключить микрофон",
+    "undeafen": "Включить звук",
+    "deafen": "Отключить звук",
+    "cameraOff": "Выключить камеру",
+    "cameraOn": "Включить камеру",
+    "stopSharing": "Завершить демонстрацию",
+    "shareScreen": "Демонстрировать экран",
+    "shareOptions": "Параметры демонстрации экрана",
+    "toggleChat": "Показать или скрыть чат",
+    "exitFullscreen": "Выйти из полноэкранного режима (Esc)",
+    "fullscreen": "Полноэкранный режим",
+    "disconnect": "Отключиться",
+    "connectionInfo": "Сведения о соединении",
+    "noiseSuppressionOff": "Выключить ИИ-шумоподавление",
+    "noiseSuppressionOn": "Включить ИИ-шумоподавление"
+  },
+  "status": {
+    "dmCall": "Личный звонок",
+    "voiceChannel": "Голосовой канал",
+    "voiceCall": "Голосовой звонок",
+    "connectionFailed": "Не удалось подключиться",
+    "connected": "Голосовая связь установлена",
+    "connecting": "Подключение…",
+    "reconnecting": "Переподключение…",
+    "disconnected": "Отсоединено",
+    "connectionLost": "Соединение потеряно. Попробуйте ещё раз.",
+    "retry": "Повторить"
+  },
+  "camera": {
+    "auto": "Авто",
+    "autoSystemDefault": "Авто (по умолчанию в системе)",
+    "selected": "Выбранная камера",
+    "fallbackName": "Камера {{index}}",
+    "select": "Выбрать камеру",
+    "switch": "Сменить камеру",
+    "turnOn": "Включить камеру",
+    "turnOff": "Выключить камеру"
+  },
+  "joinSheet": {
+    "peopleInVoice_one": "{{count}} человек в голосовом канале",
+    "peopleInVoice_few": "{{count}} человека в голосовом канале",
+    "peopleInVoice_many": "{{count}} человек в голосовом канале",
+    "peopleInVoice_other": "{{count}} человека в голосовом канале",
+    "switchNotice": "Вы покинете <current>{{current}}</current> и присоединитесь к <target>{{target}}</target>",
+    "checkingCamera": "Проверка камеры…",
+    "tapToPreview": "Нажмите для предпросмотра камеры",
+    "cameraDenied": "Доступ к камере запрещён.",
+    "stopPreview": "Остановить предпросмотр",
+    "enablePreview": "Включить предпросмотр камеры",
+    "previewError": {
+      "inUse": "Камера используется другим приложением.",
+      "unavailable": "Выбранная камера недоступна.",
+      "notFound": "Камера не обнаружена.",
+      "failed": "Не удалось запустить предпросмотр камеры."
+    },
+    "empty": {
+      "title": "В этом канале пока никого нет.",
+      "hint": "Присоединитесь первым!"
+    },
+    "unmuteMicrophone": "Включить микрофон",
+    "muteMicrophone": "Отключить микрофон",
+    "switchChannel": "Сменить канал",
+    "join": "Подключиться"
+  },
+  "mobileCall": {
+    "collapse": "Свернуть звонок",
+    "connectedCount_one": "Подключено: {{count}}",
+    "connectedCount_few": "Подключено: {{count}}",
+    "connectedCount_many": "Подключено: {{count}}",
+    "connectedCount_other": "Подключено: {{count}}",
+    "viewMembers": "Участники",
+    "micDenied": {
+      "title": "Доступ к микрофону запрещён",
+      "description": "Вы только слушаете. Другие вас не слышат.",
+      "allow": "Разрешить микрофон"
+    },
+    "shareScreen": "Демонстрировать экран",
+    "stopSharingScreen": "Завершить демонстрацию",
+    "disconnect": "Отключиться от звонка"
+  }
+}

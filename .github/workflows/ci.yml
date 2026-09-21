@@ -1,0 +1,145 @@
+name: CI
+
+# Runs the workspace's typecheck, production build, and full test suite on every
+# pull request and on pushes to main. Purpose: catch compile errors and test
+# regressions before merge instead of relying on each contributor running tests
+# locally. Once this check is green on a PR, enable branch protection on `main`
+# ("Require status checks to pass" → select "Build & test") to make it blocking.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer commit on the same branch/PR supersedes in-flight runs — cancel the
+# stale one so a rapid push sequence doesn't queue redundant CI.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 24]
+
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.34.3
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      # The desktop postinstall tries to rebuild the native uiohook-napi module.
+      # It fails gracefully (|| warn) without X11 dev headers, and nothing in CI
+      # needs the native binary — the desktop tests and TS compile are pure JS —
+      # so we intentionally skip installing those headers to keep CI fast.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Compiles shared → server → web (each runs tsc; web also runs the Vite
+      # production build). This is the typecheck + build gate for those three.
+      - name: Build shared, server & web
+        run: pnpm build
+
+      # Desktop is not part of `pnpm build` (that produces an Electron installer,
+      # which release.yml owns). Type-check its source here so desktop TS errors
+      # surface on PRs rather than only at release-tag time.
+      - name: Typecheck desktop
+        run: pnpm --filter @backspace/desktop build:ts
+
+      # `pnpm build` runs the server's `tsc`, whose tsconfig includes only
+      # `src/**/*` — so nothing in packages/server/test is ever type-checked by
+      # the steps above. This covers the federation e2e suites and the shared
+      # test helpers they boot instances with. See packages/server/tsconfig.e2e.json
+      # for why the older test/ files are not in its include yet.
+      - name: Typecheck server e2e suites
+        run: pnpm --filter @backspace/server typecheck:e2e
+
+      # Runs every package's `test` script (server, web, desktop) via vitest.
+      #
+      # This includes the two-instance federation e2e suites
+      # (packages/server/test/federation-e2e-*.test.ts), which spawn real server
+      # processes on ephemeral ports, peer them over the real HMAC handshake and
+      # relay real events between them. They are deliberately part of THIS job
+      # rather than a job of their own: branch protection requires the
+      # "Build & test" context (produced by the aggregate gate below), so a
+      # separate job would run on PRs without being able to block a merge — no
+      # use for a suite whose whole purpose is gating security fixes. They need
+      # no Docker, Caddy or LiveKit, and add roughly a minute of wall clock.
+      - name: Test
+        run: pnpm -r test
+
+  # The container image has its own build graph: the Dockerfile copies files
+  # into the builder stage one path at a time, so a build script that starts
+  # reading a new path passes every job above and still fails the image. That
+  # is how 1.1.0 shipped without an image: the web build gained the
+  # localization check under scripts/, and nothing built the Dockerfile until
+  # the tag did. Building the amd64 image here (never pushed) closes that gap
+  # on every PR. The buildx cache makes an unchanged image a few seconds.
+  build-image:
+    name: Build container image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build amd64 image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Aggregate gate reporting a single, matrix-independent "Build & test" status.
+  # Branch protection on main requires the "Build & test" context, but the matrix
+  # job above reports per-version contexts ("Build & test (Node 20/24)"). This job
+  # keeps the stable required context alive and fails unless every matrix leg
+  # succeeded (if: always() so a matrix failure still reports a definitive result
+  # instead of leaving the required check pending forever).
+  build-and-test-required:
+    name: Build & test
+    if: always()
+    needs: [build-and-test, build-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify matrix result
+        run: |
+          if [ "${{ needs.build-and-test.result }}" != "success" ]; then
+            echo "Matrix build-and-test did not succeed: ${{ needs.build-and-test.result }}"
+            exit 1
+          fi
+          if [ "${{ needs.build-image.result }}" != "success" ]; then
+            echo "Container image build did not succeed: ${{ needs.build-image.result }}"
+            exit 1
+          fi
+          echo "All matrix legs passed and the image builds."

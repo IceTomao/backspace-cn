@@ -1,0 +1,37 @@
+{
+  "name": "@backspace/desktop",
+  "version": "1.3.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "Backspace",
+  "author": {
+    "name": "Jannis Braun",
+    "email": "backspace@backspace.chat"
+  },
+  "homepage": "https://github.com/TheZwiss/backspace",
+  "main": "dist/main.js",
+  "desktopName": "io.github.TheZwiss.backspace.desktop",
+  "scripts": {
+    "build:ts": "tsc",
+    "dev": "cp build/icon.icns $(find ../../node_modules -path '*/electron/dist/Electron.app/Contents/Resources/electron.icns' 2>/dev/null | head -1) 2>/dev/null; tsc && electron .",
+    "build": "tsc && electron-builder",
+    "build:all": "tsc && electron-builder --mac --win --linux --arm64 --x64",
+    "clean": "rm -rf dist dist-electron",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "postinstall": "electron-rebuild -f -w uiohook-napi || node -e \"console.warn('[desktop] uiohook-napi native rebuild skipped - needs build tools (make, g++, python3). Only required to RUN the desktop app; the server, web client, and Docker image are unaffected.')\""
+  },
+  "dependencies": {
+    "dbus-next": "0.10.2",
+    "electron-updater": "^6.8.9",
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "@electron/fuses": "^2.1.3",
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^43.7.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11"
+  }
+}

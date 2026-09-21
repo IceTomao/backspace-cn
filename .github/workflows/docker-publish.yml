@@ -1,0 +1,153 @@
+name: Publish Container Image
+
+# Builds and publishes the Backspace application image to the GitHub Container
+# Registry (GHCR) as a multi-architecture (linux/amd64 + linux/arm64) image, so
+# self-hosters — including weak/ARM boxes like a Raspberry Pi — can `docker pull`
+# a prebuilt image instead of building the ~1.6 GB image locally (the Vite build
+# OOMs small ARM hosts). install.sh and docker-compose.yml default to pulling
+# this image, with a from-source build as the fallback.
+#
+# This is intentionally SEPARATE from the desktop-installer workflow
+# (release.yml) — they share the `v*` tag trigger but build entirely different
+# artifacts and must not be entangled.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Allow a manual rebuild/publish (e.g. to (re)publish `latest` or a moving tag
+  # without cutting a new release).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Extra tag to publish (optional, e.g. "edge")'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    # Scoped to this job. `packages: write` pushes the built image to
+    # ghcr.io/<repo>; `security-events: write` uploads the Trivy image scan
+    # SARIF to code scanning. Neither is needed by anything at workflow level.
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The runtime image bakes the git commit for the AGPL-3.0 § 13 source
+      # offer (config.commit → GET /api/instance/info). The .git dir is not in
+      # the build context (.dockerignore), so resolve the short SHA here and feed
+      # it to the build as a --build-arg, matching install.sh / deploy.sh.
+      - name: Resolve build metadata
+        id: meta_commit
+        run: echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags and labels
+        id: docker_meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          # github.repository is "TheZwiss/backspace"; metadata-action lowercases
+          # it → ghcr.io/thezwiss/backspace (GHCR requires lowercase).
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.title=Backspace
+            org.opencontainers.image.description=Self-hosted Discord alternative — text, voice, video, and federation.
+            org.opencontainers.image.source=https://github.com/TheZwiss/backspace
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      # Build a single-arch amd64 image and LOAD it into the runner's docker
+      # daemon so Trivy can scan the exact artifact before anything is published.
+      # A multi-arch manifest cannot be --load'ed, so scanning must happen on a
+      # single-arch build first; the multi-arch push below reuses these layers
+      # from the buildx cache, so this is cheap.
+      - name: Build amd64 image for scanning
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: backspace:scan
+          build-args: |
+            BACKSPACE_COMMIT=${{ steps.meta_commit.outputs.commit }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Deliberately still report-only, and this is the one scanner that is.
+      # Measured 2026-09-03 against an image built from main, after the runtime
+      # stage stopped shipping pnpm and npm: 3 fixable HIGH/CRITICAL, down from
+      # 20. All three are one cluster (fastify, @fastify/static, find-my-way) and
+      # none has a fix inside the Fastify 4 line, so clearing them is the Fastify
+      # 5 migration, not a version bump. Until that lands, making this blocking
+      # would fail every release publish, and holding security fixes behind a
+      # scanner backlog is the exact inversion this project already decided
+      # against. See docs/systems/security-scanning.md.
+      - name: Trivy image scan (report-only)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true # report-only: see the note above, not an oversight
+        with:
+          scan-type: image
+          image-ref: backspace:scan
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-image.sarif
+          severity: HIGH,CRITICAL
+
+      - name: Upload Trivy image SARIF
+        if: always()
+        continue-on-error: true # a scanner/SARIF-emit flake must never skip the publish below
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+      # Publish the multi-arch image. Reuses the amd64 layers built above via the
+      # gha cache. Attaches an SBOM and SLSA provenance attestation to the image.
+      - name: Build and push (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          build-args: |
+            BACKSPACE_COMMIT=${{ steps.meta_commit.outputs.commit }}
+          sbom: true
+          provenance: true
+          # Cache multi-arch layers across runs via the GitHub Actions cache to
+          # keep the ~1.6 GB build from re-running cold every release.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

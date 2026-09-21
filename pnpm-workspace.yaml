@@ -1,0 +1,9 @@
+packages:
+  - "packages/*"
+  # Repo tooling that needs typecheck + tests, listed explicitly rather than as
+  # `scripts/*` so unrelated one-off scripts (gen-icons.mjs) stay out of the
+  # workspace. See docs/systems/metrics.md.
+  - "scripts/metrics"
+  - "scripts/telemetry-receiver"
+  # The fork-PR triage bot. See docs/systems/security-scanning.md.
+  - "scripts/pr-triage"

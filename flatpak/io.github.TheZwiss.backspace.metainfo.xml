@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.TheZwiss.backspace</id>
+  <name>Backspace</name>
+  <summary>Self-hosted text, voice, and video communication</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+  <developer id="io.github.thezwiss">
+    <name>Jannis Braun</name>
+  </developer>
+
+  <description>
+    <p>
+      Backspace is a client for self-hosted Backspace communities. Connect to
+      an instance to chat in spaces and direct messages, make voice and video
+      calls, share your screen, and communicate with users on federated
+      instances.
+    </p>
+    <p>
+      The desktop client adds native notifications, a system tray, deep links,
+      and global push-to-talk keybinds where supported by the desktop
+      environment.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.TheZwiss.backspace.desktop</launchable>
+  <url type="homepage">https://github.com/TheZwiss/backspace</url>
+  <url type="bugtracker">https://github.com/TheZwiss/backspace/issues</url>
+  <url type="vcs-browser">https://github.com/TheZwiss/backspace</url>
+  <url type="help">https://github.com/TheZwiss/backspace#readme</url>
+  <provides>
+    <binary>backspace</binary>
+    <mediatype>x-scheme-handler/backspace</mediatype>
+  </provides>
+  <categories>
+    <category>Network</category>
+    <category>Chat</category>
+    <category>InstantMessaging</category>
+  </categories>
+  <keywords>
+    <keyword>chat</keyword>
+    <keyword>voice</keyword>
+    <keyword>video</keyword>
+    <keyword>federation</keyword>
+    <keyword>self-hosted</keyword>
+  </keywords>
+  <content_rating type="oars-1.1" />
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/TheZwiss/backspace/v1.3.0/docs/screenshots/chat.webp</image>
+      <caption>Text channels with replies, reactions, and typing indicators</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/TheZwiss/backspace/v1.3.0/docs/screenshots/voice-video-grid.webp</image>
+      <caption>Voice and video calls with screen sharing</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/TheZwiss/backspace/v1.3.0/docs/screenshots/user-discovery.webp</image>
+      <caption>Discover users across federated instances</caption>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="1.3.0" date="2026-09-14">
+      <description>
+        <p>Screen sharing starts with a preview and quality controls before you go live. Fullscreen streams use the whole window, with the header and call controls fading out once the pointer stops moving, and a voice call now survives a reconnect instead of dropping what you had.</p>
+      </description>
+    </release>
+    <release version="1.2.2" date="2026-09-09">
+      <description>
+        <p>Adds a 50% step to the interface scale and keeps narrow windows on the mobile layout at any scale. Instance admins are now told in the app when a newer Backspace release is out.</p>
+      </description>
+    </release>
+    <release version="1.2.1" date="2026-09-07">
+      <description>
+        <p>Moves the language and interface scale settings out of Account into a new Appearance tab.</p>
+      </description>
+    </release>
+    <release version="1.2.0" date="2026-09-07">
+      <description>
+        <p>Adds an interface scale from 75% to 250%, opt-in instance telemetry, and voice shortcuts on Wayland. A system-audio screen share no longer plays viewers their own voice back.</p>
+      </description>
+    </release>
+    <release version="1.1.2" date="2026-09-04">
+      <description>
+        <p>Fixes the Register and Log In links on the login and registration pages, localizes the elapsed time under activities, and adds editing your last message with the up arrow.</p>
+      </description>
+    </release>
+    <release version="1.1.1" date="2026-09-04">
+      <description>
+        <p>Rebuilds the container image that failed to build for 1.1.0. No changes to the app beyond the version number.</p>
+      </description>
+    </release>
+    <release version="1.1.0" date="2026-09-04">
+      <description>
+        <p>Backspace now speaks English, Russian and German. Pick your language under Settings, Account; dates, numbers and server errors follow the choice. The Flatpak build can also use the webcam and talk to the system power service, so video calls work and the app can keep the system awake during a call.</p>
+      </description>
+    </release>
+    <release version="1.0.6" date="2026-09-04">
+      <description>
+        <p>First release with Flatpak packaging. In the Flatpak build, updates are handled by Flatpak rather than by the app, and the in-app update controls are hidden accordingly.</p>
+      </description>
+    </release>
+    <release version="1.0.5" date="2026-09-03">
+      <description>
+        <p>Reliable desktop update handling and maintenance improvements.</p>
+      </description>
+    </release>
+    <release version="1.0.4" date="2026-09-03">
+      <description>
+        <p>Security and maintenance improvements.</p>
+      </description>
+    </release>
+    <release version="1.0.3" date="2026-09-03">
+      <description>
+        <p>Security scanning improvements and Linux packaging fixes.</p>
+      </description>
+    </release>
+    <release version="1.0.2" date="2026-09-02">
+      <description>
+        <p>Security hardening and desktop packaging improvements.</p>
+      </description>
+    </release>
+    <release version="1.0.1" date="2026-09-02">
+      <description>
+        <p>Maintenance and reliability improvements.</p>
+      </description>
+    </release>
+    <release version="1.0.0" date="2026-07-03">
+      <description>
+        <p>First public release of Backspace.</p>
+      </description>
+    </release>
+  </releases>
+</component>

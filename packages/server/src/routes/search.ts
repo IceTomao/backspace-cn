@@ -1,0 +1,493 @@
+import type { FastifyInstance } from 'fastify';
+import { eq, and, desc, lt, gt, like, inArray, sql, asc } from 'drizzle-orm';
+import { getDb, schema } from '../db/index.js';
+import { authenticate } from '../utils/auth.js';
+import { sendError } from '../utils/httpErrors.js';
+import { hasPermission, getChannelSpaceId, PermissionBits, isDmMember } from '../utils/permissions.js';
+import { fetchReactionsForMessages, fetchReplyToMessages, buildMessageWithUser } from './messages.js';
+import { fetchDmReactionsForMessages, fetchDmReplyToMessages, buildDmMessageWithUser } from './dm.js';
+import type { MessageWithUser, DmMessageWithUser } from '@backspace/shared';
+import { fetchEmbedsForMessages, fetchDmEmbedsForMessages } from '../utils/embedResolver.js';
+
+interface SearchQuery {
+  q?: string;
+  from?: string;
+  has?: string;
+  before?: string;
+  after?: string;
+  offset?: string;
+  limit?: string;
+}
+
+interface AroundQuery {
+  messageId: string;
+  limit?: string;
+}
+
+export async function searchRoutes(app: FastifyInstance): Promise<void> {
+  // GET /api/channels/:id/search — Search messages in a space channel
+  app.get<{ Params: { id: string }; Querystring: SearchQuery }>('/api/channels/:id/search', {
+    preHandler: authenticate,
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { q, from, has, before, after } = request.query;
+    const offset = Math.max(Number(request.query.offset) || 0, 0);
+    const limit = Math.min(Math.max(Number(request.query.limit) || 25, 1), 50);
+
+    const spaceId = getChannelSpaceId(id);
+    if (!spaceId) {
+      return sendError(reply, 404, 'channel_not_found');
+    }
+
+    if (!hasPermission(request.userId, spaceId, PermissionBits.VIEW_CHANNEL | PermissionBits.READ_MESSAGE_HISTORY, id)) {
+      return sendError(reply, 403, 'missing_permission', { permission: 'READ_MESSAGE_HISTORY' });
+    }
+
+    const db = getDb();
+    const conditions: ReturnType<typeof eq>[] = [eq(schema.messages.channelId, id)];
+
+    if (q && q.trim()) {
+      conditions.push(like(schema.messages.content, `%${q.trim()}%`));
+    }
+
+    if (from && from.trim()) {
+      const user = db.select().from(schema.users)
+        .where(like(schema.users.username, from.trim()))
+        .get();
+      if (user) {
+        conditions.push(eq(schema.messages.userId, user.id));
+      } else {
+        return reply.code(200).send({ results: [], totalCount: 0 });
+      }
+    }
+
+    if (before) {
+      const ts = new Date(before).getTime();
+      if (!isNaN(ts)) {
+        conditions.push(lt(schema.messages.createdAt, ts));
+      }
+    }
+
+    if (after) {
+      const ts = new Date(after).getTime();
+      if (!isNaN(ts)) {
+        conditions.push(gt(schema.messages.createdAt, ts));
+      }
+    }
+
+    const whereClause = and(...conditions)!;
+
+    // Handle has: filter with subqueries
+    let hasFilter: ReturnType<typeof sql> | null = null;
+    if (has === 'file' || has === 'image') {
+      hasFilter = sql`EXISTS (SELECT 1 FROM attachments WHERE attachments.message_id = messages.id${
+        has === 'image' ? sql` AND attachments.mimetype LIKE 'image/%'` : sql``
+      })`;
+    } else if (has === 'link') {
+      conditions.push(like(schema.messages.content, '%http%'));
+    }
+
+    // Count total
+    let countQuery;
+    if (hasFilter) {
+      countQuery = db.select({ count: sql<number>`count(*)` })
+        .from(schema.messages)
+        .where(and(whereClause, hasFilter))
+        .get();
+    } else {
+      countQuery = db.select({ count: sql<number>`count(*)` })
+        .from(schema.messages)
+        .where(whereClause)
+        .get();
+    }
+    const totalCount = countQuery?.count ?? 0;
+
+    // Fetch results
+    let messageRows: (typeof schema.messages.$inferSelect)[];
+    if (hasFilter) {
+      messageRows = db.select()
+        .from(schema.messages)
+        .where(and(whereClause, hasFilter))
+        .orderBy(desc(schema.messages.createdAt))
+        .limit(limit)
+        .offset(offset)
+        .all();
+    } else {
+      messageRows = db.select()
+        .from(schema.messages)
+        .where(whereClause)
+        .orderBy(desc(schema.messages.createdAt))
+        .limit(limit)
+        .offset(offset)
+        .all();
+    }
+
+    if (messageRows.length === 0) {
+      return reply.code(200).send({ results: [], totalCount });
+    }
+
+    // Hydrate results
+    const userIds = [...new Set(messageRows.map(m => m.userId))];
+    const users = db.select().from(schema.users).where(inArray(schema.users.id, userIds)).all();
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    const messageIds = messageRows.map(m => m.id);
+    const allAttachments = db.select()
+      .from(schema.attachments)
+      .where(inArray(schema.attachments.messageId, messageIds))
+      .all();
+    const attachmentMap = new Map<string, (typeof schema.attachments.$inferSelect)[]>();
+    for (const att of allAttachments) {
+      const mid = att.messageId ?? '';
+      if (!attachmentMap.has(mid)) attachmentMap.set(mid, []);
+      attachmentMap.get(mid)!.push(att);
+    }
+
+    const reactionsMap = fetchReactionsForMessages(messageIds);
+    const embedMap = fetchEmbedsForMessages(messageIds);
+    // Reply targets are confined to this channel
+    const replyToMap = fetchReplyToMessages(id, messageRows);
+
+    const results: MessageWithUser[] = messageRows
+      .map(m => {
+        const user = userMap.get(m.userId);
+        if (!user) return null;
+        const reactions = reactionsMap.get(m.id) ?? [];
+        const replyTo = m.replyToId ? (replyToMap.get(m.replyToId) ?? null) : null;
+        return buildMessageWithUser(m, user, attachmentMap.get(m.id) ?? [], reactions, replyTo, embedMap.get(m.id) ?? []);
+      })
+      .filter((m): m is MessageWithUser => m !== null);
+
+    return reply.code(200).send({ results, totalCount });
+  });
+
+  // GET /api/dm/:id/search — Search messages in a DM channel
+  app.get<{ Params: { id: string }; Querystring: SearchQuery }>('/api/dm/:id/search', {
+    preHandler: authenticate,
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { q, from, has, before, after } = request.query;
+    const offset = Math.max(Number(request.query.offset) || 0, 0);
+    const limit = Math.min(Math.max(Number(request.query.limit) || 25, 1), 50);
+
+    if (!isDmMember(id, request.userId)) {
+      return sendError(reply, 403, 'not_dm_member');
+    }
+
+    const db = getDb();
+    const conditions: ReturnType<typeof eq>[] = [eq(schema.dmMessages.dmChannelId, id)];
+
+    if (q && q.trim()) {
+      conditions.push(like(schema.dmMessages.content, `%${q.trim()}%`));
+    }
+
+    if (from && from.trim()) {
+      const user = db.select().from(schema.users)
+        .where(like(schema.users.username, from.trim()))
+        .get();
+      if (user) {
+        conditions.push(eq(schema.dmMessages.userId, user.id));
+      } else {
+        return reply.code(200).send({ results: [], totalCount: 0 });
+      }
+    }
+
+    if (before) {
+      const ts = new Date(before).getTime();
+      if (!isNaN(ts)) {
+        conditions.push(lt(schema.dmMessages.createdAt, ts));
+      }
+    }
+
+    if (after) {
+      const ts = new Date(after).getTime();
+      if (!isNaN(ts)) {
+        conditions.push(gt(schema.dmMessages.createdAt, ts));
+      }
+    }
+
+    const whereClause = and(...conditions)!;
+
+    let hasFilter: ReturnType<typeof sql> | null = null;
+    if (has === 'file' || has === 'image') {
+      hasFilter = sql`EXISTS (SELECT 1 FROM attachments WHERE attachments.dm_message_id = dm_messages.id${
+        has === 'image' ? sql` AND attachments.mimetype LIKE 'image/%'` : sql``
+      })`;
+    } else if (has === 'link') {
+      conditions.push(like(schema.dmMessages.content, '%http%'));
+    }
+
+    let countQuery;
+    if (hasFilter) {
+      countQuery = db.select({ count: sql<number>`count(*)` })
+        .from(schema.dmMessages)
+        .where(and(whereClause, hasFilter))
+        .get();
+    } else {
+      countQuery = db.select({ count: sql<number>`count(*)` })
+        .from(schema.dmMessages)
+        .where(whereClause)
+        .get();
+    }
+    const totalCount = countQuery?.count ?? 0;
+
+    let messageRows: (typeof schema.dmMessages.$inferSelect)[];
+    if (hasFilter) {
+      messageRows = db.select()
+        .from(schema.dmMessages)
+        .where(and(whereClause, hasFilter))
+        .orderBy(desc(schema.dmMessages.createdAt))
+        .limit(limit)
+        .offset(offset)
+        .all();
+    } else {
+      messageRows = db.select()
+        .from(schema.dmMessages)
+        .where(whereClause)
+        .orderBy(desc(schema.dmMessages.createdAt))
+        .limit(limit)
+        .offset(offset)
+        .all();
+    }
+
+    if (messageRows.length === 0) {
+      return reply.code(200).send({ results: [], totalCount });
+    }
+
+    // Hydrate
+    const userIds = [...new Set(messageRows.map(m => m.userId))];
+    const users = db.select().from(schema.users).where(inArray(schema.users.id, userIds)).all();
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    const messageIds = messageRows.map(m => m.id);
+    const allAttachments = db.select()
+      .from(schema.attachments)
+      .where(inArray(schema.attachments.dmMessageId, messageIds))
+      .all();
+    const attachmentMap = new Map<string, (typeof schema.attachments.$inferSelect)[]>();
+    for (const att of allAttachments) {
+      const mid = att.dmMessageId ?? '';
+      if (!attachmentMap.has(mid)) attachmentMap.set(mid, []);
+      attachmentMap.get(mid)!.push(att);
+    }
+
+    const reactionsMap = fetchDmReactionsForMessages(messageIds);
+    const embedMap = fetchDmEmbedsForMessages(messageIds);
+
+    // Fetch reply-to messages for DMs, confined to this DM channel
+    const replyToMap = fetchDmReplyToMessages(id, messageRows);
+
+    const results: DmMessageWithUser[] = messageRows
+      .map(m => {
+        const user = userMap.get(m.userId);
+        if (!user) return null;
+        const reactions = reactionsMap.get(m.id) ?? [];
+        const replyTo = m.replyToId ? (replyToMap.get(m.replyToId) ?? null) : null;
+        return buildDmMessageWithUser(m, user, attachmentMap.get(m.id) ?? [], reactions, replyTo, embedMap.get(m.id) ?? []);
+      })
+      .filter((m): m is DmMessageWithUser => m !== null);
+
+    return reply.code(200).send({ results, totalCount });
+  });
+
+  // GET /api/channels/:id/messages/around — Load messages around a target message
+  app.get<{ Params: { id: string }; Querystring: AroundQuery }>('/api/channels/:id/messages/around', {
+    preHandler: authenticate,
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { messageId } = request.query;
+    const limit = Math.min(Math.max(Number(request.query.limit) || 50, 1), 100);
+    const half = Math.floor(limit / 2);
+
+    if (!messageId) {
+      return sendError(reply, 400, 'validation_failed');
+    }
+
+    const spaceId = getChannelSpaceId(id);
+    if (!spaceId) {
+      return sendError(reply, 404, 'channel_not_found');
+    }
+
+    if (!hasPermission(request.userId, spaceId, PermissionBits.VIEW_CHANNEL | PermissionBits.READ_MESSAGE_HISTORY, id)) {
+      return sendError(reply, 403, 'missing_permission', { permission: 'READ_MESSAGE_HISTORY' });
+    }
+
+    const db = getDb();
+
+    // Get the target message to know its timestamp
+    const target = db.select().from(schema.messages)
+      .where(and(eq(schema.messages.id, messageId), eq(schema.messages.channelId, id)))
+      .get();
+    if (!target) {
+      return sendError(reply, 404, 'message_not_found');
+    }
+
+    // Messages before (inclusive of target)
+    const beforeRows = db.select()
+      .from(schema.messages)
+      .where(and(
+        eq(schema.messages.channelId, id),
+        sql`${schema.messages.id} <= ${messageId}`,
+      ))
+      .orderBy(desc(schema.messages.createdAt))
+      .limit(half + 1)
+      .all();
+
+    // Messages after
+    const afterRows = db.select()
+      .from(schema.messages)
+      .where(and(
+        eq(schema.messages.channelId, id),
+        gt(schema.messages.id, messageId),
+      ))
+      .orderBy(asc(schema.messages.createdAt))
+      .limit(half)
+      .all();
+
+    // Combine in chronological order
+    beforeRows.reverse();
+    const messageRows = [...beforeRows, ...afterRows];
+
+    // Deduplicate (target message appears in both queries)
+    const seen = new Set<string>();
+    const uniqueRows = messageRows.filter(m => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+
+    if (uniqueRows.length === 0) {
+      return reply.code(200).send([]);
+    }
+
+    // Hydrate
+    const userIds = [...new Set(uniqueRows.map(m => m.userId))];
+    const users = db.select().from(schema.users).where(inArray(schema.users.id, userIds)).all();
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    const msgIds = uniqueRows.map(m => m.id);
+    const allAttachments = db.select()
+      .from(schema.attachments)
+      .where(inArray(schema.attachments.messageId, msgIds))
+      .all();
+    const attachmentMap = new Map<string, (typeof schema.attachments.$inferSelect)[]>();
+    for (const att of allAttachments) {
+      const mid = att.messageId ?? '';
+      if (!attachmentMap.has(mid)) attachmentMap.set(mid, []);
+      attachmentMap.get(mid)!.push(att);
+    }
+
+    const reactionsMap = fetchReactionsForMessages(msgIds);
+    const embedMap = fetchEmbedsForMessages(msgIds);
+    // Reply targets are confined to this channel
+    const replyToMap = fetchReplyToMessages(id, uniqueRows);
+
+    const messages: MessageWithUser[] = uniqueRows
+      .map(m => {
+        const user = userMap.get(m.userId);
+        if (!user) return null;
+        const reactions = reactionsMap.get(m.id) ?? [];
+        const replyTo = m.replyToId ? (replyToMap.get(m.replyToId) ?? null) : null;
+        return buildMessageWithUser(m, user, attachmentMap.get(m.id) ?? [], reactions, replyTo, embedMap.get(m.id) ?? []);
+      })
+      .filter((m): m is MessageWithUser => m !== null);
+
+    return reply.code(200).send(messages);
+  });
+
+  // GET /api/dm/:id/messages/around — Load DM messages around a target message
+  app.get<{ Params: { id: string }; Querystring: AroundQuery }>('/api/dm/:id/messages/around', {
+    preHandler: authenticate,
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { messageId } = request.query;
+    const limit = Math.min(Math.max(Number(request.query.limit) || 50, 1), 100);
+    const half = Math.floor(limit / 2);
+
+    if (!messageId) {
+      return sendError(reply, 400, 'validation_failed');
+    }
+
+    if (!isDmMember(id, request.userId)) {
+      return sendError(reply, 403, 'not_dm_member');
+    }
+
+    const db = getDb();
+
+    const target = db.select().from(schema.dmMessages)
+      .where(and(eq(schema.dmMessages.id, messageId), eq(schema.dmMessages.dmChannelId, id)))
+      .get();
+    if (!target) {
+      return sendError(reply, 404, 'message_not_found');
+    }
+
+    const beforeRows = db.select()
+      .from(schema.dmMessages)
+      .where(and(
+        eq(schema.dmMessages.dmChannelId, id),
+        sql`${schema.dmMessages.id} <= ${messageId}`,
+      ))
+      .orderBy(desc(schema.dmMessages.createdAt))
+      .limit(half + 1)
+      .all();
+
+    const afterRows = db.select()
+      .from(schema.dmMessages)
+      .where(and(
+        eq(schema.dmMessages.dmChannelId, id),
+        gt(schema.dmMessages.id, messageId),
+      ))
+      .orderBy(asc(schema.dmMessages.createdAt))
+      .limit(half)
+      .all();
+
+    beforeRows.reverse();
+    const messageRows = [...beforeRows, ...afterRows];
+
+    const seen = new Set<string>();
+    const uniqueRows = messageRows.filter(m => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+
+    if (uniqueRows.length === 0) {
+      return reply.code(200).send([]);
+    }
+
+    // Hydrate
+    const userIds = [...new Set(uniqueRows.map(m => m.userId))];
+    const users = db.select().from(schema.users).where(inArray(schema.users.id, userIds)).all();
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    const msgIds = uniqueRows.map(m => m.id);
+    const allAttachments = db.select()
+      .from(schema.attachments)
+      .where(inArray(schema.attachments.dmMessageId, msgIds))
+      .all();
+    const attachmentMap = new Map<string, (typeof schema.attachments.$inferSelect)[]>();
+    for (const att of allAttachments) {
+      const mid = att.dmMessageId ?? '';
+      if (!attachmentMap.has(mid)) attachmentMap.set(mid, []);
+      attachmentMap.get(mid)!.push(att);
+    }
+
+    const reactionsMap = fetchDmReactionsForMessages(msgIds);
+    const embedMap = fetchDmEmbedsForMessages(msgIds);
+
+    // Reply targets are confined to this DM channel
+    const replyToMap = fetchDmReplyToMessages(id, uniqueRows);
+
+    const messages: DmMessageWithUser[] = uniqueRows
+      .map(m => {
+        const user = userMap.get(m.userId);
+        if (!user) return null;
+        const reactions = reactionsMap.get(m.id) ?? [];
+        const replyTo = m.replyToId ? (replyToMap.get(m.replyToId) ?? null) : null;
+        return buildDmMessageWithUser(m, user, attachmentMap.get(m.id) ?? [], reactions, replyTo, embedMap.get(m.id) ?? []);
+      })
+      .filter((m): m is DmMessageWithUser => m !== null);
+
+    return reply.code(200).send(messages);
+  });
+}

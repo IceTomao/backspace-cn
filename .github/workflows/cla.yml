@@ -1,0 +1,80 @@
+name: CLA Assistant
+
+# Requires every contributor to sign the project Contributor License Agreement
+# (CLA.md) before their pull request can be merged. Signatures are stored in
+# this repository at signatures/cla.json on the `cla-signatures` branch — no
+# external service or database is used. A contributor signs by commenting the
+# exact sentence configured below.
+#
+# Why not `main`: the action appends each signature as a direct commit, which
+# the "Require CI on main" ruleset rejects ("Repository rule violations found"),
+# leaving the signature unrecorded and the check permanently red. Keeping the
+# store on its own branch lets the bot append without granting any actor a
+# bypass on main. That branch has its own ruleset blocking deletion and
+# force-pushes, so the record cannot be rewritten.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+# Nothing at workflow level needs more than read. The write scopes the action
+# needs are granted on the one job that runs it, below.
+permissions:
+  contents: read
+
+jobs:
+  cla-assistant:
+    runs-on: ubuntu-latest
+    # Scoped to this job because it is the only one that runs the action.
+    # contributor-assistant/github-action, pinned below, makes these calls:
+    #   contents: write       commits signatures/cla.json to the cla-signatures
+    #                         branch of this repository, and creates the
+    #                         sign-off commit
+    #   pull-requests: write  posts and updates the signature comment on the
+    #                         pull request, and locks it
+    #   actions: write        re-runs the last failed CLA run once a signature
+    #                         comment arrives (actions.reRunWorkflow). The
+    #                         workflow and run lookups that find that run are
+    #                         reads, covered by the same scope.
+    # The action's README also lists `statuses: write`. The pinned revision
+    # calls no commit-status endpoint, so it is not granted here. Check that
+    # again before bumping the pin.
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    # Skip CLA enforcement on bot-authored PRs (e.g. Dependabot) and on the
+    # maintainer's own PRs via the allowlist below.
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: CLA Assistant
+        if: |
+          (github.event.comment.body == 'recheck' ||
+           github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') ||
+          github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Where signatures are recorded (committed to this repo on `branch`).
+          path-to-signatures: 'signatures/cla.json'
+          # The CLA document contributors are agreeing to.
+          path-to-document: 'https://github.com/TheZwiss/backspace/blob/main/CLA.md'
+          branch: 'cla-signatures'
+          # Accounts that never need to sign (maintainer + automation).
+          allowlist: 'TheZwiss,dependabot[bot],github-actions[bot]'
+          # The exact phrase a contributor comments to sign.
+          custom-allsigned-prcomment: 'All contributors have signed the CLA. Thank you!'
+          custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
+          custom-notsigned-prcomment: >
+            Thank you for your contribution! Before we can merge it, we need you
+            to sign our [Contributor License Agreement](https://github.com/TheZwiss/backspace/blob/main/CLA.md).
+            You keep the copyright to your work — this just grants the maintainer
+            the rights needed to use and relicense the project. To sign, post a
+            comment below with **exactly** this sentence:

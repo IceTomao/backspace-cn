@@ -1,0 +1,249 @@
+{
+  "chatPanel": {
+    "title": "聊天",
+    "close": "關閉聊天"
+  },
+  "badges": {
+    "mutedNoPermission": "已静音（无发言权限）",
+    "spaceMuted": "社区已静音",
+    "mutedSpaceDeafened": "已静音（社区已关闭声音）",
+    "spaceDeafened": "社区已关闭声音",
+    "locallyMuted": "本地静音",
+    "live": "直播中",
+    "you": "(你)"
+  },
+  "moderation": {
+    "spaceMute": "在此社区静音",
+    "spaceUnmute": "在此社区取消静音",
+    "spaceDeafen": "在此社区关闭声音",
+    "spaceUndeafen": "恢复此社区声音",
+    "disconnect": "断开连接",
+    "moveTo": "移动到"
+  },
+  "participantMenu": {
+    "watchCamera": "观看相机",
+    "stopWatchingCamera": "停止监视摄像头",
+    "muteUser": "将用户静音",
+    "userVolume": "用户音量"
+  },
+  "incomingCall": {
+    "status": "传入语音呼叫..."
+  },
+  "grid": {
+    "waitingForOthers": "正在等待其他人加入...",
+    "returnToGridHint": "单击以返回网格视图",
+    "backToGrid": "返回网格视图",
+    "gridButton": "网格",
+    "showMembers": "显示成员",
+    "hideMembers": "隐藏成员"
+  },
+  "connectionInfo": {
+    "title": "连接信息",
+    "notConnected": "未连接",
+    "gathering": "正在收集统计数据...",
+    "section": {
+      "network": "网络",
+      "audio": "音频",
+      "video": "视频"
+    },
+    "network": {
+      "ping": "Ping",
+      "packetLoss": "丢包",
+      "jitter": "抖动",
+      "server": "服务器",
+      "protocol": "协议"
+    },
+    "video": {
+      "requestedCodec": "请求的编解码器",
+      "negotiatedCodec": "协商编解码器",
+      "encoderImplementation": "编码器实现",
+      "qpDelta": "QP 增量",
+      "nackDelta": "NACK 增量",
+      "pliDelta": "PLI 增量"
+    },
+    "source": {
+      "microphone": "麦克风",
+      "camera": "摄像头",
+      "screen": "屏幕",
+      "screenAudio": "屏幕音频",
+      "unknown": "未知"
+    },
+    "remoteParticipant": "远程参与者"
+  },
+  "screenPicker": {
+    "title": "共享屏幕",
+    "tabs": {
+      "screens": "屏幕",
+      "windows": "窗户"
+    },
+    "searchWindows": "搜索窗口...",
+    "noWindowsMatch": "没有与您的搜索匹配的窗口",
+    "noScreens": "没有可用的屏幕",
+    "noWindows": "没有可用的窗口",
+    "loadingSources": "正在查找屏幕和窗口…",
+    "chooseTitle": "选择要分享的内容",
+    "chooseHint": "浏览器会询问您要分享哪个屏幕、窗口或选项卡。",
+    "chooseHintSystem": "系统将询问要共享的屏幕或窗口。",
+    "choose": "选择",
+    "chooseAgain": "重新选择",
+    "preview": "预览",
+    "audioNeedsRepick": "再次选择后，系统音频设置将适用。",
+    "cancelled": "未选择任何内容。",
+    "unsupported": "此浏览器无法共享您的屏幕。",
+    "captureFailed": "无法启动捕获。",
+    "startFailed": "无法启动流。",
+    "audioCaptureFailed": "无法使用系统音频启动捕获。如果您的系统不支持系统音频，请将其关闭。",
+    "start": "开始直播",
+    "subtitle": "选择要分享的内容，调整质量，然后开始。",
+    "stageIdle": "未选择任何内容",
+    "stageReady": "准备好了",
+    "permissionHintMac": "在Backspace拥有屏幕录制权限之前， macOS会阻止屏幕捕获。在系统设置→隐私和安全→屏幕录制中授予它，然后重试。",
+    "retrySources": "再试一次",
+    "kind": {
+      "monitor": "屏幕",
+      "window": "窗口"
+    }
+  },
+  "streamSettings": {
+    "title": "流设置",
+    "resolution": "分辨率",
+    "frameRate": "帧率",
+    "contentMode": "内容模式",
+    "mode": {
+      "gaming": "玩游戏",
+      "text": "文本"
+    },
+    "codec": "编解码器",
+    "codecOption": {
+      "vp9": "VP9",
+      "h264": "H.264/MPEG-4 AVC"
+    },
+    "bitrate": "比特率",
+    "custom": "自定义",
+    "auto": "推荐",
+    "customBitrateDisabled": "自定义比特率被管理员禁用",
+    "systemAudio": "“包含系统音频”，",
+    "chromeEchoNote": "当捕获类型支持时， Chrome可以排除Backspace音频",
+    "electronWindowsAudioNote": "不支持restrictOwnAudio时， Windows环回可能会捕获调用音频",
+    "electronMacAudioNote": "macOS 13 +需要屏幕和系统音频录制权限",
+    "electronLinuxAudioNote": "Linux需要PulseAudio兼容性；也可以捕获Backspace音频",
+    "systemAudioStartFailed": "无法使用系统音频启动流。如果此平台不支持，请禁用共享系统音频。",
+    "softwareH264Fallback": "硬件H264编码不可用。软件OpenH264正在使用中； VP9可能性能更好。",
+    "degradation": {
+      "maintainResolution": "保留分辨率",
+      "maintainFramerate": "保持帧速率",
+      "balanced": "均衡"
+    },
+    "summary": "{{bitrate}} · {{degradation}}"
+  },
+  "stream": {
+    "quality": "流媒体质量",
+    "qualityValue": "{{height}} p {{fps}} fps",
+    "volume": "流音量",
+    "attenuation": "流衰减",
+    "attenuationStrength": "衰减强度",
+    "stop": "停止流媒体",
+    "change": "更改流",
+    "stopWatching": "停止观看",
+    "watch": "观看视频流",
+    "watchShort": "观看",
+    "mute": "静音流",
+    "isStreaming": "{{name}}正在流式传输"
+  },
+  "streamDiagnostics": {
+    "publisherNetwork": "主播的网络不稳定",
+    "publisherCpu": "主播的计算机对视频的编码速度不够快",
+    "viewerNetwork": "您的连接不稳定",
+    "reconnecting": "丢失连接。重新连接。",
+    "unknown": "连接不稳定；无法确定受影响的一侧"
+  },
+  "voiceDiagnostics": {
+    "selfNetwork": "您的连接不稳定",
+    "participantNetwork": "{{name}}的连接不稳定",
+    "reconnecting": "与语音服务器的连接被中断—正在重新连接..."
+  },
+  "channelDuration": "已在频道中停留 {{duration}}",
+  "controls": {
+    "spaceMutedSelfMuted": "社区已静音（自己也已静音）",
+    "unmuteShortcut": "取消静音（M）",
+    "muteShortcut": "静音（M）",
+    "undeafenShortcut": "恢复声音（D）",
+    "deafenShortcut": "关闭声音（D）",
+    "unmute": "取消静音",
+    "mute": "静音",
+    "undeafen": "恢复声音",
+    "deafen": "关闭声音",
+    "cameraOff": "关闭摄像头",
+    "cameraOn": "要打开摄像头吗？",
+    "stopSharing": "停止共享",
+    "shareScreen": "共享屏幕",
+    "shareOptions": "屏幕共享选项",
+    "toggleChat": "切换聊天",
+    "exitFullscreen": "退出全屏(Esc)",
+    "fullscreen": "全屏",
+    "disconnect": "断开连接",
+    "connectionInfo": "连接信息",
+    "noiseSuppressionOff": "禁用AI噪声抑制",
+    "noiseSuppressionOn": "启用AI噪音抑制"
+  },
+  "status": {
+    "dmCall": "DM通话",
+    "voiceChannel": "语音频道",
+    "voiceCall": "语音通话",
+    "connectionFailed": "连接失败",
+    "connected": "语音已连接",
+    "connecting": "连接中...",
+    "reconnecting": "正在重新连接",
+    "disconnected": "已断开连接",
+    "connectionLost": "连接中断。请重试。",
+    "retry": "重试"
+  },
+  "camera": {
+    "auto": "推荐",
+    "autoSystemDefault": "自动（系统默认）",
+    "selected": "所选摄像头",
+    "fallbackName": "摄像头{{index}}",
+    "select": "选择摄像头",
+    "switch": "切换相机",
+    "turnOn": "打开摄像头",
+    "turnOff": "关闭相机"
+  },
+  "joinSheet": {
+    "peopleInVoice_one": "语音中有 {{count}} 人",
+    "peopleInVoice_other": "语音中有 {{count}} 人",
+    "switchNotice": "您将离开<current>{{current}}</current>并加入<target>{{target}}</target>",
+    "checkingCamera": "正在检查摄像头……",
+    "tapToPreview": "轻触以预览相机",
+    "cameraDenied": "相机权限被拒绝。",
+    "stopPreview": "停止预览",
+    "enablePreview": "启用相机预览",
+    "previewError": {
+      "inUse": "摄像头正在被其他应用程序使用。",
+      "unavailable": "所选摄像头不可用。",
+      "notFound": "未检测到摄像头。",
+      "failed": "无法启动相机预览。"
+    },
+    "empty": {
+      "title": "此频道中还没有人。",
+      "hint": "成为第一个加入的人"
+    },
+    "unmuteMicrophone": "取消麦克风静音",
+    "muteMicrophone": "静音麦克风",
+    "switchChannel": "切换频道",
+    "join": "加入语音"
+  },
+  "mobileCall": {
+    "collapse": "收起通话",
+    "connectedCount_one": "{{count}}已连接",
+    "connectedCount_other": "{{count}}已连接",
+    "viewMembers": "查看成员",
+    "micDenied": {
+      "title": "麦克风访问被拒绝",
+      "description": "您只是在聆听，其他人听不到您的声音。",
+      "allow": "允许使用麦克风"
+    },
+    "shareScreen": "共享屏幕",
+    "stopSharingScreen": "停止共享屏幕",
+    "disconnect": "断开通话"
+  }
+}

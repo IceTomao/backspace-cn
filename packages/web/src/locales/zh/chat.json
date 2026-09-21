@@ -1,0 +1,123 @@
+{
+  "message": {
+    "edit": {
+      "hint": "按 Esc <cancel>取消</cancel> • 按 Enter <save>保存</save>"
+    },
+    "edited": "（已编辑）",
+    "gifAlt": "GIF 动图",
+    "upload": {
+      "failed": "上传失败",
+      "discard": "丢弃"
+    },
+    "actions": {
+      "confirmDelete": "确认删除"
+    }
+  },
+  "list": {
+    "noHistoryPermission": "您无权查看此频道中的消息历史记录",
+    "loading": "正在加载消息",
+    "loadingOlder": "正在加载更早的消息…",
+    "jumpToPresent": "跳转到最新消息",
+    "welcome": {
+      "channel": {
+        "title": "欢迎来到频道",
+        "description": "这是对话的开始。"
+      },
+      "group": {
+        "intro": "这是小组对话的开始。",
+        "owner": "所有者：<owner>@{{name}}</owner>",
+        "federatedNotice": "消息分别存储在您和接收者的主实例中，未采用端到端加密。",
+        "openSettings": "打开群组设置",
+        "leave": "离开群组"
+      },
+      "dm": {
+        "fallbackName": "私信",
+        "intro": "这是您与 <strong>@{{name}}</strong> 的私信记录起点。",
+        "federatedNotice": "消息分别存储在您和接收者的主实例中，未采用端到端加密。",
+        "removeFriend": "删除好友"
+      }
+    }
+  },
+  "composer": {
+    "noPermission": "您无权在此频道中发送消息",
+    "placeholder": {
+      "channel": "发送消息到 #{{name}}",
+      "dm": "发送消息给 @{{name}}"
+    },
+    "replyingTo": "回复",
+    "cancelReply": "取消回复",
+    "removeAttachment": "删除附件",
+    "attachFile": "附加文件",
+    "uploading": "上传中…",
+    "uploadingLabel": "上传中",
+    "failedCount_one": "{{count}}失败",
+    "failedCount_other": "{{count}}失败",
+    "failedHint": "删除或重试发送失败的附件",
+    "gif": "GIF 动图",
+    "gifPicker": "GIF选取器",
+    "emoji": "表情符号",
+    "emojiPicker": "表情符号选取器",
+    "send": "发送",
+    "sendMessage": "发送消息",
+    "uploadFailed": "上传{{file}}失败： {{reason}}",
+    "uploadFailedReason": "上传失败",
+    "sendFailed": "消息发送失败"
+  },
+  "menu": {
+    "saveImage": "保存图像",
+    "copyImage": "复制图片",
+    "openOriginal": "打开原图",
+    "saveVideo": "保存视频",
+    "saveAudio": "保存音频",
+    "copyLink": "复制链接",
+    "openLink": "打开链接",
+    "copySelectedText": "复制所选文本",
+    "copyText": "复制文本",
+    "markUnread": "标记为未读",
+    "editMessage": "编辑消息",
+    "deleteMessage": "删除消息",
+    "linkCopied": "已复制链接",
+    "linkCopyFailed": "复制链接失败"
+  },
+  "attachment": {
+    "progress": {
+      "pausedTitle": "已暂停— {{percent}}"
+    },
+    "video": {
+      "cannotPlayDownload": "无法在此处播放—下载",
+      "unsupportedFormat": "不受支持的视频格式",
+      "unsupportedBrowser": "您的浏览器不支持视频播放。"
+    },
+    "audio": {
+      "unsupportedBrowser": "您的浏览器不支持音频播放。"
+    },
+    "federation": {
+      "remoteNamed": "此文件托管在 {{sender}} 的实例上。下载后可保留本地副本。",
+      "remoteUnknown": "托管在发件人的实例上。下载以保留本地副本。",
+      "partialGeneric": "某些收件人无法在本地缓存此文件。",
+      "partialInstance": "{{username}}的实例（上限： {{limit}} ）",
+      "partialList": "无法在{{instances}}缓存文件。他们仍然可以从您的位置查看。",
+      "listPair": "{{first}}和{{second}}"
+    }
+  },
+  "gif": {
+    "searchPlaceholder": "搜索 GIF",
+    "noResults": "未找到 GIF",
+    "noTrending": "无热门GIF",
+    "attribution": "由Klipy提供技术支持"
+  },
+  "preview": {
+    "save": "保存图像",
+    "copy": "复制图像",
+    "alt": "图片预览"
+  },
+  "invite": {
+    "sentBy": "{{name}}发送了邀请",
+    "memberCount_one": "{{count}} 名成员",
+    "memberCount_other": "{{count}} 名成员",
+    "revoked": "邀请已失效",
+    "join": "加入",
+    "joining": "正在加入…",
+    "joinFailed": "加入失败"
+  }
+}

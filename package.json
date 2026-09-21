@@ -1,0 +1,67 @@
+{
+  "name": "backspace",
+  "version": "1.3.0",
+  "private": true,
+  "description": "Open, self-hosted communication platform \u2014 text, voice, video, and federation",
+  "license": "AGPL-3.0-only",
+  "author": "Jannis Braun",
+  "homepage": "https://github.com/TheZwiss/backspace",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheZwiss/backspace.git"
+  },
+  "scripts": {
+    "dev:server": "pnpm --filter @backspace/server dev",
+    "dev:web": "pnpm --filter @backspace/web dev",
+    "dev": "pnpm --parallel --filter @backspace/server --filter @backspace/web dev",
+    "build:shared": "pnpm --filter @backspace/shared build",
+    "build:server": "pnpm --filter @backspace/server build",
+    "build:web": "pnpm --filter @backspace/web build",
+    "build": "pnpm --filter @backspace/shared build && pnpm --filter @backspace/server build && pnpm --filter @backspace/web build",
+    "typecheck": "pnpm --filter @backspace/shared build && pnpm -r typecheck && node scripts/check-i18n.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "test": "pnpm -r test",
+    "dev:desktop": "pnpm --filter @backspace/desktop dev",
+    "build:desktop": "pnpm --filter @backspace/desktop build",
+    "gen-icons": "node scripts/gen-icons.mjs",
+    "bump": "node scripts/bump-version.mjs"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.4",
+    "png-to-ico": "^3.0.2",
+    "png2icons": "^2.0.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "dbus-next>xml2js": "^0.6.2",
+      "dbus-next>usocket": "-",
+      "undici@^7": "^7.29.0",
+      "fast-uri@^2": "^2.4.5",
+      "fast-uri@^3": "^3.1.6",
+      "minimatch@^9": "^9.0.7",
+      "brace-expansion@^2": "^2.1.4",
+      "js-yaml@^4": "^4.3.1",
+      "@xmldom/xmldom@^0.8": "^0.8.15",
+      "form-data@^4": "^4.0.6",
+      "tmp@^0.2": "^0.2.6",
+      "picomatch@^2": "^2.3.2",
+      "picomatch@^4": "^4.0.4",
+      "postcss-selector-parser@^6": "^6.1.3",
+      "sharp@^0.35": "^0.35.4"
+    },
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "electron",
+      "sharp"
+    ],
+    "patchedDependencies": {
+      "uiohook-napi@1.5.5": "patches/uiohook-napi@1.5.5.patch"
+    }
+  },
+  "packageManager": "pnpm@10.34.3",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  }
+}

@@ -1,0 +1,296 @@
+import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Modal } from '../ui/Modal';
+import { Avatar } from '../ui/Avatar';
+import { SourceCodeLink } from '../ui/SourceCodeLink';
+import { api } from '../../api/client';
+import type { InstanceInfoResponse } from '@backspace/shared';
+import { useUIStore } from '../../stores/uiStore';
+import { useAuthStore } from '../../stores/authStore';
+import { AccountPanel } from './settingsPanels/AccountPanel';
+import { AppearancePanel } from './settingsPanels/AppearancePanel';
+import { VoicePanel } from './settingsPanels/VoicePanel';
+import { PrivacyPanel } from './settingsPanels/PrivacyPanel';
+import { ConnectionsPanel } from './settingsPanels/ConnectionsPanel';
+import { DesktopPanel } from './settingsPanels/DesktopPanel';
+import { DesktopDownloadPanel } from './settingsPanels/DesktopDownloadPanel';
+import { InstancePanel } from './settingsPanels/InstancePanel';
+import { KeybindsPanel } from './settingsPanels/KeybindsPanel';
+import { isElectron } from '../../platform/platform';
+import { useInstanceUpdateBadge } from '../../hooks/useInstanceUpdateBadge';
+import { SettingsSectionsProvider, useSettingsSectionsContext } from './SettingsSectionsContext';
+import { HiButton } from '../telemetry/answers/HiButton';
+
+type SettingsTab = 'account' | 'appearance' | 'voice' | 'privacy' | 'connections' | 'keybinds' | 'desktop' | 'instance';
+
+export function SidebarSubLinks() {
+  const ctx = useSettingsSectionsContext();
+  if (!ctx || ctx.sections.length === 0) return null;
+
+  return (
+    <div className="overflow-hidden">
+      {ctx.sections.map((section) => (
+        section.invite === true ? (
+          // Same invitation as the tab strip, sized for the narrow column.
+          <div key={section.id} className="flex px-2 py-1.5">
+            <HiButton onClick={() => ctx.scrollToSection(section.id)}>{section.label}</HiButton>
+          </div>
+        ) : (
+        <button
+          key={section.id}
+          onClick={() => ctx.scrollToSection(section.id)}
+          className={`w-full flex items-center gap-1.5 text-left pl-6 pr-2 py-1 text-xs rounded-md transition-colors ${
+            ctx.activeSection === section.id
+              ? 'text-txt-primary'
+              : 'text-txt-tertiary hover:text-txt-secondary'
+          }`}
+          aria-current={ctx.activeSection === section.id ? 'true' : undefined}
+        >
+          <span className="flex-1 min-w-0 truncate">{section.label}</span>
+          {section.badgeCount !== undefined && section.badgeCount > 0 && (
+            <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-accent-amber/15 text-accent-amber">
+              {section.badgeCount}
+            </span>
+          )}
+          {section.badgeDot === true && (
+            <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent-amber" />
+          )}
+        </button>
+        )
+      ))}
+    </div>
+  );
+}
+
+function SettingsScrollContainer({ children }: { children: React.ReactNode }) {
+  const ctx = useSettingsSectionsContext();
+  return (
+    <div ref={ctx?.scrollContainerRef} className="flex-1 min-w-0 overflow-y-auto scrollbar-thin py-6">
+      {children}
+    </div>
+  );
+}
+
+export function UserSettingsModal() {
+  const { t } = useTranslation(['settings', 'common']);
+  const activeModal = useUIStore((s) => s.activeModal);
+  const modalData = useUIStore((s) => s.modalData);
+  const closeModal = useUIStore((s) => s.closeModal);
+  const isMobile = useUIStore((s) => s.isMobile);
+  const isAdmin = useAuthStore((s) => s.user?.isAdmin);
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
+  const updateBadge = useInstanceUpdateBadge();
+
+  const [tab, setTab] = useState<SettingsTab>('account');
+  const [mobileView, setMobileView] = useState<'tabs' | 'content'>('tabs');
+  // AGPL § 13: home-instance source offer. Fetched from the public info endpoint
+  // so the source link reflects the version this instance is actually running.
+  const [instanceInfo, setInstanceInfo] = useState<InstanceInfoResponse | null>(null);
+
+  const isOpen = activeModal === 'userSettings';
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    api.instance.info()
+      .then((info) => { if (!cancelled) setInstanceInfo(info); })
+      .catch(() => { /* Non-critical — link falls back to hidden if unreachable. */ });
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
+  // Deep-linking: read modalData.tab when opening
+  useEffect(() => {
+    if (isOpen) {
+      const requested = modalData.tab as SettingsTab | undefined;
+      if (requested && ['account', 'voice', 'privacy', 'connections', 'keybinds', 'instance'].includes(requested)) {
+        // Only allow instance tab for admins
+        if (requested === 'instance' && !isAdmin) {
+          setTab('account');
+        } else {
+          setTab(requested);
+        }
+      } else {
+        setTab('account');
+      }
+      // On mobile, if deep-linking to a tab, show content directly
+      setMobileView(requested ? 'content' : 'tabs');
+    }
+  }, [isOpen, modalData.tab, isAdmin]);
+
+  const handleLogout = () => {
+    logout();
+    closeModal();
+  };
+
+  const tabClass = (target: SettingsTab) =>
+    `w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+      tab === target ? 'bg-interactive-selected text-txt-primary font-medium' : 'text-txt-tertiary hover:text-txt-secondary hover:bg-interactive-hover'
+    }`;
+
+  const handleTabClick = (target: SettingsTab) => {
+    setTab(target);
+    if (isMobile) setMobileView('content');
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={closeModal} size="settings" mobileStyle="fullscreen">
+      <SettingsSectionsProvider>
+      <div className="flex h-full">
+        {/* Desktop Sidebar */}
+        <div className="hidden desktop:flex w-52 flex-shrink-0 flex-col p-4 gap-3">
+          {/* User card */}
+          <div className="glass-bubble rounded-lg p-3 flex items-center gap-3">
+            <Avatar
+              src={user?.avatar}
+              name={user?.displayName || user?.username || ''}
+              size={36}
+              userId={user?.id}
+              avatarColor={user?.avatarColor}
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-txt-primary truncate">{user?.displayName || user?.username}</div>
+              <div className="text-xs text-txt-tertiary truncate">@{user?.username}</div>
+            </div>
+          </div>
+
+          {/* Nav list */}
+          <div className="glass-bubble rounded-lg p-2 flex-1 flex flex-col">
+            <div className="text-[10px] font-semibold text-txt-tertiary uppercase tracking-wider px-3 py-1">{t('settings:nav.userSettings')}</div>
+            <button onClick={() => handleTabClick('account')} className={tabClass('account')}>{t('settings:nav.tabs.account')}</button>
+            <button onClick={() => handleTabClick('appearance')} className={tabClass('appearance')}>{t('settings:nav.tabs.appearance')}</button>
+            <button onClick={() => handleTabClick('voice')} className={tabClass('voice')}>{t('settings:nav.tabs.voice')}</button>
+            <button onClick={() => handleTabClick('privacy')} className={tabClass('privacy')}>{t('settings:nav.tabs.privacy')}</button>
+
+            <div className="border-t border-white/[0.04] my-2 mx-2" />
+            <div className="text-[10px] font-semibold text-txt-tertiary uppercase tracking-wider px-3 py-1">{t('settings:nav.appSettings')}</div>
+            <button onClick={() => handleTabClick('connections')} className={tabClass('connections')}>{t('settings:nav.tabs.connections')}</button>
+            <button onClick={() => handleTabClick('keybinds')} className={tabClass('keybinds')}>{t('settings:nav.tabs.keybinds')}</button>
+            <button onClick={() => handleTabClick('desktop')} className={tabClass('desktop')}>{t('settings:nav.tabs.desktop')}</button>
+
+            {isAdmin && (
+              <>
+                <div className="border-t border-white/[0.04] my-2 mx-2" />
+                <div className="text-[10px] font-semibold text-txt-tertiary uppercase tracking-wider px-3 py-1">{t('settings:nav.administration')}</div>
+                <button
+                  onClick={() => handleTabClick('instance')}
+                  className={`${tabClass('instance')} flex items-center gap-1.5`}
+                >
+                  <span className="flex-1 min-w-0 truncate">{t('settings:nav.tabs.instance')}</span>
+                  {updateBadge && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent-amber" />}
+                </button>
+                {tab === 'instance' && <SidebarSubLinks />}
+              </>
+            )}
+
+            <div className="flex-1" />
+
+            <div className="border-t border-white/[0.04] my-2 mx-2" />
+            <button
+              onClick={handleLogout}
+              className="w-full text-left px-3 py-2 rounded-md text-sm text-txt-danger hover:bg-accent-rose/10 transition-colors"
+            >
+              {t('settings:nav.logOut')}
+            </button>
+
+            {instanceInfo && (
+              <div className="px-3 pt-2">
+                <SourceCodeLink sourceCodeUrl={instanceInfo.sourceCodeUrl} version={instanceInfo.version} commit={instanceInfo.commit} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Mobile: Tab list */}
+        {isMobile && mobileView === 'tabs' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {/* Mobile user card */}
+            <div className="glass-bubble rounded-lg p-3 flex items-center gap-3">
+              <Avatar
+                src={user?.avatar}
+                name={user?.displayName || user?.username || ''}
+                size={36}
+                userId={user?.id}
+                avatarColor={user?.avatarColor}
+              />
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-txt-primary truncate">{user?.displayName || user?.username}</div>
+                <div className="text-xs text-txt-tertiary truncate">@{user?.username}</div>
+              </div>
+            </div>
+
+            <div className="glass-bubble rounded-lg p-2 space-y-0.5">
+              <div className="text-[10px] font-semibold text-txt-tertiary uppercase tracking-wider px-3 py-1">{t('settings:nav.userSettings')}</div>
+              <button onClick={() => handleTabClick('account')} className={tabClass('account')}>{t('settings:nav.tabs.account')}</button>
+              <button onClick={() => handleTabClick('appearance')} className={tabClass('appearance')}>{t('settings:nav.tabs.appearance')}</button>
+              <button onClick={() => handleTabClick('voice')} className={tabClass('voice')}>{t('settings:nav.tabs.voice')}</button>
+              <button onClick={() => handleTabClick('privacy')} className={tabClass('privacy')}>{t('settings:nav.tabs.privacy')}</button>
+
+              <div className="border-t border-white/[0.04] my-2 mx-2" />
+              <div className="text-[10px] font-semibold text-txt-tertiary uppercase tracking-wider px-3 py-1">{t('settings:nav.appSettings')}</div>
+              <button onClick={() => handleTabClick('connections')} className={tabClass('connections')}>{t('settings:nav.tabs.connections')}</button>
+              <button onClick={() => handleTabClick('keybinds')} className={tabClass('keybinds')}>{t('settings:nav.tabs.keybinds')}</button>
+              <button onClick={() => handleTabClick('desktop')} className={tabClass('desktop')}>{t('settings:nav.tabs.desktop')}</button>
+
+              {isAdmin && (
+                <>
+                  <div className="border-t border-white/[0.04] my-2 mx-2" />
+                  <div className="text-[10px] font-semibold text-txt-tertiary uppercase tracking-wider px-3 py-1">{t('settings:nav.administration')}</div>
+                  <button onClick={() => handleTabClick('instance')} className={tabClass('instance')}>{t('settings:nav.tabs.instance')}</button>
+                </>
+              )}
+
+              <div className="border-t border-white/[0.04] my-2 mx-2" />
+              <button
+                onClick={handleLogout}
+                className="w-full text-left px-3 py-2 rounded-md text-sm text-txt-danger hover:bg-accent-rose/10 transition-colors"
+              >
+                {t('settings:nav.logOut')}
+              </button>
+
+              {instanceInfo && (
+                <div className="px-3 pt-2">
+                  <SourceCodeLink sourceCodeUrl={instanceInfo.sourceCodeUrl} version={instanceInfo.version} commit={instanceInfo.commit} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Content area (desktop always, mobile only when viewing content) */}
+        {(!isMobile || mobileView === 'content') && (
+          <SettingsScrollContainer>
+            <div className="px-6 max-w-[640px] mx-auto">
+              {/* Mobile back button */}
+              {isMobile && (
+                <button
+                  onClick={() => setMobileView('tabs')}
+                  className="flex items-center gap-1.5 text-txt-tertiary hover:text-txt-secondary mb-4 text-sm"
+                  aria-label={t('settings:nav.backToMenu')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+                  </svg>
+                  {t('common:labels.settings')}
+                </button>
+              )}
+              {tab === 'account' && <AccountPanel />}
+              {tab === 'appearance' && <AppearancePanel />}
+              {tab === 'voice' && <VoicePanel />}
+              {tab === 'privacy' && <PrivacyPanel />}
+              {tab === 'connections' && <ConnectionsPanel />}
+              {tab === 'keybinds' && <KeybindsPanel />}
+              {tab === 'desktop' && (
+                isElectron()
+                  ? <DesktopPanel />
+                  : <DesktopDownloadPanel version={instanceInfo?.version ?? null} />
+              )}
+              {tab === 'instance' && isAdmin && <InstancePanel />}
+            </div>
+          </SettingsScrollContainer>
+        )}
+      </div>
+      </SettingsSectionsProvider>
+    </Modal>
+  );
+}

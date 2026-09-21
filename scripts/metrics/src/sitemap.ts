@@ -1,0 +1,87 @@
+/**
+ * The sitemap for the published site.
+ *
+ * Written at deploy time rather than committed, because two of the three
+ * pages change whenever the collector runs and a `lastmod` that lies is worse
+ * than no `lastmod` at all: a crawler that has been told a page is unchanged
+ * has been given a reason not to come back.
+ *
+ * `robots.txt` is only honoured at a domain root. The site now serves at the
+ * root of its own domain, so `site/robots.txt` declares this sitemap by URL
+ * and the two are published together. That was not always true: as a project
+ * page under `thezwiss.github.io/backspace/` this file was the only discovery
+ * signal the repository could publish for itself, which is why it is written
+ * whether or not anything references it. A sitemap at a known URL can also be
+ * submitted to a search console directly.
+ */
+
+export interface SitemapEntry {
+  /** Path relative to the site root, e.g. `insights/`. Empty string is the root. */
+  path: string;
+  /** `YYYY-MM-DD`, omitted when nothing dates the page. */
+  lastmod?: string;
+  changefreq: string;
+  priority: string;
+}
+
+/**
+ * Escapes the five characters XML reserves. The URLs here are built from a
+ * configured site URL and fixed paths rather than from archive data, so this
+ * is defence against a malformed configuration rather than against content —
+ * but an unescaped `&` in a site URL produces a sitemap no crawler will
+ * parse, and it would fail silently at the consumer rather than here.
+ */
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+export function renderSitemap(siteUrl: string, entries: readonly SitemapEntry[]): string {
+  const base = siteUrl.replace(/\/+$/, '');
+  const urls = entries.map((entry) => {
+    const loc = escapeXml(entry.path === '' ? `${base}/` : `${base}/${entry.path}`);
+    const lastmod = entry.lastmod === undefined ? '' : `\n    <lastmod>${escapeXml(entry.lastmod)}</lastmod>`;
+    return (
+      '  <url>\n' +
+      `    <loc>${loc}</loc>${lastmod}\n` +
+      `    <changefreq>${escapeXml(entry.changefreq)}</changefreq>\n` +
+      `    <priority>${escapeXml(entry.priority)}</priority>\n` +
+      '  </url>'
+    );
+  });
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    urls.join('\n') +
+    '\n</urlset>\n'
+  );
+}
+
+/**
+ * The four published pages.
+ *
+ * `lastmod` on the two data pages is the date the archive was last collected,
+ * not the date this ran: they are rebuilt on every deploy, but their CONTENT
+ * only changes when a collection adds a row, and `lastmod` describes content.
+ * The two landing pages carry none — nothing in this pipeline knows when they
+ * last changed, and inventing a date would be the same lie in miniature.
+ *
+ * `ru/` is the Russian translation of the landing page, not a separate
+ * document: the two declare each other with `hreflang`, and a sitemap that
+ * listed only one of them would leave the pair discoverable from one side
+ * only. It takes a lower priority than the root because the root is also the
+ * `x-default`.
+ */
+export function siteEntries(archiveDate: string | null): SitemapEntry[] {
+  const dated = archiveDate === null ? {} : { lastmod: archiveDate };
+  return [
+    { path: '', changefreq: 'weekly', priority: '1.0' },
+    { path: 'ru/', changefreq: 'weekly', priority: '0.9' },
+    { path: 'insights/', ...dated, changefreq: 'daily', priority: '0.8' },
+    { path: 'insights/data/', ...dated, changefreq: 'daily', priority: '0.7' },
+  ];
+}

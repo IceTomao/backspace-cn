@@ -1,0 +1,7 @@
+{
+  "you": {
+    "editProfile": "Profil bearbeiten",
+    "homeInstance": "Heimatinstanz: {{domain}}",
+    "logOutConfirm": "Möchtest du dich wirklich abmelden?"
+  }
+}

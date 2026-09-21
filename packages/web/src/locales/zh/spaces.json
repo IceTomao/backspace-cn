@@ -1,0 +1,517 @@
+{
+  "create": {
+    "title": "创建社区",
+    "icon": {
+      "upload": "上传",
+      "previewAlt": "图标预览",
+      "colorLabel": "图标颜色",
+      "cropTitle": "社区图标",
+      "uploadFailed": "上传失败"
+    },
+    "name": {
+      "label": "社区名称",
+      "placeholder": "我的社区",
+      "required": "请输入社区名称"
+    },
+    "visibilityLabel": "可见性",
+    "description": {
+      "label": "描述",
+      "placeholder": "简单介绍一下您的社区……",
+      "counter": "{{length}}/{{max}}"
+    },
+    "submit": "创建",
+    "submitting": "正在创建…"
+  },
+  "channel": {
+    "create": {
+      "title": "建立频道",
+      "typeLabel": "频道类型",
+      "types": {
+        "text": {
+          "name": "文本",
+          "description": "发送消息、图像和文件"
+        },
+        "voice": {
+          "name": "语音",
+          "description": "使用语音和视频聊天"
+        }
+      },
+      "nameLabel": "频道名称",
+      "namePlaceholder": "新频道",
+      "topicLabel": "主题（可选）",
+      "topicPlaceholder": "这个频道是关于什么的？",
+      "categoryLabel": "类别",
+      "noCategory": "无类别",
+      "nameRequired": "请输入频道名称。",
+      "noSpaceSelected": "未选择社区",
+      "submit": "创建频道",
+      "submitting": "正在创建…"
+    },
+    "settings": {
+      "title": "频道设置",
+      "channelLabel": "频道",
+      "private": {
+        "label": "非公开频道",
+        "description": "只有选定的成员和角色才能查看此频道。",
+        "note": "此频道会对未明确授权的成员隐藏。管理员和社区所有者始终可以查看所有频道。"
+      },
+      "deleteButton": "删除频道"
+    },
+    "delete": {
+      "title": "删除# {{name}} ？",
+      "description": "这将永久删除<strong> # {{name}}</strong>及其所有消息。此操作无法撤消。",
+      "descriptionVoice": "这将永久删除<strong> # {{name}}</strong>及其所有消息。当前在此语音频道中的任何用户都将被断开连接。此操作无法撤消。",
+      "confirm": "删除频道"
+    }
+  },
+  "category": {
+    "create": {
+      "title": "创建类别",
+      "nameLabel": "类别名称",
+      "namePlaceholder": "新类别",
+      "nameRequired": "分类名称为必填",
+      "noSpaceSelected": "未选择社区",
+      "submit": "创建类别",
+      "submitting": "正在创建…"
+    },
+    "settings": {
+      "title": "分类设置",
+      "categoryLabel": "类别",
+      "private": {
+        "label": "私人分类",
+        "description": "只有选定的成员和角色才能查看此类别中的频道。",
+        "note": "此类别会对未明确授权的成员隐藏。类别内的频道会继承此限制，除非单独覆盖。"
+      },
+      "deleteButton": "删除类别"
+    },
+    "delete": {
+      "title": "删除「{{name}}」？",
+      "description": "这将永久删除<strong>{{name}}</strong>类别。其中的频道将被移动到顶层。此操作无法撤消。",
+      "confirm": "删除类别"
+    }
+  },
+  "invite": {
+    "title": "邀请朋友",
+    "intro": "发送给好友或分享链接。",
+    "requestOnly": {
+      "notice": "此社区采用加入申请。用户需要管理员批准，因此没有可分享的邀请链接。",
+      "dismiss": "明白"
+    },
+    "searchPlaceholder": "搜索好友...",
+    "noMatches": "没有好友符合您的搜索条件",
+    "noFriends": "还没有朋友",
+    "alreadyMember": "您已加入该社区",
+    "removeSelected": "移除{{name}}",
+    "selectFriends": "选择好友",
+    "send_one": "发送{{count}}邀请",
+    "send_other": "发送{{count}}邀请",
+    "sending": "发送中……",
+    "retryFailed": "重试失败",
+    "status": {
+      "sent": "已发送",
+      "failed": "✗ {{reason}}"
+    },
+    "shareLink": "分享链接",
+    "generating": "生成...",
+    "generateFailed": "无法生成邀请链接",
+    "failure": {
+      "inviteInvalid": "邀请链接不再有效",
+      "notAFriend": "不是好友",
+      "userNotFound": "未找到用户",
+      "alreadyMember": "已经是成员",
+      "upstream": "无法验证邀请，请重试",
+      "cannotInviteSelf": "无法邀请自己",
+      "invalidBody": "无效请求",
+      "invalidTarget": "目标无效",
+      "unreachable": "无法连接到您的实例",
+      "serverError": "无法发送（服务器错误）"
+    }
+  },
+  "join": {
+    "title": "加入社区",
+    "discoverIntro": "查看可加入的社区，或前往“探索”浏览全部社区。",
+    "discoverError": "暂时无法加载可发现的社区。您仍可使用下方的邀请码加入。",
+    "discoverEmpty": "暂无可探索的社区。请在下方输入邀请码，或稍后再试。",
+    "browseExplore": "在“浏览”中浏览全部",
+    "discoveryOff": "此实例已关闭社区发现。您仍可使用邀请码加入。",
+    "inviteDivider": "有邀请码吗？",
+    "invitePlaceholder": "例如abc123或https://instance.com/join/abc123",
+    "submit": "加入社区",
+    "submitting": "正在加入…",
+    "connect": {
+      "intro": "请连接到<host>{{host}}</host>以加入此社区。",
+      "passwordLabel": "输入您的密码以连接",
+      "passwordPlaceholder": "您的账号密码",
+      "passwordNote": "您的密码由主实例验证，绝不会发送至{{host}}。该实例只会收到专门签发的凭据。",
+      "submit": "连接并加入",
+      "submitting": "连接中..."
+    },
+    "fallback": {
+      "notice": "{{host}}上已存在一个账号，且不接受您的主实例签发的凭据。请使用该实例的原密码登录；之后将自动改用签发的凭据。",
+      "usernamePlaceholder": "您在此实例上的用户名",
+      "passwordLabel": "此实例的密码",
+      "passwordPlaceholder": "远程实例上的密码",
+      "submit": "登录并加入",
+      "submitting": "正在登录……"
+    }
+  },
+  "explore": {
+    "title": "探索",
+    "searchPlaceholder": "搜索社区…",
+    "discoveryDisabled": "实例管理员已禁用社区发现。",
+    "noMatches": "没有符合搜索条件的社区。",
+    "empty": "暂无可探索的社区。",
+    "allJoined": "您已加入所有可发现的社区",
+    "joinedSection": "已加入",
+    "badges": {
+      "joined": "已加入",
+      "public": "公开",
+      "request": "请求"
+    },
+    "noDescription": "无说明",
+    "memberCount_one": "{{count}} 位成员",
+    "memberCount_other": "{{count}}位成员",
+    "viewSpace": "查看社区",
+    "join": "加入社区",
+    "joining": "正在加入…",
+    "requestPending": "申请待处理",
+    "requestMessagePlaceholder": "您为什么想加入？ （选填）",
+    "sendRequest": "发送请求",
+    "sendingRequest": "发送中……",
+    "requestToJoin": "请求加入",
+    "preview": {
+      "join": "加入",
+      "joining": "加入",
+      "pending": "待定",
+      "request": "请求",
+      "sending": "发送中…"
+    }
+  },
+  "settings": {
+    "title": "社区设置",
+    "backAria": "返回社区设置菜单",
+    "nav": {
+      "general": "常规",
+      "management": "管理",
+      "tabs": {
+        "overview": "概述",
+        "discovery": "探索",
+        "roles": "角色",
+        "bans": "封禁"
+      }
+    },
+    "discardChanges": "丢弃",
+    "overview": {
+      "identity": "社区信息",
+      "iconLabel": "社区图标",
+      "iconAlt": "社区图标",
+      "colorLabel": "图标颜色",
+      "bannerLabel": "社区横幅",
+      "bannerAlt": "社区横幅",
+      "uploadBanner": "上传横幅（ 16: 9 ）",
+      "removeBanner": "移除横幅",
+      "nameLabel": "社区名称",
+      "iconUploadFailed": "上传失败",
+      "bannerUploadFailed": "横幅上传失败",
+      "cropIconTitle": "裁剪社区图标",
+      "cropBannerTitle": "裁剪社区横幅",
+      "transfer": {
+        "description": "将所有权转让给其他成员。您将成为普通成员。",
+        "prompt": "将所有权转让给<strong>{{name}}</strong> ？",
+        "button": "转移所有权",
+        "confirm": "移交",
+        "transferring": "正在转移…",
+        "success": "所有权转移至{{name}}",
+        "failed": "所有权转让失败"
+      },
+      "delete": {
+        "description": "永久删除此社区及其全部数据。此操作无法撤销。",
+        "button": "删除社区",
+        "confirmAgain": "再次单击以确认删除",
+        "failed": "删除社区失败"
+      }
+    },
+    "discovery": {
+      "title": "探索",
+      "disabledNotice": "实例管理员已禁用社区发现。在重新启用前，更改可见性不会生效。",
+      "visibility": {
+        "label": "可见性",
+        "hint": "控制谁可以发现和加入此社区。",
+        "options": {
+          "private": {
+            "label": "私密",
+            "description": "只有拥有邀请链接的人员才能加入"
+          },
+          "request": {
+            "label": "请求加入",
+            "description": "在“浏览”中可见；人们可以请求加入"
+          },
+          "public": {
+            "label": "公开",
+            "description": "在“浏览”中可见；任何人都可以立即加入"
+          }
+        }
+      },
+      "description": {
+        "label": "描述",
+        "hint": "“浏览”页面上显示的简短摘要。",
+        "placeholder": "浏览页面的简短说明...",
+        "counter": "{{length}}/{{max}}"
+      },
+      "requests": {
+        "title": "待处理的加入请求",
+        "empty": "没有待处理的请求",
+        "actionFailed": "操作失败"
+      }
+    },
+    "members": {
+      "description": "管理此社区的成员。点击成员可编辑其角色。",
+      "listHeading": "成员({{total}})",
+      "owner": "所有者",
+      "noRoles": "角色：",
+      "ban": "拉黑",
+      "kick": "踢",
+      "confirm": {
+        "banTitle": "封禁{{name}}",
+        "kickTitle": "踢出{{name}}",
+        "banDescription": "解除封禁前，该用户无法重新加入此社区。",
+        "kickDescription": "他们可以通过邀请链接重新加入。"
+      },
+      "updateRolesFailed": "更新角色失败",
+      "kickFailed": "踢出成员失败",
+      "banFailed": "封禁成员失败"
+    }
+  },
+  "bans": {
+    "title": "封禁",
+    "description": "被封禁的用户在解除封禁前无法重新加入此社区。",
+    "loading": "正在加载封禁……",
+    "empty": "没有被封禁的用户",
+    "listHeading": "封禁（ {{total}} ）",
+    "bannedBy": "被{{moderator}}在{{date}}封禁",
+    "bannedByWithReason": "被{{moderator}}在{{date}}封禁： {{reason}}",
+    "unban": "解除封禁",
+    "loadFailed": "加载失败",
+    "unbanFailed": "无法解禁用户"
+  },
+  "roles": {
+    "title": "角色",
+    "create": "创建角色",
+    "creating": "正在创建…",
+    "listHeading": "角色",
+    "description": "角色决定成员拥有的权限。排序更高的角色优先。",
+    "defaultName": "新增角色",
+    "copyName": "{{name}}的副本",
+    "backToList": "返回到角色列表",
+    "created": "角色已创建。在下面自定义它。",
+    "identity": "基本信息",
+    "nameLabel": "角色名称",
+    "colorLabel": "角色颜色",
+    "nameEmpty": "角色名称不能为空。",
+    "nameDuplicate": "已存在同名角色",
+    "groups": {
+      "general": "常规",
+      "text": "文本",
+      "voice": "语音"
+    },
+    "saved": "设置已保存",
+    "copy": "复制角色组",
+    "copying": "复制中……",
+    "delete": "删除角色",
+    "deleting": "正在删除…",
+    "confirmDelete": "确认？",
+    "createFailed": "创建角色失败",
+    "saveFailed": "保存失败",
+    "deleteFailed": "删除角色失败",
+    "copyFailed": "复制失败"
+  },
+  "permissions": {
+    "title": "权限",
+    "names": {
+      "administrator": "管理权限",
+      "viewChannel": "查看所有频道",
+      "manageChannels": "管理频道",
+      "manageRoles": "管理角色",
+      "manageSpace": "管理社区",
+      "createInvite": "创建邀请",
+      "kickMembers": "踢出成员",
+      "banMembers": "封禁成员",
+      "sendMessages": "发送消息",
+      "manageMessages": "管理聊天消息",
+      "attachFiles": "附上文件",
+      "readMessageHistory": "查看历史消息",
+      "addReactions": "添加反应",
+      "connect": "连接",
+      "speak": "发言",
+      "muteMembers": "将成员静音",
+      "deafenMembers": "关闭成员声音",
+      "moveMembers": "移动成员",
+      "stream": "直播",
+      "disconnectMembers": "断开与成员的连接"
+    },
+    "tristate": {
+      "deny": "拒绝",
+      "neutral": "中立（继承）",
+      "allow": "允许"
+    },
+    "overrideCount_one": "{{count}}覆盖",
+    "overrideCount_other": "{{count}}覆盖",
+    "removeOverride": "清除覆盖",
+    "roleOverrides": "角色重设",
+    "memberOverrides": "成员覆盖",
+    "addRole": "添加角色",
+    "addMember": "添加成员",
+    "noMoreRoles": "没有更多要添加的角色",
+    "loadFailed": "加载覆盖失败",
+    "saveFailed": "保存覆盖失败",
+    "partialFailure_one": "{{count}}覆盖保存失败",
+    "partialFailure_other": "{{count}}覆盖保存失败"
+  },
+  "sidebar": {
+    "directMessages": "私信",
+    "addSpace": "添加社区",
+    "joinSpace": "加入社区",
+    "exploreSpaces": "探索社区",
+    "folder": {
+      "tooltip_one": "文件夹({{count}})",
+      "tooltip_other": "文件夹({{count}})",
+      "spaceCount_one": "{{count}} 个社区",
+      "spaceCount_other": "{{count}} 个社区",
+      "unnamed": "未命名文件夹",
+      "rename": "重命名文件夹",
+      "color": "文件夹颜色",
+      "create": "创建文件夹",
+      "moveTo": "移至文件夹",
+      "removeFrom": "从文件夹中删除",
+      "ungroup": "拆解",
+      "created": "已创建文件夹",
+      "moved": "已移至文件夹",
+      "removed": "已从文件夹中移除。",
+      "ungrouped": "文件夹已取消分组"
+    },
+    "space": {
+      "inviteCopied": "链接到剪贴板",
+      "inviteFailed": "无法生成邀请",
+      "transferOwnership": "转移所有权",
+      "settings": "社区设置",
+      "leave": "退出社区",
+      "reconnecting": "正在重新连接至{{instance}} …",
+      "remoteInstance": "远程实例",
+      "leaveConfirm": {
+        "title": "退出社区",
+        "titleNamed": "离开{{name}}",
+        "description": "确定要退出此社区吗？再次加入时需要新的邀请。"
+      },
+      "left": "已退出社区",
+      "leaveFailed": "退出社区失败"
+    },
+    "dmList": {
+      "comingSoon": "敬请期待",
+      "newDm": "新建私信",
+      "empty": "尚无对话",
+      "leaveGroup": "离开群组",
+      "leaveGroupConfirm": {
+        "title": "离开群组",
+        "description": "您确定要离开吗？除非有人重新添加您，否则您将无法重新加入。"
+      }
+    },
+    "userArea": {
+      "inputDevice": "输入设备",
+      "outputDevice": "输出设备",
+      "inputDevices": "输入设备",
+      "outputDevices": "输出设备",
+      "inputVolume": "输入音量",
+      "outputVolume": "输出音量",
+      "systemDefault": "系统默认",
+      "microphonePermission": "需要麦克风权限。",
+      "audioPermission": "需要音频权限。",
+      "enable": "启用",
+      "voiceSettings": "语音设置",
+      "mute": "静音",
+      "unmute": "取消静音",
+      "deafen": "关闭声音",
+      "undeafen": "恢复声音",
+      "spaceMuted": "社区已静音",
+      "spaceDeafened": "社区已关闭声音",
+      "permissionMuted": "已静音（无发言权限）"
+    }
+  },
+  "channels": {
+    "loading": "正在加载频道",
+    "create": "建立频道",
+    "createCategory": "创建类别",
+    "settings": "频道设置",
+    "categorySettings": "分类设置",
+    "delete": "删除频道",
+    "deleteCategory": "删除类别",
+    "emptyCategory": "没有频道",
+    "empty": "没有频道。",
+    "deleteConfirm": {
+      "title": "删除频道",
+      "description": "您确定吗？这将永久删除频道及其所有消息。"
+    },
+    "deleteCategoryConfirm": {
+      "title": "删除类别",
+      "description": "您确定要删除此类别吗？此类别中的频道将被移动到未分类—不会删除任何频道。"
+    },
+    "deleted": "频道已删除",
+    "deleteFailed": "删除频道失败",
+    "categoryDeleted": "分类已删除。",
+    "categoryDeleteFailed": "分类删除失败。"
+  },
+  "members": {
+    "titleWithCount_one": "成员— {{count}}",
+    "titleWithCount_other": "成员— {{count}}",
+    "loading": "正在加载成员...",
+    "groups": {
+      "owner": "所有者"
+    }
+  },
+  "mobile": {
+    "addSheet": {
+      "createSpace": "创建社区",
+      "joinSpace": "加入社区",
+      "exploreSpaces": "探索社区"
+    },
+    "muteUser": "将用户静音"
+  },
+  "main": {
+    "selectChannel": "选择频道",
+    "selectChannelHint": "选择文本或语音频道以开始",
+    "notificationSettings": "通知设置",
+    "voice": {
+      "connectionFailed": "连接失败",
+      "connected": "已连接",
+      "connecting": "连接中…",
+      "participants_one": "{{count}}已连接",
+      "participants_other": "{{count}}已连接",
+      "inCall_one": "{{count}}通话中",
+      "inCall_other": "{{count}}通话中",
+      "empty": "此语音频道中当前没有人。",
+      "join": "加入语音"
+    },
+    "dm": {
+      "fallbackName": "私信",
+      "composerPlaceholder": "消息{{target}}",
+      "calling": "正在致电{{name}} …",
+      "groupSettings": "群组设置",
+      "openGroupSettings": "群组设置",
+      "memberCount_one": "（{{count}} 名成员）",
+      "memberCount_other": "（ {{count}}名成员）",
+      "startVoiceCall": "开始语音通话",
+      "startVideoCall": "开始视频",
+      "addFriends": "将好友添加到DM"
+    }
+  },
+  "ownership": {
+    "title": "转移所有权",
+    "description": "选择一名成员成为<name>{{name}}</name>的新所有者",
+    "confirmQuestion": "将<name>{{space}}</name>的所有权转让给<name>{{member}}</name>?",
+    "regularMember": "您将成为普通成员。",
+    "transferring": "正在转移...",
+    "confirm": "移交",
+    "loading": "正在加载成员...",
+    "success": "所有权转移至{{name}}",
+    "failed": "所有权转让失败"
+  }
+}

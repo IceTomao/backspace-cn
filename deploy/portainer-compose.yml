@@ -1,0 +1,85 @@
+# Backspace 中文版 - Portainer Stack
+#
+# 使用前：
+# 1. 将 backspace-cn_1.3.0.tar 导入 Portainer 的镜像库。
+# 2. 在 Portainer Stack 的 Environment variables 中设置：
+#    DOMAIN, LIVEKIT_URL, JWT_SECRET, LIVEKIT_API_KEY, LIVEKIT_API_SECRET,
+#    LIVEKIT_TURN_DOMAIN。
+# 3. 此 Stack 不包含反向代理。Lucky 负责 HTTPS、域名转发。
+#    Backspace 对外提供 3000，LiveKit 信令使用主机 7880。
+#
+# 语音、视频和屏幕共享已默认启用。不要在 Cloudflare Tunnel 等 HTTP 隧道
+# 后使用本 Stack 的语音功能，WebRTC 的 UDP 媒体流无法穿过该类隧道。
+
+services:
+  backspace:
+    image: backspace-cn:1.3.0
+    container_name: backspace
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      DB_PATH: /app/data/backspace.db
+      UPLOAD_DIR: /app/data/uploads
+      DOMAIN: ${DOMAIN:?请在 Portainer 设置 DOMAIN，例如 chat.example.com}
+      JWT_SECRET: ${JWT_SECRET:?请在 Portainer 设置 JWT_SECRET}
+      REGISTRATION_OPEN: "true"
+      MAX_UPLOAD_SIZE: "104857600"
+      LIVEKIT_URL: ${LIVEKIT_URL:?请在 Portainer 设置 LIVEKIT_URL，例如 wss://voice.example.com:18443}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?请在 Portainer 设置 LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?请在 Portainer 设置 LIVEKIT_API_SECRET}
+      LIVEKIT_TURN_DOMAIN: ${LIVEKIT_TURN_DOMAIN:?请在 Portainer 设置 LIVEKIT_TURN_DOMAIN，例如 chat.example.com}
+    volumes:
+      - backspace-data:/app/data
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    networks:
+      - backspace-internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  livekit:
+    image: livekit/livekit-server:v1.9.11
+    container_name: backspace-livekit
+    restart: unless-stopped
+    network_mode: host
+    configs:
+      - source: livekit_config
+        target: /etc/livekit.yaml
+    command: --config /etc/livekit.yaml
+
+networks:
+  backspace-internal:
+    driver: bridge
+
+volumes:
+  backspace-data:
+
+configs:
+  livekit_config:
+    content: |
+      port: 7880
+      rtc:
+        tcp_port: 7881
+        # Single UDP mux port for a small self-hosted deployment.
+        udp_port: 7882
+        use_external_ip: true
+      turn:
+        enabled: true
+        domain: ${LIVEKIT_TURN_DOMAIN}
+        udp_port: 3478
+        relay_range_start: 30000
+        relay_range_end: 30010
+      keys:
+        ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+      room:
+        auto_create: true
+        empty_timeout: 300
+        departure_timeout: 20
+      logging:
+        level: info

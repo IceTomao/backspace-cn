@@ -1,0 +1,242 @@
+# Contributing to Backspace
+
+Thanks for considering a contribution! Backspace is free and open source software
+(GNU AGPL-3.0, with a commercial dual-license option), and contributions of all
+sizes are welcome: bug reports, fixes, features, documentation, and design.
+
+## Before you start
+
+- **Read the architecture docs.** The `docs/systems/` directory documents every
+  subsystem (database, API, WebSocket protocol, federation, permissions, voice,
+  design system, and more). Read the relevant spec before changing a subsystem,
+  and update it in the same pull request if your change is structural.
+- **Open an issue first for anything non-trivial.** It saves you from building
+  something that conflicts with planned direction. Small fixes can go straight
+  to a pull request.
+- **Architectural changes need an approved design before any code.** See
+  [Design before code](#design-before-code) below for what counts and how it
+  works. Opening an issue is not the same as agreeing a design: wait for a
+  maintainer to say "approved to implement" before you branch.
+- **One logical change per pull request.** Keep diffs focused and reviewable.
+- **Keep pull requests small enough to review.** Review capacity is the
+  bottleneck on this project, not authoring capacity. A change touching a
+  hundred files waits longer than five changes touching twenty, and may be asked
+  to split. If something is genuinely large and indivisible, it needs a design
+  proposal first (see below).
+- **You own your diff.** Use whatever tools you like, including AI assistants;
+  nobody will ask. What matters is that you have run it, and that it does not
+  contain two solutions to the same problem sitting side by side. Code the
+  author has not verified is the only kind of contribution that costs more to
+  review than it did to write. If you work with an agent, see
+  [Working with AI agents](#working-with-ai-agents).
+
+## Design before code
+
+Some changes set a rule that every later contributor has to follow, or close
+off a path the project may need later. For those, a short conversation before
+the code is the difference between a change that merges and one that gets
+reworked after it is finished. The point of this section is to protect your
+time, not to add a hurdle: the discussion is the same either way, and it is
+much cheaper before the implementation exists. Backspace has one maintainer
+and the last call is his, but the discussion is not his alone: proposals are
+open threads, and other contributors' arguments shape the decision.
+
+A change is architectural, and needs a design proposal, if it does any of:
+
+- introduces a mechanism or convention that other code must comply with from
+  then on (a global event bus, a new state layer, a required wrapper around a
+  browser API, a naming or file-layout rule);
+- adds a framework-level dependency, a build tool, or a new runtime mode or
+  platform layer (an ordinary library falls under the dependency rule below
+  and only needs a sentence in the issue);
+- changes the database schema, a REST or WebSocket contract, the federation
+  protocol, the permission model, or the preload bridge between the desktop
+  shell and the web client;
+- spans more than two subsystems in `docs/systems/` with one mechanism.
+
+When in doubt, ask on the issue. The answer "no proposal needed" takes a
+maintainer a minute; an unwanted rewrite takes days on both sides.
+
+How it works:
+
+1. Open an issue with the **Design proposal** template. State the problem, the
+   approach you intend to take, the alternatives you considered and why they
+   lost, and what other contributors will have to do differently afterwards.
+   A few paragraphs is the normal size. Prototyping to find out whether the
+   idea works is fine and often helps the discussion; just do not polish
+   before the approach is agreed, because it may change.
+2. The proposal is open for discussion by anyone. If you have worked on the
+   subsystems involved, weigh in; `git log` on the files a proposal would
+   touch shows who else has, and mentioning them is welcome. The maintainer
+   makes the final call, normally within a few days, and waits a little
+   longer while a discussion is active. The call is "approved to implement",
+   questions, or, for the largest decisions, a request to write it up as an
+   ADR in `docs/decisions/` so the reasoning outlives the pull request. A
+   proposal that several contributors have argued through usually gets a
+   faster decision than one nobody has looked at. One that sits with no
+   response at all for a week is a bug in the process; nudge it.
+3. Implement against the agreed design and link the proposal from the pull
+   request.
+
+If a pull request arrives with an architectural change and no proposal, review
+pauses while the design is discussed on the pull request itself. That works,
+and nobody is turned away for it, but it is the slow path: by then the
+discussion is about finished code, and changing the approach means redoing
+work that a proposal would have avoided.
+
+## Working with AI agents
+
+The quality bar is the same however the code was written: it does one thing,
+it is complete, it matches the surrounding code, and it has been run. Nothing
+in this section changes that bar. It describes how to reach it with an agent,
+because an agent used carelessly produces work that looks finished and is not,
+and that costs more to review than it did to write.
+
+**The repository is set up for agents.** `CLAUDE.md` at the root carries the
+rules and points to `docs/systems/`, where every subsystem is specified. Point
+your agent at it before anything else, whatever the agent is called. The specs
+are kept current by the same changes that alter the subsystems, so a change
+that touches one is expected to update it in the same pull request; an agent
+that has read the spec will do that on its own.
+
+**Find the optimal solution before writing code.** Plan first, with the agent
+doing the exploration: read the affected subsystems, lay out the options, and
+argue them against each other until one wins on its merits, not on being the
+first that worked. Write the plan down. For architectural changes, that plan
+is the design proposal above, and it is discussed before implementation. A
+planning workflow such as the superpowers plugin makes this the default rather
+than a discipline.
+
+**Execute the plan with tests leading.** Write the test, make it pass, move
+on. Review the work against the plan and the spec as you go rather than at the
+end; slop is what accumulates when generation runs ahead of review.
+
+**Test the result.** Run the automated tests, and run the thing by hand on the
+platforms it touches. A build that compiles is not a build that runs.
+
+**Have an agent review the pull request before you open it.** Adversarially:
+what is wrong, what is untested, where two solutions to one problem sit side
+by side. Every pull request here gets that review on arrival, and it usually
+finds something; doing it first turns a round trip of days into minutes. Fix
+what it finds; do not paste the report into the pull request. Then read the
+diff yourself. You own it.
+
+**Use a model that can carry the reasoning.** Good architecture and good code
+come from strong thinking models with room to think: Opus 5, Fable, or
+comparable. Weaker or faster models can produce the same output, but only if
+you know how to get it out of them, and the burden of knowing that is on you,
+not on the reviewer. If a task is worth a pull request, it is worth the
+strongest model you have.
+
+## Contributor License Agreement (required)
+
+Before your first contribution can be merged, you must sign the project's
+[Contributor License Agreement](CLA.md).
+
+Backspace is a single-owner project. Under the CLA **you keep the copyright to
+your contribution** and grant the maintainer (Jannis Braun) an exclusive,
+sublicensable license to it, which is what lets the project be offered under both
+the AGPL and a commercial license. In return, you receive a perpetual license to
+reuse the specific code you authored in your own other projects (see CLA §5). You
+also confirm that you have the right to contribute the code in the first place.
+
+Signing is automatic and takes one comment:
+
+1. Open your pull request.
+2. The CLA bot will comment with a link to the agreement and ask you to sign.
+3. Reply on the pull request with exactly:
+
+   > I have read the CLA Document and I hereby sign the CLA
+
+4. The bot records your signature against your GitHub username. You only sign
+   once, and it covers all of your future contributions.
+
+A second bot comment appears on pull requests from forks: a short table of
+what the PR touches (workflows, install scripts, build files, dependency
+sources) so the maintainer can approve CI runs from anywhere. It looks at file
+paths and dependency sources only, never at the quality of the change, and
+needs nothing from you.
+
+## Development setup
+
+Requirements: **Node.js 24 (LTS)** and **pnpm 10**. Run `nvm use` (reads
+`.nvmrc`); Corepack activates the pinned pnpm from the `packageManager` field
+automatically, so don't install pnpm globally.
+
+```bash
+pnpm install          # install all workspace dependencies
+cp .env.example .env  # then set JWT_SECRET (openssl rand -hex 32)
+pnpm dev              # API server on :3005, Vite dev server on :5173
+```
+
+You can run the two halves separately with `pnpm dev:server` and `pnpm dev:web`.
+
+Working on the **desktop** app additionally needs a C++ toolchain (`make`, `g++`,
+`python3`) to build the native `uiohook-napi` module. On Debian/Ubuntu:
+`sudo apt install build-essential python3`. Without it `pnpm install` just warns
+and skips that one rebuild; the server and web client are unaffected.
+
+Voice and video are optional and require a LiveKit server; see the README for
+configuration. Text, federation, uploads, and everything else run fully without
+it.
+
+## Coding standards
+
+- **TypeScript strict mode**, no `any`. The codebase compiles cleanly under
+  strict settings, so keep it that way.
+- **Match the surrounding code.** Follow existing patterns, naming, and module
+  boundaries rather than introducing new ones.
+- **Federation-aware.** Never assume a single global user ID. Resolve the
+  correct federated identity for the relevant instance when comparing IDs,
+  checking permissions, or talking to remote servers. See
+  `docs/systems/federation.md` and `docs/systems/client-federation.md`.
+- **Design system.** UI work follows the "Aether Drift" design system documented
+  in `docs/systems/design-system.md`.
+- **No new dependencies without justification.** Prefer the existing stack. New
+  dependencies must be **permissive** (MIT/ISC/Apache-2.0/BSD), or weak-copyleft
+  (LGPL/MPL) only when dynamically linked at arm's length. Never add **strong
+  copyleft** (GPL/AGPL) or non-permissive licenses (SSPL, BUSL/BSL,
+  non-commercial): strong copyleft cannot ship in the commercial edition, and the
+  others are incompatible with `AGPL-3.0-only`.
+- **Complete implementations only.** No placeholder code, no `TODO` stubs, no
+  partial components. Handle the error and edge cases.
+
+## Packaging, platform, and UI changes need evidence
+
+A build that compiles is not a build that runs. If a change affects how the app
+is packaged, installed, sandboxed, or launched (Electron builds, Flatpak, Docker,
+installers, the desktop shell), run the result and show it: a screenshot, a short
+recording, or a terminal session, and say which OS and desktop environment. UI
+work is the same, with a screenshot of the changed surface.
+
+Automated checks cover the scriptable part. Whether the app actually starts,
+finds its tray icon, shows a notification, or can open a file is not scriptable,
+and it is the part that breaks.
+
+## Before you open a pull request
+
+- `pnpm build` succeeds (shared types, server, and web all build).
+- The dev server and web client both start without errors (`pnpm dev`).
+- Tests pass (`pnpm test` where applicable to the package you touched).
+- You updated the relevant `docs/systems/` spec if your change altered schema,
+  API routes, WebSocket events, the federation protocol, permissions, or the
+  design system.
+- You ran the thing you changed, and attached evidence if it affects packaging,
+  installation, or the UI (see above).
+- If the change is architectural (see [Design before code](#design-before-code)),
+  the pull request links the approved design proposal.
+- You reviewed the full diff after the last commit, with an agent if one wrote
+  it, and fixed what you found.
+
+## Reporting bugs and requesting features
+
+Use GitHub Issues. For bugs, include reproduction steps, expected vs. actual
+behavior, and your environment (deployment method, browser/desktop, and whether
+federation or voice is involved). For security issues, please do **not** open a
+public issue. See [`SECURITY.md`](SECURITY.md).
+
+## License
+
+By contributing, you agree that your contributions are licensed under the
+[GNU AGPL-3.0](LICENSE) and are subject to the [CLA](CLA.md), an exclusive-license
+grant that also enables the project's commercial dual-license.

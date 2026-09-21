@@ -1,0 +1,177 @@
+import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useUIStore } from '../../stores/uiStore';
+import { useAuthStore } from '../../stores/authStore';
+import { api } from '../../api/client';
+import { AccountPanel } from '../modals/settingsPanels/AccountPanel';
+import { AppearancePanel } from '../modals/settingsPanels/AppearancePanel';
+import { VoicePanel } from '../modals/settingsPanels/VoicePanel';
+import { ConnectionsPanel } from '../modals/settingsPanels/ConnectionsPanel';
+import { PrivacyPanel } from '../modals/settingsPanels/PrivacyPanel';
+import { KeybindsPanel } from '../modals/settingsPanels/KeybindsPanel';
+import { DesktopPanel } from '../modals/settingsPanels/DesktopPanel';
+import { DesktopDownloadPanel } from '../modals/settingsPanels/DesktopDownloadPanel';
+import { MobileScreenHeader } from './MobileScreenHeader';
+import { TransferIndicator } from './TransferIndicator';
+import { isElectron } from '../../platform/platform';
+import { useInstanceUpdateBadge } from '../../hooks/useInstanceUpdateBadge';
+
+interface MobileSettingsScreenProps {
+  initialPanel?: string;
+}
+
+type PanelTitleKey =
+  | 'settings:nav.tabs.account'
+  | 'settings:nav.tabs.appearance'
+  | 'settings:nav.tabs.voice'
+  | 'settings:nav.tabs.privacy'
+  | 'settings:nav.tabs.connections'
+  | 'settings:nav.tabs.keybinds'
+  | 'settings:nav.tabs.desktop';
+
+/**
+ * Every panel this screen can open directly: its header title and its body. The
+ * body is a function so Desktop can decide at render time, the one entry that
+ * depends on where the client runs. Inside the app it is the app's own
+ * settings, in a browser it is the download offer, which is the same wiring the
+ * settings modal uses. `instanceVersion` is null until the instance info
+ * request lands, and stays null if it failed.
+ */
+const panelConfig: Record<
+  string,
+  { titleKey: PanelTitleKey; body: (instanceVersion: string | null) => React.ReactNode }
+> = {
+  account: { titleKey: 'settings:nav.tabs.account', body: () => <AccountPanel /> },
+  appearance: { titleKey: 'settings:nav.tabs.appearance', body: () => <AppearancePanel /> },
+  voice: { titleKey: 'settings:nav.tabs.voice', body: () => <VoicePanel /> },
+  privacy: { titleKey: 'settings:nav.tabs.privacy', body: () => <PrivacyPanel /> },
+  connections: { titleKey: 'settings:nav.tabs.connections', body: () => <ConnectionsPanel /> },
+  keybinds: { titleKey: 'settings:nav.tabs.keybinds', body: () => <KeybindsPanel /> },
+  desktop: {
+    titleKey: 'settings:nav.tabs.desktop',
+    body: (instanceVersion) =>
+      isElectron() ? <DesktopPanel /> : <DesktopDownloadPanel version={instanceVersion} />,
+  },
+};
+
+const sectionIcons: Record<string, React.ReactNode> = {
+  account: (
+    <svg className="w-5 h-5 text-txt-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+    </svg>
+  ),
+  appearance: (
+    <svg className="w-5 h-5 text-txt-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.439.44 1.151 0 1.59l-2.879 2.879M6.75 17.25h.008v.008H6.75v-.008z" />
+    </svg>
+  ),
+  voice: (
+    <svg className="w-5 h-5 text-txt-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+    </svg>
+  ),
+  privacy: (
+    <svg className="w-5 h-5 text-txt-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+    </svg>
+  ),
+  connections: (
+    <svg className="w-5 h-5 text-txt-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-4.122a4.5 4.5 0 00-6.364-6.364L4.5 6.325a4.5 4.5 0 001.242 7.244" />
+    </svg>
+  ),
+  instance: (
+    <svg className="w-5 h-5 text-txt-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
+    </svg>
+  ),
+  keybinds: (
+    <svg className="w-5 h-5 text-txt-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 7.125C2.25 6.504 2.754 6 3.375 6h6c.621 0 1.125.504 1.125 1.125v3.75c0 .621-.504 1.125-1.125 1.125h-6a1.125 1.125 0 01-1.125-1.125v-3.75zM14.25 8.625c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 01-1.125-1.125v-8.25zM3.75 16.125c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 01-1.125-1.125v-2.25z" />
+    </svg>
+  ),
+  desktop: (
+    <svg className="w-5 h-5 text-txt-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a9 9 0 01-9 9m0 0a9 9 0 01-9-9" />
+    </svg>
+  ),
+};
+
+export function MobileSettingsScreen({ initialPanel }: MobileSettingsScreenProps) {
+  const { t } = useTranslation(['mobile', 'settings', 'common']);
+  const pushMobileScreen = useUIStore((s) => s.pushMobileScreen);
+  const isAdmin = useAuthStore((s) => s.user?.isAdmin);
+  const updateBadge = useInstanceUpdateBadge();
+
+  // The browser's Desktop panel builds its download links from the instance
+  // version, the same source the settings modal reads them from. Nothing else
+  // on this screen needs it, so no other panel starts the request.
+  const needsInstanceVersion = initialPanel === 'desktop' && !isElectron();
+  const [instanceVersion, setInstanceVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!needsInstanceVersion) return;
+    let cancelled = false;
+    api.instance.info()
+      .then((info) => { if (!cancelled) setInstanceVersion(info.version); })
+      .catch(() => { /* Non-critical: without a version every link falls back to the releases listing. */ });
+    return () => { cancelled = true; };
+  }, [needsInstanceVersion]);
+
+  // If initialPanel is set, render that panel directly
+  if (initialPanel) {
+    const panel = panelConfig[initialPanel];
+    if (!panel) return null;
+    if (initialPanel === 'instance' && !isAdmin) return null;
+
+    return (
+      <div className="flex flex-col h-full bg-surface-base">
+        <MobileScreenHeader title={t(panel.titleKey)} rightActions={<TransferIndicator />} />
+        <div className="flex-1 overflow-y-auto p-4">
+          {panel.body(instanceVersion)}
+        </div>
+      </div>
+    );
+  }
+
+  // Settings section list. Desktop is listed everywhere, mirroring the settings
+  // modal: inside the app it opens the app's own settings, in a browser it
+  // opens the download offer, which is worth reaching from a phone because the
+  // visitor may be downloading for another machine. Keybinds stays
+  // Electron-only: its value comes from the desktop app's global keybind
+  // manager, and the web fallback (only while the tab has focus, no recording
+  // flow on touch keyboards) would mislead a mobile-web user into recording a
+  // binding that can never fire.
+  const sections = [
+    { id: 'account', label: t('settings:nav.tabs.account') },
+    { id: 'appearance', label: t('settings:nav.tabs.appearance') },
+    { id: 'voice', label: t('settings:nav.tabs.voice') },
+    { id: 'privacy', label: t('settings:nav.tabs.privacy') },
+    { id: 'connections', label: t('settings:nav.tabs.connections') },
+    ...(isElectron() ? [{ id: 'keybinds', label: t('settings:nav.tabs.keybinds') }] : []),
+    { id: 'desktop', label: t('settings:nav.tabs.desktop') },
+    ...(isAdmin ? [{ id: 'instance', label: t('settings:nav.tabs.instance'), dot: updateBadge }] : []),
+  ];
+
+  return (
+    <div className="flex flex-col h-full bg-surface-base">
+      <MobileScreenHeader title={t('common:labels.settings')} rightActions={<TransferIndicator />} />
+      <div className="flex-1 overflow-y-auto">
+        {sections.map((section) => (
+          <button
+            key={section.id}
+            onClick={() => pushMobileScreen(`settings-${section.id}`)}
+            className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-interactive-hover text-left transition-colors"
+          >
+            {sectionIcons[section.id]}
+            <span className="text-sm text-txt-primary flex-1">{section.label}</span>
+            {section.dot && <span className="w-1.5 h-1.5 rounded-full bg-accent-amber" />}
+            <svg className="w-4 h-4 text-txt-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}

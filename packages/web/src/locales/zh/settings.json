@@ -1,0 +1,425 @@
+{
+  "interfaceScale": {
+    "label": "界面比例",
+    "description": "调整文字、按钮和面板大小。此设置保存在当前设备的浏览器或应用中。",
+    "reset": "重置为100%"
+  },
+  "voice": {
+    "input": {
+      "title": "输入设备",
+      "checkingAccess": "正在检查麦克风访问权限…",
+      "accessDenied": {
+        "title": "麦克风访问被拒绝",
+        "description": "授予麦克风选择输入设备的权限。",
+        "retry": "再试一次"
+      },
+      "permissionPrompt": {
+        "description": "列出和选择输入设备需要麦克风权限。",
+        "enable": "启用麦克风访问权限"
+      },
+      "device": {
+        "systemDefault": "系统默认",
+        "currentlyUsing": "当前使用： {{label}}",
+        "none": "未检测到麦克风。"
+      },
+      "volume": {
+        "label": "输入音量"
+      },
+      "meter": {
+        "hint": "加入语音频道后，音量指示器会开始工作。"
+      }
+    },
+    "output": {
+      "title": "输出设备",
+      "checkingAccess": "正在检查音频访问权限…",
+      "device": {
+        "systemDefault": "系统默认",
+        "unsupported": "此浏览器不支持选择输出设备。音频将按系统默认值播放。"
+      },
+      "permissionPrompt": {
+        "description": "需要麦克风权限才能列出输出设备（浏览器只有获得麦克风权限后才会显示设备名称）。",
+        "enable": "启用音频访问"
+      },
+      "volume": {
+        "label": "输出音量"
+      },
+      "testSound": "测试音频"
+    },
+    "video": {
+      "title": "视频",
+      "checkingAccess": "正在检查相机访问权限…",
+      "accessDenied": {
+        "title": "相机访问被拒绝",
+        "description": "授予相机选择相机的权限。",
+        "retry": "再试一次"
+      },
+      "blocked": {
+        "browser": "摄像头在浏览器级别被阻止。点击浏览器地址栏中的摄像头图标，重置权限，然后点击重试。",
+        "mac": "在“系统设置” “→隐私和安全→摄像头”中授予摄像头访问权限，然后重新启动应用。",
+        "windows": "在“设置” “→隐私和安全→摄像头”中授予摄像头访问权限，然后重新启动应用。",
+        "other": "相机权限被拒绝。请在浏览器/Chromium提示符中重置，然后重试。"
+      },
+      "permissionPrompt": {
+        "description": "选择摄像头和预览需要摄像头权限。",
+        "enable": "启用相机预览"
+      },
+      "camera": {
+        "label": "摄像头",
+        "auto": "自动（系统默认）",
+        "fallbackName": "摄像头{{number}}",
+        "detectedFallback": "检测到摄像头",
+        "currentlyUsing": "当前使用： {{label}}",
+        "none": "未检测到摄像头。"
+      },
+      "preview": {
+        "testAria": "测试摄像头",
+        "testHint": "单击以测试摄像头",
+        "stop": "停止预览",
+        "retry": "再试一次"
+      },
+      "previewError": {
+        "inUse": "摄像头正在被其他应用程序使用。",
+        "unavailable": "所选摄像头不可用。",
+        "notFound": "未检测到摄像头。",
+        "generic": "无法启动相机预览。"
+      }
+    },
+    "title": "语音与视频",
+    "volume": {
+      "sectionTitle": "音量",
+      "soundEffects": {
+        "label": "音效音量"
+      },
+      "messageSound": {
+        "label": "为每条消息播放声音",
+        "description": "关闭（默认）：仅在被提及和收到私信时播放。开启：每条频道消息都播放。"
+      }
+    },
+    "processing": {
+      "sectionTitle": "语音处理",
+      "noiseSuppression": {
+        "label": "噪声抑制",
+        "description": "基于机器学习的噪声消除（ RNNoise ）。过滤键盘、风扇和背景噪音。"
+      },
+      "echoCancellation": {
+        "label": "回声消除",
+        "description": "取消扬声器反馈到麦克风的回声。始终开启语音频道和呼叫。"
+      },
+      "autoGain": {
+        "label": "自动增益控制",
+        "description": "自动调节麦克风音量。直播时可能会影响声音稳定性。"
+      }
+    }
+  },
+  "nav": {
+    "userSettings": "设置",
+    "appSettings": "应用设置",
+    "administration": "管理",
+    "tabs": {
+      "account": "账户",
+      "appearance": "设备外观",
+      "voice": "语音与视频",
+      "privacy": "隐私",
+      "connections": "连接",
+      "keybinds": "快捷键",
+      "desktop": "桌面",
+      "instance": "实例"
+    },
+    "logOut": "退出登录",
+    "backToMenu": "返回设置"
+  },
+  "appearance": {
+    "title": "设备外观"
+  },
+  "account": {
+    "title": "我的账户",
+    "detached": {
+      "notice": "此账号已与其主实例分离。",
+      "explanation": "{{homeInstance}}已重置或不再可用，因此此账号现在可以在本地运行。您的个人资料和密码在这里管理。",
+      "reattachHint": "作为{{username}}的{{homeInstance}} ，您可以重新关联此账号。个人资料和状态将从那里再次同步。",
+      "reattachButton": "重新附加至{{homeInstance}}",
+      "reattachConfirm": "确认重新附加为{{username}}",
+      "reattaching": "正在重新附加…",
+      "reattachFailed": "重新附加失败",
+      "reattached": "账号已与{{username}}重新关联"
+    },
+    "profile": {
+      "sectionTitle": "个人资料定制",
+      "avatar": {
+        "label": "头像",
+        "alt": "你的头像",
+        "change": "更换头像",
+        "uploadFailed": "头像上传失败",
+        "cropTitle": "裁剪头像"
+      },
+      "banner": {
+        "label": "横幅",
+        "change": "更改横幅",
+        "uploadFailed": "横幅上传失败",
+        "cropTitle": "裁剪横幅"
+      },
+      "avatarColor": {
+        "label": "头像颜色"
+      },
+      "bannerColor": {
+        "label": "横幅颜色",
+        "hexPlaceholder": "十六进制"
+      },
+      "bio": {
+        "label": "关于我",
+        "placeholder": "向世界介绍你自己……",
+        "counter": "{{used}}/{{max}}"
+      }
+    },
+    "details": {
+      "sectionTitle": "账户",
+      "status": {
+        "label": "状态"
+      },
+      "customStatus": {
+        "label": "状态",
+        "placeholder": "最近你在忙什么呢？"
+      }
+    },
+    "password": {
+      "current": {
+        "label": "原密码",
+        "placeholder": "输入当前密码"
+      },
+      "new": {
+        "label": "新密码",
+        "placeholder": "最少{{min}}个字符"
+      },
+      "confirm": {
+        "label": "确认新密码",
+        "placeholder": "确认新密码"
+      },
+      "show": "显示密码",
+      "hide": "隐藏密码",
+      "tooShort": "新密码必须至少为{{min}}个字符",
+      "mismatch": "密码匹配不上",
+      "changed": "更改密码",
+      "changeFailed": "密码更改失败",
+      "submit": "修改密码",
+      "submitting": "改变"
+    },
+    "danger": {
+      "description": "删除账号后，您将无法返回。您的消息将保留，但归因于“已删除用户”。",
+      "deleteButton": "删除帐户"
+    },
+    "save": {
+      "updated": "个人资料已更新",
+      "failed": "更新个人资料失败"
+    },
+    "deletion": {
+      "title": "删除帐户",
+      "warning": {
+        "headline": "这将永久删除您的账号。",
+        "spaces": "您在所有社区中的成员身份都将被删除",
+        "friends": "所有好友连接都将被删除",
+        "dms": "所有DM会籍都将被移除",
+        "messages": "您的消息将保留，但归因于“已删除用户”"
+      },
+      "ownedSpaces": {
+        "prompt_one": "您拥有 {{count}} 个社区。请先处理：",
+        "prompt_other": "您拥有 {{count}} 个社区。请先逐一处理：",
+        "transfer": "移交",
+        "delete": "删除社区",
+        "selectOwner": "选择新所有者"
+      },
+      "processing": "处理中…",
+      "confirm": {
+        "permanent": "此操作是永久性的，无法撤消。",
+        "usernamePrompt": "输入您的用户名<username>{{username}}</username>以确认",
+        "passwordPlaceholder": "输入您的密码",
+        "submit": "删除我的账户",
+        "deleting": "正在删除..."
+      },
+      "federation": {
+        "removing": "正在从关联实例中删除您的账号……",
+        "deleteAnyway": "删除账户"
+      },
+      "complete": {
+        "title": "帐号已删除",
+        "redirecting": "重定向到登录页面"
+      },
+      "errors": {
+        "usernameMismatch": "用户名不匹配",
+        "spacesFailed": "无法处理社区",
+        "deleteFailed": "删除账号失败"
+      }
+    }
+  },
+  "privacy": {
+    "title": "隐私",
+    "discovery": {
+      "sectionTitle": "探索",
+      "label": "允许其他人查找我的个人资料",
+      "description": "启用后，您的个人资料将显示在“发现人员”中。其他人可以随时通过准确的用户名添加您。"
+    },
+    "activity": {
+      "sectionTitle": "活动状态",
+      "label": "分享活动状态",
+      "description": "让其他人看到您在做什么，比如您正在玩的游戏或正在听的音乐。"
+    }
+  },
+  "connections": {
+    "title": "连接件"
+  },
+  "instance": {
+    "tabs": {
+      "general": "常规",
+      "registration": "注册",
+      "federation": "联邦",
+      "streaming": "流媒体",
+      "storage": "存储",
+      "users": "用户",
+      "updates": "更新",
+      "telemetry": "Say Hi"
+    }
+  },
+  "keybinds": {
+    "portal": {
+      "description": "在Wayland上，桌面管理所有Backspace快捷方式。在Backspace下的系统键盘快捷方式设置中分配、更改或删除键。此处不使用本地浏览器/X11绑定。",
+      "idle": "准备所有可用操作的首次注册。",
+      "pending": "正在连接到桌面门户。如果出现系统对话框，请为要使用的操作选择快捷方式。",
+      "ready": "Backspace已注册。打开系统的键盘快捷方式设置以更改或删除分配。下面的列表是只读的，当您返回Backspace时会刷新。",
+      "unavailable": "门户不可用、权限被拒绝或会话结束。需要全局快捷方式门户后端。本地绑定在Wayland上被禁用。",
+      "retry": "注册或重新连接快捷方式",
+      "assigned": "系统快捷方式： {{shortcut}}",
+      "notAssigned": "没有活动的系统分配"
+    },
+    "title": "快捷键",
+    "note": {
+      "webOnly": "此选项卡聚焦时，快捷方式有效。对于在其他应用程序中工作的全局快捷方式，请使用桌面应用程序。"
+    },
+    "section": {
+      "voice": "语音快捷方式"
+    },
+    "action": {
+      "toggleMute": "切换静音",
+      "toggleDeafen": "切换声音开关",
+      "pushToTalk": "一键通",
+      "toggleCamera": "切换摄像头",
+      "toggleScreenShare": "切换屏幕共享",
+      "disconnect": "断开连接"
+    },
+    "row": {
+      "recordingPrompt": "按组合键…",
+      "notBound": "待绑定按键",
+      "record": "录入",
+      "escToCancel": "（按 Esc 取消）"
+    },
+    "key": {
+      "shift": "Shift键",
+      "ctrl": "Ctrl键",
+      "alt": "Alt键",
+      "option": "选项",
+      "cmd": "Cmd",
+      "win": "胜",
+      "space": "空格键",
+      "middleClick": "中击",
+      "mouse4": "鼠标4",
+      "mouse5": "鼠标5",
+      "mouseGeneric": "鼠标 {{button}}"
+    },
+    "accessibility": {
+      "title": "需要辅助功能权限",
+      "description": "Backspace需要辅助功能权限才能在应用程序外使用全局快捷方式。",
+      "grant": "授予许可"
+    },
+    "hookError": {
+      "title": "全局快捷方式不可用",
+      "description": "无法启动输入侦听器。在Linux上，您的用户可能需要位于<code> INPUT </code>组中。"
+    },
+    "conflict": {
+      "message": "<strong>{{combo}}</strong>已绑定到<strong>{{action}}</strong>.是否覆盖？",
+      "overwrite": "覆盖"
+    }
+  },
+  "desktop": {
+    "title": "桌面",
+    "autoLaunch": {
+      "openAtLogin": {
+        "label": "启动首选项",
+        "description": "登录时自动启动Backspace"
+      },
+      "startMinimized": {
+        "label": "启动最小化",
+        "description": "开始隐藏在系统托盘中，而不是显示窗口"
+      }
+    },
+    "updates": {
+      "appName": "Backspace Desktop",
+      "versionLabel": "版本{{version}}",
+      "checking": "检查更新",
+      "checkingShort": "检查…",
+      "checkNow": "检查更新",
+      "downloading": "正在下载{{version}}, {{percent}} %",
+      "downloadingWithRate": "正在下载{{version}} ， {{percent}} %在{{rate}}",
+      "rateMegabytes": "{{value}} MB/s",
+      "rateKilobytes": "{{value}} KB/秒",
+      "upToDate": "你是最新版本。",
+      "available": "版本{{version}}可用",
+      "readyToInstall": "版本{{version}}已准备好安装",
+      "installFailed": "版本{{version}}无法安装",
+      "checkFailed": "上次更新检查失败",
+      "idle": "检查桌面应用程序的新版本",
+      "external": "更新通过您的Flatpak软件管理器安装",
+      "download": "下载",
+      "restart": "重启",
+      "manualNote": "此版本无法自行安装更新，因此将从GitHub下载新版本并手动替换应用。请参阅发行说明，了解平台上的步骤。",
+      "externalNote": "Flatpak在应用程序外部自动应用更新。使用您的软件管理器或<code> flatpak update </code>命令更新Backspace。"
+    },
+    "instance": {
+      "current": "当前连接的实例",
+      "change": "更改实例"
+    }
+  },
+  "desktopDownload": {
+    "title": "桌面",
+    "intro": "全局密钥绑定，从启动时开始，并显示系统托盘图标。",
+    "unsupported": "桌面应用程序可在Windows、Linux和macOS上运行。",
+    "name": {
+      "windows": "窗户",
+      "mac": "macOS",
+      "linux": "Linux系统"
+    },
+    "tag": {
+      "windows": "这台电脑",
+      "mac": "这款Mac",
+      "linux": "这台机器"
+    },
+    "covers": {
+      "windows": "x64或arm64",
+      "mac": "在Apple Silicon和Intel Mac上运行",
+      "linux": "AppImage或deb包， x64或arm64"
+    },
+    "download": {
+      "windows": "下载视窗版",
+      "mac": "下载macOS版",
+      "linux": "下载Linux版"
+    },
+    "picker": {
+      "architecture": "建筑",
+      "format": "套裝軟體格式"
+    },
+    "arch": {
+      "appleSilicon": "Apple Silicon",
+      "intel": "Intel",
+      "x64": "x64",
+      "arm64": "ARM64"
+    },
+    "kind": {
+      "appimage": "AppImage",
+      "deb": "Deb"
+    },
+    "archGuessed": {
+      "windows": "您的浏览器没有说明这台电脑使用哪个处理器，因此x64是预选的。",
+      "mac": "您的浏览器没有说明此Mac具有哪个芯片，因此预先选择了Apple Silicon。",
+      "linux": "您的浏览器没有说明此机器具有哪个处理器，因此预先选择了x64。"
+    },
+    "version": "版本{{version}}",
+    "allReleases": "GitHub上的所有版本"
+  }
+}

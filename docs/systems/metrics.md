@@ -1,0 +1,979 @@
+# Repository Metrics Archive
+
+Source files:
+- `scripts/metrics/src/types.ts` -- Shared row shapes (`TrafficPoint`, `CountPoint`, `ReleaseRow`, `RepoPoint`, `DimensionRow`)
+- `scripts/metrics/src/github.ts` -- GitHub API client: auth, pagination (`Link: rel="next"`), `/stats/*` 202 retry
+- `scripts/metrics/src/series.ts` -- CSV/NDJSON parse + format, date-keyed upsert, explicit-key upsert (releases), dimensional upsert
+- `scripts/metrics/src/store.ts` -- Filesystem layer: atomic per-file writes (temp + rename), `meta.json` read/write, path containment
+- `scripts/metrics/src/collect.ts` -- Daily snapshot entrypoint (`collect()`)
+- `scripts/metrics/src/backfill.ts` -- One-shot historical reconstruction entrypoint (`backfill()`)
+- `scripts/metrics/src/cli-collect.ts` -- `process.env`/clock-reading wrapper invoked by `metrics.yml`'s "Collect" step
+- `scripts/metrics/src/cli-backfill.ts` -- `process.env`-reading wrapper invoked by `backfill.yml`
+- `scripts/metrics/src/cli-record-failure.ts` -- `process.env`/clock-reading wrapper invoked by `metrics.yml`'s "Record failure" step (`if: failure()` only)
+- `scripts/metrics/src/cli-support.ts` -- Env validation, token safety check, timestamp derivation, failure recording, log formatting
+- `scripts/metrics/src/bundle.ts` -- Archive reader: builds the `DashboardData` the page renders, weekly downsampling, the 2 MB size budget
+- `scripts/metrics/src/cli-bundle.ts` -- `process.env`/clock-reading wrapper invoked by `deploy-pages.yml`'s "Bundle the metrics archive" step
+- `scripts/metrics/vendor.json` -- SHA-256 manifest for the vendored uPlot files, enforced by `vendor-check.test.ts`
+- `site/insights/index.html` -- The dashboard: one self-contained static page, no framework, no build step
+- `site/insights/vendor/uplot.min.js`, `site/insights/vendor/uplot.min.css` -- Vendored uPlot 1.6.32
+- `.github/workflows/metrics.yml` -- Daily cron: collect, commit, push; on failure, record and push the failure to `meta.json`; `gh workflow enable`; then call the Pages deploy
+- `.github/workflows/backfill.yml` -- `workflow_dispatch`-only backfill runner
+- `.github/workflows/deploy-pages.yml` -- Pages deploy: bundles the archive into `site/insights/data.json`, uploads `site/`, publishes
+
+This document covers both halves of the subsystem: the **collection pipeline** (the `scripts/metrics` package, `metrics.yml`/`backfill.yml`, and the orphan `metrics-data` branch they write to) and the **public dashboard** built from that archive (`site/insights/`, the bundler, and `deploy-pages.yml`). §10 covers the dashboard.
+
+---
+
+## 1. Why this exists
+
+GitHub's Insights → Traffic panel (views, clones, referrers, popular paths) retains data for **14 days only**, then discards it. No API reconstructs a day once it has aged out of that window. Every day this collector does not run is a day of traffic history destroyed permanently, with no recovery path.
+
+Everything else GitHub tracks about the repo (stars, forks, issues, releases, contributors) is retrievable at any later date from permanent, timestamped API data — so it only needs to be captured once, not daily.
+
+### What is and is not recoverable
+
+| Data | Retention | Action |
+|---|---|---|
+| Traffic: views, clones, referrers, popular paths | **14 days, then destroyed** | **Snapshot daily** |
+| Release asset download counts | Live cumulative total, no time series | **Snapshot daily** |
+| Stars | Permanent — `/stargazers` returns `starred_at` | Backfill once |
+| Forks | Permanent — `created_at` | Backfill once |
+| Releases | Permanent — `published_at` | Backfill once |
+| Contributors | Permanent — `/stats/contributors` | Backfill once |
+
+Issues/PRs and commit/code-frequency history are not collected at all, and no chart on the dashboard draws them, so there is nothing here to seed for them. `repo.csv`'s `open_issues` column is the one adjacent figure that *is* collected and carried into the bundle; no chart plots it today.
+
+---
+
+## 2. Architecture
+
+```
+scripts/metrics/                     @backspace/metrics (pnpm workspace package)
+  package.json      zero runtime dependencies; scripts: typecheck, test, vendor:check
+  tsconfig.json      extends the repo's strict base config, plus erasableSyntaxOnly,
+                      verbatimModuleSyntax, allowImportingTsExtensions
+  vendor.json        sha256 manifest for the vendored uPlot files
+  src/
+    types.ts          shared row shapes (import type only)
+    github.ts         API client
+    series.ts         CSV/NDJSON codec + upsert
+    store.ts           filesystem layer, meta.json
+    collect.ts         daily snapshot
+    backfill.ts         historical reconstruction
+    telemetry.ts        instance-ping export: parse, aggregate, fold
+    bundle.ts           archive -> DashboardData, downsampling, size budget
+    cli-collect.ts      env/clock wrapper for metrics.yml's "Collect" step
+    cli-backfill.ts     env wrapper for backfill.yml
+    cli-record-failure.ts  env/clock wrapper for metrics.yml's "Record failure" step
+    cli-bundle.ts       env/clock wrapper for deploy-pages.yml's "Bundle" step
+    cli-support.ts      shared CLI helpers
+    *.test.ts           vitest, no network, no filesystem outside a per-test tmpdir
+
+site/                                the GitHub Pages site
+  index.html         landing page, English (unrelated to metrics)
+  ru/index.html      the same landing page in Russian; the two are an hreflang pair
+  assets/site.css    the landing pages' stylesheet, shared by both
+  assets/site.js     the landing pages' script, shared by both
+  insights/
+    index.html       the dashboard: one file, inline CSS and JS, no build step
+    vendor/uplot.min.js, vendor/uplot.min.css   uPlot 1.6.32, committed verbatim
+    data.json        BUILD ARTEFACT, gitignored, written at deploy time
+
+.github/workflows/metrics.yml        daily cron -> collect -> commit -> push -> deploy
+.github/workflows/backfill.yml       workflow_dispatch only
+.github/workflows/deploy-pages.yml   bundle -> upload site/ -> deploy to Pages
+
+branch: metrics-data (orphan, ruleset-protected — see §8)
+  traffic/views.csv, traffic/clones.csv
+  traffic/referrers.ndjson, traffic/paths.ndjson
+  stars.csv, forks.csv, releases.csv, contributors.csv, repo.csv, workflows.csv
+  telemetry/network.csv
+  telemetry/versions.ndjson, telemetry/countries.ndjson, telemetry/clients.ndjson
+  meta.json
+```
+
+The collector is plain TypeScript executed directly by Node's native type stripping — no build step, no transpiler, no `dist/`. `pnpm-workspace.yaml` lists `scripts/metrics` explicitly (not `scripts/*`), so unrelated future scripts under `scripts/` are not swept into the workspace by accident. The dashboard follows the same rule for the same reason: `site/insights/index.html` is one file with its CSS and JS inline, and its only dependency is committed next to it.
+
+The two landing pages are the one exception, and they are an exception because there are two of them. They shared 542 lines of CSS and 198 of JavaScript that say nothing about language, so those live in `site/assets/` and both pages link them; only markup, which genuinely differs per language, is duplicated. The five strings the script used to hardcode reach it through `data-` attributes on the elements they belong to (`#nums` carries `data-src` and the three stat-card labels, `#nums-note` the two note texts, `#typing-who` its suffix), and the number formatting reads `document.documentElement.lang`, so `1,234` on one page is `1 234` on the other with no branch in the code. A third language is more markup and no more plumbing; if one is ever added, that is the moment to consider generating the pages from a template rather than the moment to copy the JavaScript again.
+
+### The collection workflows
+
+Both `metrics.yml` and `backfill.yml`:
+- Declare `concurrency: { group: metrics-data, cancel-in-progress: false }`. This shared group name is the **only** thing preventing the daily cron and a dispatched backfill from racing on the same branch — they queue instead of running concurrently, and neither is ever cancelled mid-write, since cancelling a collection run loses that day irrecoverably.
+- Skip entirely on a fork (`if: ${{ !github.event.repository.fork }}`), because `METRICS_TOKEN` is a repository secret and does not propagate to forks — without this guard a fork's own scheduled run would fail every day with nothing the fork owner could do about it.
+- Bootstrap the `metrics-data` branch via `git ls-remote --exit-code --heads origin metrics-data` **before** any `actions/checkout` step references it. `actions/checkout` hard-fails the job if given a nonexistent `ref`, so the check has to run first. If the branch is absent, both workflows create it with `git worktree add --orphan` into a scratch directory (`.metrics-init`), commit an empty initial commit, push, and remove the worktree — never touching the primary checkout, so an early exit can't leave that tree modified.
+- Check out `metrics-data` into `./.metrics-data` (gitignored — see `.gitignore`'s `.metrics-data/` entry — so `git status` on the main checkout stays clean) and pin `actions/setup-node` to `node-version: 24`.
+- Run `step-security/harden-runner` with `egress-policy: audit`, and pin every `uses:` to a full commit SHA with a trailing `# vX.Y.Z` comment, per this repo's standing CI convention (see `docs/systems/security-scanning.md`).
+- Pass the telemetry pair to their run step: `TELEMETRY_EXPORT_TOKEN` from `secrets`, and `TELEMETRY_ENDPOINT` from `vars`. Both are optional and both are unset on this repository. The token being unset turns the telemetry step off and prints a notice on stderr; the endpoint being unset interpolates the empty string, which `telemetryEndpoint` in `cli-support.ts` reads as "use the default receiver" (§3). The endpoint is a repository variable rather than a secret because it is a hostname that is already written down here, and a secret would be one nobody could read back to check.
+
+`metrics.yml` runs `collect` (`node scripts/metrics/src/cli-collect.ts`); `backfill.yml` runs `backfill` (`node scripts/metrics/src/cli-backfill.ts`). Both of those jobs declare only `contents: write` (plus `actions: write` on `metrics.yml`, for the schedule-keepalive step in §8).
+
+### When the collector runs
+
+`metrics.yml` is scheduled for **15:19 UTC daily**. The time is chosen and the choice is load-bearing, so it is worth knowing what it is placed between before moving it.
+
+**The lower edge is GitHub's traffic aggregation.** A day's views and clones are not queryable the moment that day ends. They appear some hours into the next day, and the boundary moves from day to day. Measured on this repo while the schedule was `0 3 * * *`: the run at 07:25 UTC on 2026-09-02 picked up 2026-09-01 in full, but the run at 07:28 UTC on 2026-09-03 found no 2026-09-02 bucket at all and left `traffic/views.csv` and `traffic/clones.csv` untouched, while writing that day's `stars.csv`, `forks.csv`, `repo.csv` and `workflows.csv` rows normally. The missing bucket was present when the API was queried by hand at 12:57 UTC the same day. A run sitting on that boundary collects yesterday's traffic on some days and not on others.
+
+**Losing that race costs freshness, not data.** §4.4 is what makes that true: the traffic endpoints return a rolling 14-day window and the merge overwrites, so the next successful run fills the gap. The cost is visible instead of destructive, and it is visible in an unhelpful way. Views and clones publish one to two days behind, inconsistently, while stars, forks, subscribers and downloads come from live counters stamped with today's date and are always current. Half the dashboard then looks stale next to the other half, which reads as breakage and is not.
+
+**The upper edge is midnight UTC.** Scheduled runs are queued rather than punctual, and the top of the hour is the most contended slot GitHub has: under `0 3 * * *` the two scheduled runs dispatched at 07:25 and 07:28 UTC, about 4.4 hours late. A run pushed past 00:00 UTC would derive a `today` of the following date, and `stars.csv`, `forks.csv` and `repo.csv` only ever write today's row, so the date they skipped is never revisited by anything (§4.1). That failure does not self-heal the way a late traffic fetch does.
+
+15:19 UTC leaves several hours of margin on both sides, and the odd minute keeps it off the slots everyone else picks. If a scheduled run is ever observed dispatching after about 21:00 UTC, move the hour earlier rather than adding a second cron: two runs a day would double the commits and the Pages deploys to buy back a gap the 14-day window already repairs.
+
+`metrics.yml` has a second job, `deploy-dashboard`, which republishes the dashboard from the archive the run just wrote. It is a separate job with a *narrower* grant than `collect` — the deploy wiring and the reasons for the split are in §10.5.
+
+`metrics.yml` additionally runs a failure path that `backfill.yml` does not have: a "Record failure" step (`node scripts/metrics/src/cli-record-failure.ts`, `if: failure()`) followed by a "Commit and push failure record" step, both gated to run only when something earlier in the job failed. See §3.3 for what this writes and why `backfill.yml` doesn't need the equivalent — a failed backfill dispatch is visible in the Actions tab for whoever ran it, with no unattended schedule depending on it the way the daily cron does.
+
+---
+
+## 3. Data schemas
+
+All files live at the root of the `metrics-data` branch. CSVs are sorted ascending on their first (date) column on every write; NDJSON files are sorted `(snapshot_date asc, count desc, dimension asc)`. Both orderings are fixed by `series.ts` (`formatCsv`, `compareDimensionRows`) so that re-running the collector against unchanged upstream data produces a byte-identical file — the property that keeps daily commits to one line of diff. `releases.csv` additionally fixes a tie-break within a shared date, `tag` ascending (`compareReleaseRows`, applied by the `upsertByKey` merge described in §3.1's caveat below), since it is the one CSV where more than one row can share a date.
+
+### 3.1 CSV series
+
+| File | Columns | One row means |
+|---|---|---|
+| `traffic/views.csv` | `date,count,uniques` | Total views and unique visitors on that UTC date |
+| `traffic/clones.csv` | `date,count,uniques` | Total clones and unique cloners on that UTC date — see the caveat below the table |
+| `stars.csv` | `date,total` | The repo's live `stargazers_count` as read on that date (a point-in-time snapshot, not a delta) — see the caveat below the table |
+| `forks.csv` | `date,total` | The repo's live `forks_count` as read on that date — see the caveat below the table |
+| `releases.csv` | `date,tag,name` | A release published on that UTC date (`date` = `published_at`'s UTC day) — see the caveat below the table |
+| `contributors.csv` | `date,total` | Cumulative distinct-contributor count, where a contributor counts from the UTC date of the start of their first commit week onward. Capped: see the note below the table |
+| `repo.csv` | `date,subscribers,open_issues,downloads_total,downloads_app,downloads_updates` | The repo object's counters as read on that date, plus release asset `download_count` sums: every asset, then that total split into app installs and update-check traffic |
+| `workflows.csv` | `date,runs` | Workflow runs this repository started on that UTC date. A `0` is a measured zero, never a gap — see the caveat below the table |
+| `telemetry/network.csv` | `date,instances_1d,instances_7d,instances_30d,users_registered,users_active1d,users_active7d,users_active30d,messages7d,storage_mib,voice_instances,federation_instances` | The self-hosted fleet as it looked on that UTC date, from the opt-in instance pings. Every column is a gauge, never a running total. See the caveat below the table |
+
+#### Caveats on the table above
+
+**Clones count this repository's own CI.** GitHub counts every `actions/checkout` in the clone statistics, so `traffic/clones.csv` measures the build pipeline and the audience together, with no field distinguishing them. Measured on this repo: days with no workflow runs sit at 2-30 clones, while 2026-08-25 and 2026-09-01 recorded 155 and 189 clones against 218 and 180 successful checkout steps. Clones far above one per unique cloner is the signature. The ratio is not a constant and this archive does not model it: neither the run count nor the checkout-step count predicts the clone figure closely (218 checkout steps produced 155 clones, 180 produced 189), so only the co-occurrence is established, not a coefficient. That is exactly why nothing here publishes a "clones minus CI" figure: that would be a model, and the premise of this archive is that every number on it is a measurement. Page views are unaffected, because a checkout loads no page. The confound is disclosed on the Reach group's clones card, which carries it as a standing caveat naming the chart that measures it, in the Traffic paragraphs of the page's `#method` section, in the static data page's clones blurb, and in the `BUILD:SUMMARY` sentence that states the peak clone day. It is also *shown*: `workflows.csv` records this repository's own daily workflow-run count, and the dashboard plots it as the Delivery group's hero chart, joined to the clones chart by the page-wide cursor and by a link in each direction rather than by a shared x axis, see §10.7. The two series are never combined into one corrected figure — see §4.5.
+
+**`stars.csv` and `forks.csv` are point-in-time snapshots, not deltas.** Each row is the live counter as read that day, so it correctly reflects someone who starred and later unstarred. A row written by `backfill()` instead reconstructs the value from `/stargazers`' `starred_at`, which lists only *current* stargazers, making a reconstructed row a **lower bound**. Nothing on disk distinguishes the two writers. See §4.2.
+
+**`releases.csv` is keyed on `tag`, not `date`.** It is the one CSV where more than one row can legitimately share a date, so its merge uses `upsertByKey` with a `tag` ascending tie-break (`compareReleaseRows`) rather than `upsertByDate`. See §4.2.
+
+**`telemetry/network.csv` comes from a second service, and every column in it is a gauge.** The rows are not fetched from GitHub at all: they are aggregated from the opt-in instance pings the receiver at `hello.backspacechat.com` collects, read back through its `export` route (`telemetry.ts`, and the design spec at `docs/superpowers/specs/2026-09-06-instance-telemetry-design.md` §8 for the payload). The rules that decide what a row means:
+
+- **Snapshot, not sum.** A row for day D is built from the *latest ping per instance* in `[D-6, D]`. An instance whose ping failed, or whose host was off for a day, keeps its last reported values for up to a week rather than dropping the fleet total by its size and putting it back the next day. Consecutive rows are comparable; they must never be summed across days.
+- **Two days in thirty.** Only instances that reported on at least two distinct days in `[D-29, D]` enter any figure. A single ping, from a test box or from somebody curious about the endpoint, never moves a total.
+- **`users_active1d` is the one restricted column.** It sums only rows dated D itself, because a one-day-active count carried forward from four days ago is not a one-day-active count. Every other user figure sums over the snapshot, so a total can move on a day when nothing was reported at all.
+- **Per-row values are capped at 10^9 before summing** (`MAX_ROW_VALUE`). Instances report their own numbers, so one modified build could otherwise push a series off the chart permanently.
+- **`instances_1d` / `instances_7d` / `instances_30d`** count eligible instances that pinged on D, that are in the snapshot, and that were seen anywhere in `[D-29, D]`, respectively.
+- **Only payload schema `1` is interpreted.** The envelope's `schema` field is parsed and carried on the row, and nothing reads it: every value is pulled through accessors that treat a missing or unexpected field as `0`/`false`, so an older or newer instance contributes whatever it happens to share with schema 1 and never fails the run. When a schema `2` exists and means something different, that is the point at which this file has to start branching on the field.
+
+**Each collection rewrites two days, and a telemetry failure is a skip.** The collector aggregates `today-1` and `today-2` on every run and merges with `'overwrite'`, so a ping that arrived late (an instance retries the next day) corrects the day before yesterday, exactly as `workflows.csv` re-counts its window (§4.5). To do that it pulls the raw export for `[today-31, today-1]`, which is the exact input the thirty-day eligibility window of the older of those two days needs, and no more. If that fetch fails for any reason (a non-2xx answer, a `200` whose every line was rejected, or a truncated export, all three of which `createTelemetryFetcher` raises), the run records `telemetry (<reason>)` in `skipped`, writes nothing under `telemetry/`, and finishes the traffic collection normally. Catching the failure and writing anyway would upsert a well-formed all-zero snapshot over the real row every day until somebody read a CI log; a skipped day costs nothing, because the next run refetches the same 31-day window.
+
+**A fetch that succeeds is not the same as a day worth publishing.** `today-1` and `today-2` are candidates, not a guarantee: before either is aggregated, `publishableTelemetryDays` (`telemetry.ts`) filters them down to the days strictly after the oldest ping the fetch actually returned. On the oldest ping day itself, and on every day before it, no instance can yet have the two distinct reporting days eligibility requires, so the aggregate would be all zeros by construction — the structural absence of evidence, not a measurement of an empty fleet (§4.3). A fetch that returned no pings at all (the receiver existed but nothing had opted in yet, or nothing arrived in the window) excludes both candidates for the identical reason, and none of the four `telemetry/` files are touched that run. This is the same rule telemetry backfill applies below; both callers go through the one function so the reasoning is stated once. Either way nothing gets published leaves a line in `skipped`: `telemetry (no pings in the fetched window)` when the fetch answered empty, `telemetry (every candidate day is at or before the oldest ping)` when it didn't. A successful fetch that quietly publishes nothing would otherwise be indistinguishable in the run log from an ordinary quiet day, and a wiped receiver or a fleet that stopped reporting needs to be visible, not just correct.
+
+**A day the fleet genuinely fell silent on still gets a real zero row.** The rule above only excludes a day that predates evidence; it says nothing about an instance that pinged once and never again. A fleet with pings but with no instance meeting the two-distinct-days threshold on either candidate day is a legitimate zero, and it is written exactly like any other measured value, `instances_7d: 0` and all, because `publishableTelemetryDays` only looks at whether a day is after the oldest ping, never at what the aggregate for that day comes out to. Folding a zero aggregate into the same skip as "nothing to publish" would make a fleet that went silent chart identically to a fleet that was never measured, which is the one confusion this whole fix exists to prevent from the other direction.
+
+**A truncated export is refused, not aggregated.** The receiver caps an answer at 10,000 rows and 8 MiB and announces the cut with an `x-export-truncated` response header (see docs/systems/telemetry.md). That is the one failure the body cannot show: a truncated answer keeps the NDJSON shape exactly, every line parses and every row is well formed, so the partial window is indistinguishable from a genuinely smaller fleet. `createTelemetryFetcher` therefore reads the header before it reads the body and throws, which puts a truncated day on the same path as a 401: the partial rows are discarded unparsed, nothing under `telemetry/` is written, `series_last_date` gains no telemetry key, and the run's `skipped` line carries the reason, the requested range and what to do about it. The check fires on the header being *present*, not on it holding the exact value `1`, because the failure of reading it too narrowly is a published number that is quietly too small. The collector's exit code is unchanged: the traffic series are the irreplaceable half of the run (GitHub deletes its window after 14 days, the receiver keeps 90), so failing the job would cost a day of traffic history to report a telemetry day that the next run refetches anyway. `backfill.yml` is the exception, and deliberately so: it does not catch a telemetry failure at all, so a truncated export there aborts the dispatch with a non-zero exit and the message on stderr, which is the right outcome for a job somebody is watching.
+
+**The step is off until the receiver has a token.** `TELEMETRY_EXPORT_TOKEN` is an optional secret on `metrics.yml`'s "Collect" step (and `backfill.yml`'s "Backfill" step). Unset, `cli-collect.ts` passes no fetcher, the four files are never touched, and
+the run prints a one-line notice naming `TELEMETRY_EXPORT_TOKEN` on **stderr**
+before finishing green. The notice is the point: a secret rotated away would
+otherwise stop the telemetry collection silently, for as long as nobody looked
+at the archive, with every run still passing. `TELEMETRY_ENDPOINT` overrides the
+default `https://hello.backspacechat.com` and
+is only needed to point at a staging receiver. It is wired into both workflows
+as an optional repository **variable** (`vars.TELEMETRY_ENDPOINT`), not a
+secret: it is a hostname, it is documented here, and a secret would be one
+nobody could read back to check what it was set to. An unset `vars` entry
+interpolates the empty string rather than nothing, so `telemetryEndpoint` in
+`cli-support.ts` treats blank as absent; reading it with `?? default` would hand
+the fetcher an empty base URL on every repository that has not set it.
+
+### The static data page
+
+`cli-bundle.ts` writes a second artifact beside `data.json`: `<bundle dir>/data/index.html`, served at `…/insights/data/`. It is rendered by `renderDataPage` in `datapage.ts`, a pure function over the same `DashboardData` the charts are built from, so the two encodings cannot disagree about a figure.
+
+It exists because the dashboard draws every value client-side. A text-only crawler, an LLM fetching the URL, or a reader with JavaScript disabled otherwise sees the headings and the methodology and not one measured number. The static page carries the values as real `<table>` rows, plus a schema.org `Dataset` block naming `data.json` as a machine-readable `distribution` — without which nothing on the site tells a crawler that `data.json` exists at all.
+
+Three properties worth keeping:
+
+- **Escaping is load-bearing, not cosmetic.** Referrer hostnames and popular paths are strings GitHub reports from real traffic, so they originate outside this repo and reach the page verbatim. `escapeHtml` covers `& < > " '`, ampersand first so replacements are not re-escaped, and `jsonLd` additionally escapes `<` so a `</script>` sequence in the data cannot terminate the structured-data block early. Both are pinned by tests in `datapage.test.ts`.
+- **The page inherits the absent-versus-zero rule.** A `null` renders as the words `not measured`, never as `0`; a measured zero renders as `0`. It also reports the resolution it was handed, so a downsampled bundle is labelled as weekly buckets rather than silently presented as daily.
+- **The output path is derived, not configured.** It is `data/index.html` inside `METRICS_OUTPUT_PATH`'s directory. A second path variable would be a second thing that can point elsewhere, at which point the page and the JSON it mirrors can disagree about where each lives. `METRICS_SITE_URL` is separate and genuinely optional: set, the page emits absolute links and `Dataset` URLs; unset, it links relatively, so a fork gets a correct page rather than one advertising this deployment's domain as the home of its data.
+
+Both `site/insights/data.json` and `site/insights/data/` are gitignored: they exist only inside a deploy run.
+
+### Static content baked into the charted page
+
+The static data page solves the crawler problem for a reader that follows the link to it. `/insights/` is the URL that actually gets shared, and a fetcher that reads that URL and stops never does follow it — which is the common case for a search crawler or an assistant asked to look at the page. So `cli-bundle.ts` also writes two regions into `site/insights/index.html` itself, from the same `DashboardData`:
+
+- **`<!-- BUILD:SUMMARY -->`** — a paragraph of headline measurements: the latest measured value of each counter with the date it was measured, the archive totals for views and clones with each one's peak day, app downloads, the leading referrer and path, how many releases shipped and which is newest, and the archive's coverage and resolution. Rendered by `renderSummaryHtml` in `summary.ts`.
+
+  **Every figure the page's lead row shows has to appear in this paragraph**, because the row is drawn client-side and this paragraph is not: a fetcher that runs no JavaScript sees only what is written here. Adding a figure to the lead row without adding it here reopens exactly the gap this block exists to close.
+
+  **The traffic figures here and in the lead row are the same number, and a divergence is a bug.** An earlier revision of this section claimed the opposite, on the belief that the row's views figure was a rolling 30-day window; it is not. `flowCard` sums every measured value in the series, and the 30 days govern only the delta chip beside the figure. So `renderSummaryHtml` is a **second implementation, in a second language, of eight figures**: page views, clones, stars, forks, watchers, contributors, app downloads and the release count. `INSIGHTS_FIGURES` exists precisely so the row and the group heads cannot disagree, and none of these can join it — the paragraph is written at deploy time by the bundler and the page is not.
+
+  That equality is asserted rather than trusted: `insights-check.mjs` reads each of the eight out of the built paragraph, reads the same figure off the rendered page, and prints `MATCH`, `DIVERGED` or `ONE-SIDED` for each. Eight is every figure the paragraph states that the page also prints as a **head**; the peaks and the ranked rows it also states have no head to compare against. Nobody sees both printings at once — a reader without JavaScript sees only the paragraph, a reader with it sees only the page — so a divergence is invisible on the page by construction and can only be caught there.
+
+  What the row carries and the paragraph does not is the **30-day delta chip**. That one is a window, and a window baked into a served page goes stale the moment the window moves with nothing on the page able to tell, so it stays client-side.
+
+  The paragraph sits directly under the two signpost paragraphs that link the plain tables and `data.json`, and `renderSummaryHtml` ends without repeating those links on the strength of that adjacency. Anything inserted between them makes the omission wrong instead of considered.
+- **`<!-- BUILD:JSONLD -->`** — the schema.org `Dataset` block, regenerated so `variableMeasured` carries `PropertyValue` entries with real values and `temporalCoverage` states the archive's actual span. Rendered by `renderDatasetJsonLd`. Skipped when `METRICS_SITE_URL` is unset, since every URL in it is absolute; the committed block stands in that case.
+  The telemetry variables (`reporting instances`, `active users on reporting
+  instances`, `server versions in use`, `countries instances report from`,
+  `client kinds in use`), the sentence naming the second source and the second
+  clause of `measurementTechnique` are emitted only when the archive holds at
+  least one ping, gated on `SummaryFacts.telemetryInstances` in `summary.ts`
+  and on `telemetry.network.dates` in `datapage.ts`. A variable declared over
+  an archive that has never measured it is a claimed measurement, which is the
+  one thing this subsystem exists not to publish. The committed fallback in
+  `site/insights/index.html` carries the extended form, because the live
+  archive holds pings.
+
+Four properties this depends on:
+
+- **It is a second implementation of eight of the charted page's figures, and that is checked rather than denied.** An earlier revision of this line claimed the opposite, on the grounds that the page's figures are "range-dependent and carry 30-day deltas". They are not range-dependent: a value is all-time and the fixed 30-day delta beside it ends on the archive's newest measured day, so the range control moves neither. What `summary.ts` genuinely does not duplicate is the deltas, left out because a window baked into a served page goes stale the moment the window moves. See §10.2 for the eight and for the check that holds them equal.
+- **The absent-versus-zero rule applies to prose.** A figure with no measurement behind it loses its whole clause rather than printing `0` or a dash. This text is read by machines that will quote whatever number sits next to a label, so a dash next to "watchers" is a worse outcome here than on a chart.
+- **A missing marker throws.** `replaceRegion` refuses to return the page unchanged, because the committed fallback says "not built by the pipeline" and publishing it silently would look exactly like a successful deploy.
+- **`labelled()` mirrors the dashboard's `displayLabel` exactly** — trimmed `title` when non-empty, `dimension` otherwise. GitHub fills `title` for paths and leaves it **empty for every referrer**, where the host lives in `dimension`. Reading `title` alone renders "Leading referrer: , 193 views", which is how this was caught.
+
+### The sitemap
+
+`cli-bundle.ts` writes `site/sitemap.xml` (gitignored, `sitemap.ts`) listing the four published pages, with `lastmod` on the two generated ones taken from the archive's newest date rather than from the clock: they are rebuilt every deploy, but their *content* only changes when a collection adds a row, and `lastmod` describes content. Neither landing page carries a `lastmod` — nothing in this pipeline knows when either last changed.
+
+`ru/` is listed beside the root rather than left out. It is a translation of the landing page, not a separate document: the two declare each other with `hreflang` and the root is also the `x-default`, which is why `ru/` takes the lower priority of the pair. A sitemap that listed only one of them would leave the pair discoverable from one side only.
+
+**`robots.txt` is published from this repository, at `site/robots.txt`.** It is only honoured at a domain root, and since the site moved to `backspacechat.com` (a GitHub Pages custom domain, `site/CNAME`) the site *is* that root, so the file ships in the Pages artifact like any other asset. It is committed rather than generated: the one URL it carries, the sitemap, is fixed. Before the move this site was a project page at `thezwiss.github.io/backspace/` and could not publish one at all; the root belonged to a separate `thezwiss.github.io` user-pages repository, which still exists and still carries a `robots.txt` for that domain (its sitemap line now points here). A fork that enables Pages inherits `site/CNAME` naming a domain it does not own; GitHub refuses a custom domain already claimed by another repository, so the fork has to delete that file or set its own.
+
+### The IndexNow key
+
+`site/` carries one IndexNow verification key, as a `.txt` file whose name is
+the key itself. It is a public file by design and belongs in the repository: the protocol proves control of a domain
+by asking the submitter to host the key at a URL only that domain's owner can
+write to, so the key is evidence of control rather than a secret, and it is
+worthless to anyone who cannot publish under this domain.
+
+It exists because Yandex runs about 70% of Russian search and a Yandex
+Webmaster account could not be created (registration fails from this region,
+which is a known and common outcome, not a configuration error). IndexNow is
+the account-free route to the same outcome: `GET https://yandex.com/indexnow`
+with the key and a URL asks Yandex to look at that page now, rather than
+waiting for it to arrive on its own. One key reaches every participating
+engine, so the same submission also notifies Bing.
+
+The file name must match the key exactly, and its only content is the key
+itself with no trailing newline and no markup. It is not listed in
+`sitemap.xml`; it is not a page.
+
+**No workflow pings this endpoint, deliberately.** The deploy runs daily
+whenever a collection lands, and IndexNow is for telling an engine that
+content actually changed. A daily ping of four unchanged URLs is the kind of
+thing that gets a submitter throttled. Submit by hand when a page genuinely
+changes:
+
+```
+# KEY is the name of the key file in site/, without the .txt
+curl "https://yandex.com/indexnow?url=https://backspacechat.com/ru/&key=$KEY"
+```
+
+The key is deliberately not written out here. Repeating it in prose would give
+it a second home to drift from, and a high-entropy string next to `key=` is
+indistinguishable from a leaked credential to a secret scanner, which is what
+the first draft of this section proved by failing `gitleaks`. The file name in
+`site/` is the single source of truth.
+
+
+**The download split.** `downloads_total` sums every release asset. That number is dominated by update machinery rather than by installs: electron-updater fetches `latest.yml` / `latest-mac.yml` / `latest-linux.yml` on every update check from every installed client, and `.blockmap` files during a differential update, and GitHub counts all of them in `download_count` exactly like an installer. When the split was added on 2026-09-02 the feed files had 1,519 downloads against 323 for every real installer and archive combined, so the single figure overstated installs by roughly 5.7x.
+
+`downloads_app` counts installers and archives; `downloads_updates` counts anything matching `*.yml`, `*.yaml` or `*.blockmap` (`isUpdateArtifact` in `collect.ts`). For any row carrying all three, `downloads_app + downloads_updates === downloads_total`.
+
+`downloads_total` keeps its original meaning and is still written, because redefining a column in place would silently change what its historical rows mean. Rows written before the split stay **blank** in the two new columns, never `0`: the archive never measured that split for those days, and `formatCsv` writes a missing field as an empty value, which the bundler maps to `null`. The dashboard shows `downloads_app` and `downloads_updates` as separate cards and no longer shows the combined total, which answered neither question.
+
+`repo.csv.downloads_total` is a `number | null` in memory (`RepoPoint` in `types.ts`) and is written as a **blank CSV field**, never `0`, whenever the optional `/releases` fetch fails that run (see §5). `subscribers` and `open_issues` are never blank — they come from the required `/repos/{slug}` fetch, which has already succeeded by the time `repo.csv` is written.
+
+**`stars.csv`/`forks.csv` are one row per UTC date, from both of the processes that write them.** The daily collector (`collect.ts`) appends today's row from the repo object's live counter, so a run either produces that day's row or (on a required-fetch failure) writes nothing at all. `backfill()`, reconstructing the same files from `starred_at`/`created_at` timestamps, is **dense over the range it reconstructs**: `cumulativeByDay` (`backfill.ts`) emits a row for every UTC date from the first event through the run date, carrying the running total forward across days on which nothing happened.
+
+That density is deliberate and it is a correction, not a convenience. These series are cumulative point-in-time totals, so a day on which nobody starred is not a day whose value is unknown — it is known exactly, and it equals the previous day's total. Emitting only the days that moved left the file sparse and pushed the carry-forward onto every reader, which the dashboard cannot do: it draws an absent date as a **break in the line** (§10), a convention that is load-bearing for traffic, where GitHub omits a day it measured no views and a break is the only honest rendering. Applied to a star count the same convention published a hole in the record where there was no hole in the knowledge, so a 62-day history rendered as scattered dots. The archive now states the value it knows for each day and the reader is asked to carry nothing. `contributors.csv` is the one series that stays sparse and is the documented exception at the page layer (§10.2): it is recomputed in full from the commit history on every run rather than sampled, so a date it holds no row for is one the total is known to have been unchanged on, not one that went unread.
+
+What is still true: nothing recorded on disk distinguishes which of the two writers produced a given row — both write through the same `upsertByDate`/CSV format, and a row looks identical regardless of origin. A reconstructed row is a lower bound on what the live counter read that day (§4.2), and that caveat now applies to every date in the reconstructed range rather than only to the dates an event landed on. The two are not distinguishable from the file alone.
+
+**`releases.csv` is keyed on `tag`, not `date`.** Unlike every other series in this table, more than one row can legitimately share a `date`: two releases published the same UTC day are two distinct rows, merged by `upsertByKey` (`series.ts`) keyed on `tag` and sorted `(date asc, tag asc)` for byte-stable output. Both `collect.ts` (`'overwrite'` mode — the day's live fetch is authoritative) and `backfill.ts` (`'if-absent'` mode — a reconstruction must never replace a value the collector already measured) merge through this same keyed function, so the two writers can no longer disagree about which same-day release survives.
+
+### 3.2 Aggregate-window series (NDJSON, one JSON object per line)
+
+| File | Fields | One row means |
+|---|---|---|
+| `traffic/referrers.ndjson` | `snapshot_date, dimension, title, count, uniques` | In the trailing 14 days ending on `snapshot_date`, referrer host `dimension` sent `count` views (`uniques` unique visitors) |
+| `traffic/paths.ndjson` | `snapshot_date, dimension, title, count, uniques` | In the trailing 14 days ending on `snapshot_date`, path `dimension` (with page `title`) received `count` views |
+| `telemetry/versions.ndjson` | `snapshot_date, dimension, title, count, uniques` | `count` instances in the `snapshot_date` snapshot were running version `dimension` |
+| `telemetry/countries.ndjson` | `snapshot_date, dimension, title, count, uniques` | `count` instances in the `snapshot_date` snapshot resolved to country `dimension` |
+| `telemetry/clients.ndjson` | `snapshot_date, dimension, title, count, uniques` | `count` **users** in the `snapshot_date` snapshot were on client kind `dimension` (`web`, `desktop`, `mobile`) |
+
+`/traffic/popular/referrers` and `/traffic/popular/paths` each return a single **trailing-14-day aggregate, top 10 only** — there is no per-day breakdown and none is obtainable by any means. Each row is that aggregate tagged with the day it was fetched. `dimension` is the referrer host on `referrers.ndjson` and the page path on `paths.ndjson`; `title` is always `''` on `referrers.ndjson` (the API doesn't return a referrer title) and the page title on `paths.ndjson`.
+
+`upsertDimensional` in `series.ts` keys on `(snapshot_date, dimension)` and rewrites the whole file every run — there is no append mode for this format. **A dimension absent from a given `snapshot_date`'s rows means "outside the top 10 that day," never zero.** If referrer X drops out of the top 10, its row for that date simply doesn't exist; nothing writes a `count: 0` row for it.
+
+The three `telemetry/*.ndjson` files share that shape and that merge, and add one rule of their own. **A dimension value held by fewer than three instances on a day folds into `other` before anything is written** (`MIN_INSTANCES_PER_DIMENSION` in `telemetry.ts`). Nothing in the public archive names a version, a country or a client kind that one or two instances carry, because with a fleet this small that is close to naming the instance. `other` is written last and omitted entirely when nothing folded into it, and `title` is always `''` on all three. The rows follow the same snapshot as `network.csv`: the latest ping per eligible instance in the seven days ending on `snapshot_date`.
+
+`versions.ndjson` adds a shape check on top of the threshold. `build.version` is
+free text an instance chose, and three instances agreeing on a value is enough to
+clear the fold, so a value that does not match `/^\d+\.\d+\.\d+(-[0-9A-Za-z.]{1,16})?$/`
+is counted as `other` before the tally is folded (`releaseVersion` in
+`telemetry.ts`). A missing version counts there too. The receiver bounds the
+field on arrival as well, but rows stored before that bound existed can still
+carry anything, so the only version strings the archive names are ones the
+collector recognises. `other` is one bucket either way: a mapped value and a
+folded value share the single row, they never produce two rows with the same
+key.
+
+`clients.ndjson` is the one file where the folding threshold and the published figure count different things: a client kind folds by **how many instances** report it, and the number written is **how many users** are on it. The threshold protects the instance, so it has to count instances; the figure worth charting is people. `count` and `uniques` are equal on all three files, carried only because the format is shared with the traffic dimensionals.
+
+### 3.3 Collector state (`meta.json`)
+
+```json
+{
+  "last_run": "2026-09-01T22:06:27.352Z",
+  "last_success": "2026-09-01T22:06:27.352Z",
+  "error": null,
+  "series_last_date": { "traffic/views.csv": "2026-08-31", "stars.csv": "2026-09-01" }
+}
+```
+
+The two timestamps are whatever `new Date().toISOString()` produced, milliseconds included (`deriveRunTimestamps` in `cli-support.ts`); nothing truncates them. `series_last_date` keys are exact file paths (only the `.csv` files collected this run are recorded; NDJSON files are not). **A key is added the first time a series is ever written and, from then on, is never removed** — a run that skips a series (an optional fetch failed, or the series simply wasn't touched) leaves that key exactly as the last successful run left it, so the field goes *stale* (a date that stops advancing) rather than *disappearing*. A vanished key would be far easier to miss than a date that stopped moving, which is the whole reason this field exists (see §9).
+
+There are **two writers** of this file, one per outcome, never both in the same run:
+
+1. **On success**, `collect()` (`collect.ts`) is the only writer. It writes `meta.json` last of all, once every other file for the run has landed — see §5's atomicity guarantee — and it is the only place `series_last_date` is ever advanced to a fresh date. Building that map is itself two steps: `collect()` first reads the *previous* `meta.json` via `store.readMeta()` (synchronously, as the write phase's first action — a corrupt existing `meta.json` therefore throws before any file changes this run, the same all-or-nothing guarantee a required-fetch failure already has) and seeds `series_last_date` from it, then overwrites only the keys for series actually written this run. A first-ever run (`readMeta()` returns `null`) seeds from `{}`. On a required-fetch failure, `collect()` throws before any of this, so this writer only ever records a genuine success.
+2. **On failure**, `recordFailure()` (`cli-support.ts`, invoked by `cli-record-failure.ts` from `metrics.yml`'s "Record failure" step, `if: failure()`) is the only writer. It reads whatever `meta.json` currently exists (or `null` — legitimate on a run that fails before `collect()` has ever written one), refreshes `last_run` to its own timestamp, and sets `error` to a description of what failed — `run <job status> — <url of the failed run>`, passed in via the `METRICS_RUN_OUTCOME` environment variable, interpolated in the step's `env:` block and never into its `run:` string. The URL is there because this string is the entirety of what a maintainer reading `meta.json` gets: a bare status tells them the archive stopped but not where to look. It leaves **`last_success` and `series_last_date` completely untouched** — not merged, not partially updated, byte-for-byte whatever `collect()` (or a previous failure record) last wrote — because `last_success` is this archive's "last known good" signal and a failure must never move it, and a failed run measured nothing, so it must never edit `series_last_date` either. A "Commit and push failure record" step, mirroring the success path's commit-and-push, then commits and pushes just `meta.json`, with a failed push swallowed to a `::warning::` annotation rather than failing the (already-failed) job.
+
+The practical upshot: a normal successful day produces **exactly one** commit on `metrics-data` (the data snapshot, `meta.json` included via that step's `git add -A`) — there is no second, redundant metadata commit on success anymore. A failed day produces at most one commit too (the failure record; there is no data commit to accompany it unless `collect()` itself succeeded but a later step, e.g. the push, failed — see §9). Check `error` **and** `last_run` together for "did last night's run actually work": `error` distinguishes a failed run from a successful one, but only a run that reached one of the two writers sets it at all. A cancelled or timed-out job sets neither, so a stale `last_run` is the signal that catches those. See §9.
+
+---
+
+## 4. Write semantics
+
+**Fetched values win. Three guards make that safe.**
+
+### 4.1 Atomicity
+
+`collect()` fetches every **required** series (`views`, `clones`, `referrers`, `paths`, the repo object) via a single `Promise.all` before writing anything. If any of those rejects, the function throws before a single `store.write*` call happens — the data directory and `meta.json` are left completely untouched, and the next run treats the previous data as still authoritative. This is asserted directly by a test (`collect.test.ts`, "aborts the entire write when a required traffic fetch fails"), which checks that `traffic/views.csv`, `stars.csv`, and `meta.json` are all still empty/absent after a failed clones fetch.
+
+Once the write phase starts, its very first action is a synchronous read, not a write: `store.readMeta()`, which seeds `series_last_date` from the previous run (§3.3). Placed there — before the first `store.write*` call — rather than later alongside the read-back-after-write calls that finish assembling `meta.json`, a corrupt existing `meta.json` throws before any file changes this run, extending the same all-or-nothing guarantee above to this failure mode too. `readMeta()` is `readFileSync` + `JSON.parse`, both synchronous, so it introduces no `await`. Every `store.write*` call that follows is likewise synchronous with no `await` between any of them, so there is no point where a second run (or anything else) could interleave. `meta.json` is written last of all, so its presence is a completion marker.
+
+**The honest limit on this guarantee:** it is atomicity within one process's happy path, not a transaction. A synchronous run of `writeFileSync`/`renameSync` calls still issues one OS syscall at a time — a hard kill (`SIGKILL`, OOM) or an OS-level error (`ENOSPC`, a permissions change) between two of those calls can leave some files updated to today and others holding yesterday's content, with `meta.json` never reaching its update in that case (so it still points at the last run that *did* complete). **This torn-cross-file state does not self-heal for `stars.csv`, `forks.csv`, or `repo.csv`.** Those three files only ever write **today's** row each run — there is no retry logic that revisits a skipped or partially-written prior date for them. `traffic/*` is different: because the API returns a rolling 14-day window, a gap in the traffic files left by a torn run is silently repaired the next time collection succeeds (see §4.4). A torn `stars.csv`/`forks.csv`/`repo.csv` is not repaired by anything except a future day's row simply continuing forward from wherever it was left.
+
+### 4.2 Backfill is write-if-absent
+
+`backfill()` (`backfill.ts`) merges every series it touches in `'if-absent'` mode — an existing row is never replaced by a reconstructed one. `stars.csv`/`forks.csv` go through `upsertByDate(existing, incoming, 'if-absent')`, keyed on `date`; `releases.csv` goes through `upsertByKey(existing, incoming, (row) => row.tag, 'if-absent', compareReleaseRows)`, keyed on `tag` instead (see §3.1's caveat on why releases needs a different key). Both share the same `'if-absent'` guarantee regardless of key. This is a structural requirement, not a style choice: the daily collector writes `stars.csv`/`forks.csv` from the repo object's **live counters** (`stargazers_count`, `forks_count`), which correctly reflect someone who starred and later unstarred. Backfill reconstructs the same series from `/stargazers`' `starred_at` field, which lists only **current** stargazers — anyone who starred and later unstarred is permanently invisible to it. The two methods measure the same date differently by construction, and the collector's measured value is the one that was actually true on that date. Running backfill against an archive with months of collector-written history therefore changes nothing for any date (or, for `releases.csv`, any tag) the collector already covered; it only fills gaps neither process has ever recorded. This is the one property `backfill.test.ts` exists to pin down.
+
+`backfill()` is permitted to touch exactly `stars.csv`, `forks.csv`, `releases.csv` and the four `telemetry/*` files (the `WRITABLE` constant in `backfill.ts`). It never opens `traffic/*` (no historical traffic API exists at all) or `repo.csv` (`subscribers` has no historical API either — a stray rewrite there would be a permanent, unrecoverable loss) or `contributors.csv` (the `/stats/contributors` weekly buckets the daily collector reads already cover all of history whenever that endpoint answers, so there is no gap for a one-shot backfill to fill).
+
+**Telemetry backfill has a hard 90-day reach and starts where the evidence starts.** The receiver keeps raw pings for 90 days, so a dispatch pulls `[today-89, today-1]` in three requests of at most 31 days each and, before filtering, considers every day in that same `[today-89, today-1]` range a candidate to aggregate. It does not aggregate all of them: the fill is bounded below by the oldest day the export actually carries, for the same reason the workflow fill begins at the oldest surviving run (§4.5). The receiver has not existed for 90 days on every dispatch, and an aggregate over a day it holds no row for is an all-zero snapshot that reads as a measured empty fleet, which §4.3 forbids. An empty export therefore writes nothing at all, and neither does the oldest day the export does carry: eligibility needs two distinct reporting days inside the trailing thirty, and that day has exactly one by definition, so its aggregate is all zeros by construction. The fill starts one day after it. This is the same `publishableTelemetryDays` call the daily collector makes (above); the two are bound by the identical eligibility rule and share the one function that states it. Nothing in `backfill.ts` re-checks that a chunk's rows actually stayed inside the `[from, to]` it requested; that is left to the receiver's `exportRange` (`scripts/telemetry-receiver/src/store.ts`), whose `WHERE day >= ?1 AND day <= ?2` reads the same two parameters this loop sends, so a row outside the requested range would be a receiver defect rather than something a second local clamp here could catch any more reliably. Inside the range the earliest days are still computed over a short history, because the snapshot rule looks back thirty days to decide which instances count and a day near the start of the export has fewer than thirty behind it: those instance counts are a lower bound, and there is no way to fetch around it. `network.csv` merges if-absent like every other backfilled CSV, so any day the collector measured keeps its own row. The three NDJSON files hold to the same rule at a coarser grain: `upsertDimensional` has no if-absent mode, so `mergeDimensional` applies one itself and drops every incoming row whose `snapshot_date` the file already carries. It has to be by day rather than by row, because `dimension` is part of `upsertDimensional`'s key: a version that folds into `other` on a truncated lookback does not collide with the collector's row naming it, so a row-keyed merge would leave `{D, "1.1.2", 5}` in place and add `{D, "other", 3}` beside it, and the day would count eight instances where five reported. So a telemetry day is filled whole or left exactly as it is, and dispatching `backfill.yml` for stars or forks never rewrites telemetry history. A backfill dispatched without `TELEMETRY_EXPORT_TOKEN` set touches nothing under `telemetry/` and reconstructs everything else normally. Unlike the collector, a failed telemetry fetch here is not caught: this job is dispatched by hand and watched, it has no `skipped` channel, and every fetch happens before every write, so a rejection leaves the archive untouched.
+
+### 4.3 No zero-filling
+
+Nothing in this package ever writes `0` to stand in for "not measured." `repo.csv.downloads_total` is left as a blank CSV field (`null` in memory) when the optional `/releases` fetch fails, specifically so a missing measurement can never be mistaken for a real zero download count. A version that instead carried the previous run's value forward under today's date was considered and rejected during review: a flat line in that case would be indistinguishable from a genuinely quiet day, whereas a hole in the data is visible and honestly represents "we don't know." The same principle governs the dimensional files (§3.2, a dropped-out referrer is an absent row, never a zero) and `getStats()` (§6, a persistent 202 is `null`, never a zero).
+
+The rule has a counterpart that `workflows.csv` is the first series to exercise: **a measured zero must not be hidden either.** The Actions list endpoint is asked for a date range and answers it completely, so a day inside the requested window with no runs is a day this collector measured and found empty. Writing no row for it would render on the chart as collector downtime — the same class of lie, pointed the other way. So `countByDay` (`series.ts`) emits a row for every day in the range it is given, zeros included, and the caller owns the claim that the range was fully observed. Contrast the traffic endpoints, which omit a zero-traffic day entirely: there, absence really is "not measured", which is why the two series must never share a fill rule.
+
+### 4.4 Self-healing (traffic only)
+
+The traffic window is 14 buckets wide, so any gap of **≤13 full days** without a successful run is silently repaired the next time `collect()` runs — the next successful fetch's window simply covers the missed dates again, and `upsertByDate`'s overwrite mode fills them in. A missed cron, a transient API outage, or a rejected push therefore costs nothing as long as the next run succeeds within two weeks. As established in §4.1, this self-healing property belongs to `traffic/*` specifically and does not extend to `stars.csv`, `forks.csv`, or `repo.csv`.
+
+
+### 4.5 Workflow runs are counted over a window, and never subtracted from clones
+
+`workflows.csv` exists because GitHub counts every `actions/checkout` in the clone statistics (§3.1), so the clone line is partly a picture of this project's build pipeline. Two properties keep it honest.
+
+**It is collected over a trailing 14-day window, not for `today` alone.** The collector runs mid-afternoon UTC, so the current day's run count is always partial. Counting only `today` and never revisiting it would freeze every day at whatever fraction had happened by the time the run fired — a uniform understatement nothing downstream could detect. The window matches the traffic window it is compared against, the fetch is bounded server-side with `created=>=`, and the merge is `'overwrite'`, so yesterday's partial count is replaced by its complete one on the next run. Re-counting a settled day writes an identical value, so this costs no extra diff.
+
+**Backfill stops at the oldest surviving run.** GitHub deletes workflow runs once they pass the repository's retention period (90 days by default). Reconstructing a day older than the oldest run still returned would write a confident `0` for a day whose evidence has been destroyed — a fabricated measurement, indistinguishable ever after from a genuinely quiet day. Inside the surviving span the zeros are sound, because retention deletes uniformly by age: if the oldest surviving run is still present, no later day has lost runs. Below that date the reconstruction writes nothing, leaving a gap, which is the truthful encoding.
+
+**The two series are never combined.** No "clones minus estimated CI" figure is published anywhere. The relationship is not a stable coefficient — measured on this repository, 218 successful checkout steps accompanied 155 clones on one day and 180 accompanied 189 on another — so a corrected number would be a model, on a page whose entire claim is that every figure was measured. The two are plotted in different groups, clones in Reach and workflow runs in Delivery, joined by the page-wide cursor and by a link in each direction, rather than as one dual-axis chart, precisely so the co-occurrence is visible without inviting a ratio to be read off them. The cursor syncs on scale values rather than on a shared x axis, which is why the two can sit in different groups at all; §10.7 says why.
+---
+
+## 5. The 202 problem
+
+`GET /repos/{slug}/stats/contributors` computes its answer asynchronously. While GitHub is still building the statistic, the endpoint answers `202` with an effectively empty body rather than `200`. `github.ts`'s `getStats()` is the only client method built to handle this:
+
+- On a `202`, it retries with a backoff (`2000 * (attempt + 1)` ms between attempts, up to `statsAttempts` times — 5 by default) and never parses the placeholder body.
+- If every attempt still comes back `202`, `getStats()` returns `null`. **`null` is the only way this method reports "not available yet"** — the success branch only ever produces a value by parsing a genuine `200` body, so there is no path from an in-progress computation to a zero-shaped result.
+- In `collect()`, a `null` from `getStats()` causes `contributors.csv` to be skipped for that run, leaving whatever value the file already holds untouched. It is treated as optional for atomicity purposes (§4.1): a stats timeout must never abort the traffic write, since traffic is the irreplaceable series.
+
+GitHub's `/stats/*` cache is keyed by the default branch's current commit and is invalidated by every push to it — so on an actively-developed repo, hitting a `202` is routine, not an edge case, and every collection run should be expected to occasionally skip `contributors.csv` for a day.
+
+**`/stats/contributors` returns at most 100 contributors.** This is undocumented behavior of the GitHub endpoint itself, not of anything in this package: once a repo has more than 100 total contributors, the 101st and beyond simply never appear in the response, and `contributors.csv`'s cumulative count silently stops increasing at 100 forever — indistinguishable on the chart from a genuine plateau in new-contributor growth. There is no workaround; the endpoint has no pagination for this list.
+
+---
+
+## 6. Field-name traps
+
+These are documented because reading the obviously-named GitHub field would silently produce wrong data, and nothing in the type system catches it:
+
+- **`watchers_count` is a duplicate of `stargazers_count`, not the watcher count.** `repo.csv`'s `subscribers` column is populated from `subscribers_count`, the actually-correct field — the collector never reads `watchers_count` at all (`RepoResponse` in `collect.ts` declares only `stargazers_count`, `forks_count`, `subscribers_count`, and `open_issues_count`).
+- **The repo object's `open_issues_count` includes open PRs.** `repo.csv.open_issues` carries that combined meaning — GitHub does not separate the two in this field.
+- **`/stargazers` requires the custom media type to return `starred_at` at all.** `backfill.ts` requests it with `Accept: application/vnd.github.star+json`; without that header the endpoint returns bare user objects with no timestamp, and `toDate()` would throw on every entry. Listing stargazers at all is gated to repo admins/collaborators as of a GitHub platform change — `METRICS_TOKEN` satisfies this because it belongs to a repo admin, not because star lists are openly public.
+
+---
+
+## 7. Token and branch-protection setup
+
+**Both are in place on `TheZwiss/backspace`** as of 2026-09-01: the `METRICS_TOKEN` repository secret exists, and the `metrics-data` branch carries the `Protect metrics data store` ruleset (`deletion` + `non_fast_forward`, no bypass actors). The archive has been collecting since that date. This section stays because both are one-time, manual GitHub settings that no code in this repository can create — a fork, a transfer, or a re-created repository has to redo them, and until they exist `metrics.yml` and `backfill.yml` fail on every run.
+
+1. **Create a fine-grained personal access token**, scoped to this repository only, with:
+   - **Administration: read** — the traffic endpoints (`/traffic/views`, `/traffic/clones`, `/traffic/popular/referrers`, `/traffic/popular/paths`) require this permission specifically, and it is the exact documented requirement for all of them.
+   - **Contents: read** — needed to read the repo object and its release/star/fork data.
+
+   **`METRICS_TOKEN` deliberately does NOT carry `Actions: read`.** `/actions/runs`, which backs `workflows.csv` (§4.5), is fetched with the workflow's own `GITHUB_TOKEN` instead, passed as `METRICS_ACTIONS_TOKEN`. `actions` exists in the Actions `permissions:` vocabulary where `administration` does not, so the built-in token can reach that endpoint and there is no reason to widen a long-lived PAT to do it. `metrics.yml`'s collect job already holds `actions: write`; `backfill.yml` declares `actions: read` explicitly, because naming any `permissions:` block sets every unlisted scope to `none`.
+2. **Store it as the `METRICS_TOKEN` repository secret** (Settings → Secrets and variables → Actions → New repository secret).
+3. **Create a branch protection ruleset on `metrics-data`** blocking **deletion** and **force-push (non-fast-forward)**, with **no bypass actors**. `gh ruleset list` on this repo shows the two precedents: `Protect CLA signature store` and, for this branch, `Protect metrics data store`. Do **not** require pull requests or status checks — both workflows commit directly to the branch, and requiring a PR would break every run. This branch is the only place in the repository holding genuinely irreplaceable data (the traffic history), so it is the one branch that most needs this protection.
+
+**Why `GITHUB_TOKEN` cannot substitute for `METRICS_TOKEN`:** there is no `administration` key in the Actions `permissions:` vocabulary at all — not "read" nor any other level — so no configuration of the built-in token can reach the traffic endpoints. The split is forced by GitHub's own permission model, not a security preference that could be relaxed.
+
+`cli-support.ts`'s `assertHeaderSafeToken()` validates the token for control characters (a stray newline, tab, or other C0/DEL byte) **before** it is ever used to build an HTTP header. This exists because a malformed token reaching Node's `fetch`/`Headers` implementation throws a `TypeError` whose message embeds the entire broken header value — including the secret — verbatim, and this CLI's top-level catch prints whatever any thrown error says to the (public) Actions log. If `metrics.yml` fails immediately with a message about a "control character," the token was pasted with a trailing newline or similar and needs to be re-entered as the secret's raw value.
+
+---
+
+## 8. The 60-day schedule hazard
+
+GitHub disables a repository's scheduled workflows after 60 days with no activity on the repository. This collector's own commits do not reliably reset that timer: they land on the orphan `metrics-data` branch (not the default branch) and are made with `GITHUB_TOKEN`, and whether a non-default-branch push counts as "activity" for this purpose is undocumented. Every commonly-suggested keepalive trick assumes commits to the default branch, which this workflow deliberately never makes.
+
+The mitigation is active rather than passive: the final step of `metrics.yml`'s `collect` job runs
+
+```yaml
+gh workflow enable metrics.yml --repo "${{ github.repository }}" || true
+```
+
+unconditionally (`if: always()`), on every run, using `GITHUB_TOKEN` with `actions: write` permission. This is idempotent — re-enabling an already-enabled workflow is a no-op — and the `|| true` means a permissions problem with this specific call can never fail the whole run over what is meant to be a self-heal step (though it does mean a failure here is silent unless someone is watching the step log).
+
+The dashboard carries a staleness banner as a partial second backstop (§10.6): it compares `meta.last_run` against the bundle's own `generated_at` and warns above 48 hours, and it warns unconditionally whenever `meta.error` is non-null. **Partial, and the limit is exactly the failure mode this section is about.** The banner's reference clock is `generated_at`, not the visitor's clock, so it only fires once something rebuilds the bundle after the collector stalled. If the schedule is disabled, `metrics.yml` never runs, `deploy-dashboard` never runs, and the published bundle freezes with both timestamps close together — a page that looks healthy because nothing is measuring the gap. A push under `site/**` or a `workflow_dispatch` of `deploy-pages.yml` rebuilds the bundle and makes the banner fire.
+
+So the reliable check for this specific hazard is still `meta.json`'s `last_run`/`last_success` on the tip of `metrics-data`, read by hand or by a script. The banner is not a nightly backstop for either case: `deploy-dashboard` carries `needs: collect` (§10.5), so a collector that is merely failing stops the republish just as surely as one that stopped being scheduled, and in both cases the banner stays silent until something else rebuilds the bundle.
+
+---
+
+## 9. Operations
+
+### Running collection locally
+
+```bash
+METRICS_TOKEN=<fine-grained PAT> \
+GITHUB_REPOSITORY=TheZwiss/backspace \
+METRICS_DATA_DIR=/path/to/a/checkout/of/metrics-data \
+node scripts/metrics/src/cli-collect.ts
+```
+
+All three environment variables are required (`requiredEnv` in `cli-support.ts` throws immediately if any is missing, empty, or whitespace-only). Three more are optional. `METRICS_ACTIONS_TOKEN` is read by `cli-collect.ts` alone (see `workflows.csv`, §4.5). `TELEMETRY_EXPORT_TOKEN` enables the telemetry step and `TELEMETRY_ENDPOINT` overrides the receiver's default `https://hello.backspacechat.com`; `cli-collect.ts` and `cli-backfill.ts` read that pair identically. Both entrypoints read the endpoint through `telemetryEndpoint` in `cli-support.ts`, which holds the single copy of that default and treats a blank or whitespace-only value as unset. `TELEMETRY_ENDPOINT` is wired into both workflows as an optional repository **variable** (`vars.TELEMETRY_ENDPOINT`), not a secret: it is a hostname, it is documented here, and a secret would be one nobody could read back to check what it was set to. An unset `vars` entry interpolates the empty string rather than nothing, which is exactly the case `telemetryEndpoint` exists to absorb. Leave `TELEMETRY_EXPORT_TOKEN` out and the run prints a one-line notice naming it on stderr and collects everything else normally, rather than skipping telemetry silently. `METRICS_DATA_DIR` must point at a directory containing (or where you want created) the series files described in §3 — normally a local checkout of the `metrics-data` branch. Requires Node ≥22.18 for unflagged type stripping (the package's `engines` field); the workflow itself pins Node 24. This has not been exercised against the live API as part of writing this document — it is a direct read of what `cli-collect.ts` requires, not a verified live run.
+
+### Running a backfill
+
+Either dispatch `backfill.yml` from the Actions tab (or `gh workflow run backfill.yml`), or run it locally the same way as collection:
+
+```bash
+METRICS_TOKEN=<fine-grained PAT> \
+GITHUB_REPOSITORY=TheZwiss/backspace \
+METRICS_DATA_DIR=/path/to/a/checkout/of/metrics-data \
+node scripts/metrics/src/cli-backfill.ts
+```
+
+Safe to run at any time, including repeatedly — every write is if-absent (§4.2), so no value a rerun disagrees with is ever replaced. "Changes nothing" is the normal outcome but not a guarantee: a rerun still *adds* rows for dates no writer has ever recorded, so an archive seeded before the fill described in §3.1 gains its quiet days on the next dispatch (that is how the existing archive was brought forward), and a collector-era gap gains a row it is better off without — see §9 before dispatching against an archive with collector history in it. The CLI's summary line is deliberately phrased "backfill target files (write-if-absent, listed whether or not they changed this run)" rather than "wrote," because `backfill()`'s `written` result is the fixed, exhaustive list of files it is *permitted* to touch, not the set that actually gained a row this run — see `formatBackfillSummary` in `cli-support.ts`.
+
+The same asymmetry applies to the telemetry series, and harder: the receiver keeps 90 days and the collector's own daily runs cover everything inside that, so a telemetry backfill is worth dispatching only after a stretch of failed collections, and only within three months of it.
+
+One asymmetry to know before dispatching for `workflows.csv` specifically: unlike stars and forks, whose evidence (`starred_at`, `created_at`) is permanent, workflow runs are **deleted at the retention horizon**. A backfill run today reconstructs further back than one run in three months will, and the days it can no longer reach are gone for good. If the CI series matters, the useful dispatch is the earliest one, not the most convenient one. Everything it does write is still if-absent, so it remains safe to repeat.
+
+### Building the dashboard bundle locally
+
+```bash
+METRICS_DATA_DIR=/path/to/a/checkout/of/metrics-data \
+METRICS_OUTPUT_PATH=/tmp/data.json \
+node scripts/metrics/src/cli-bundle.ts
+```
+
+Two environment variables, both required, both checked by the same `requiredEnv` that guards the other three entrypoints. No token: the bundler reads the archive off disk and never touches the network.
+
+- `METRICS_DATA_DIR` is the archive root — the same variable `cli-collect.ts` and `cli-backfill.ts` read.
+- `METRICS_OUTPUT_PATH` is a **file** path, not a directory. It is resolved against the process working directory, and its parent is created recursively. Point it somewhere outside the repo unless you actually want to preview the page, since `site/insights/data.json` is gitignored precisely so the artefact never lands in a commit.
+
+Two lines on stdout, and a third on stderr only if the bundle is at or above the 80 % warning mark (§10.3). Real output, run against a fresh clone of `metrics-data` on 2026-09-02 — the two counts and the byte total grow with the archive, so treat them as the shape rather than as values to match:
+
+```
+archive /path/to/metrics-data: since 2026-02-15 — 14 days of views, 1 releases
+wrote /tmp/data.json: 3550 bytes of the 2097152-byte budget (downsampled: no, daily)
+```
+
+**"Missing" means two different things here, with opposite outcomes. Do not conflate them.**
+
+- **A missing archive *directory* is the empty case, not an error.** `METRICS_DATA_DIR` is set, but nothing exists at that path: the bundler exits **0** and writes a valid `empty: true` bundle, because `store.read` collapses `ENOENT` — and only `ENOENT` — to "absent". This is the behaviour `deploy-pages.yml` depends on when the `metrics-data` branch does not exist (§10.5).
+- **A missing *environment variable* is an error.** Either variable unset, empty, or whitespace-only fails `requiredEnv` before anything is read, and the bundler exits **1** with `Missing required environment variable <NAME>` — the empty and whitespace-only cases adding `(present but empty or whitespace-only)`.
+
+Every other failure also exits non-zero and fails the deploy: an unreadable directory (`EACCES`), a data dir that is really a file (`ENOTDIR`), a corrupt CSV, or a bundle still over budget after downsampling.
+
+To preview the page itself, write the bundle to `site/insights/data.json` and serve `site/` over HTTP — the page fetches `data.json` relative and same-origin, so a browser will block the request from a `file://` page.
+
+### Recovering from a gap
+
+A gap of **13 days or fewer** in traffic data self-heals automatically the next time `collect()` succeeds — no action needed (§4.4). A gap of **14 days or more** in traffic is permanent; there is nothing to backfill it with.
+
+A gap in `releases.csv` (however it happened) can be recovered by dispatching `backfill.yml`: `published_at` is a permanent, immutable timestamp on every release, so reconstructing from `/releases` produces the exact same rows the collector would have written, for any date range.
+
+**A collector-era gap in `stars.csv`/`forks.csv` is *not* recoverable, and dispatching `backfill.yml` will not fill it correctly — despite `backfill.yml` being permitted to write both files.** Two separate problems make this true, and both are inherent to the reconstruction, not implementation bugs to be fixed later:
+
+- `cumulativeByDay` (`backfill.ts`) writes a row for **every** date from the first event through the run date, quiet days included (§3.1). A dispatch will therefore now *fill* a collector-era gap rather than leave it visibly absent, which is the opposite of what an earlier version of this document promised. Read the next bullet before dispatching: filling such a gap is the hazard, not the remedy.
+- The value backfill writes comes from `/stargazers`/`/forks`, which list only **currently** starred/forked state. Anyone who starred and later unstarred (or forked and later deleted the fork) is invisible to it. The collector's original row — lost in the gap — measured the live counter as it stood on that date, which can only be greater than or equal to what a reconstruction sees. A backfilled row for a gap date is therefore, at best, an undercount, and at worst a value that makes an otherwise-monotonic series dip on a chart — reading as genuinely measured history rather than as the reconstruction gap it actually is.
+
+This is not a defect in `backfill()` itself: reconstructing pre-collection history (seeding the archive before `collect()` ever ran) is exactly what it is for, and it does that correctly. Note what changed and what did not. The dense fill removed one protection — a quiet-day gap in the collector era used to survive a dispatch untouched, and now it does not — and it removed nothing else: the value written into such a gap was always a possible undercount, on any date backfill reached. The archive carries no marker for where the reconstructed era ends and the collector era begins (`meta.json` records `series_last_date`, never a first date), so `backfill()` cannot enforce that boundary itself and this warning is the only thing holding it. The hazard is specifically in treating it as a generic gap-repair tool for `stars.csv`/`forks.csv` after the fact — it is not one, for either of the two reasons above. A gap in `repo.csv` (`subscribers`) or `contributors.csv` cannot be backfilled at all — the next successful collection run simply resumes from wherever it left off, with no way to fill the missed dates retroactively.
+
+### Triaging a red `metrics.yml` run
+
+A red run on this workflow used to mean one thing. Since `deploy-dashboard` was added it means one of two, and they have different consequences: a failed **collection** may have cost a day of traffic history permanently, a failed **deploy** cost nothing but a stale published page. GitHub emails the repository owner on scheduled-workflow failures either way, so the first job is telling them apart.
+
+**Open the run and look at which job is red.**
+
+- **`collect` red.** A genuine collection failure. `deploy-dashboard` will show as skipped — `needs: collect` carries an implicit `success()`, so a failed collection never deploys off nothing. Read `meta.json` on `metrics-data`: the "Record failure" step should have written `error` with the run URL, and `last_success` tells you how old the newest trustworthy figures are. §4.4 says whether the gap self-heals.
+- **`collect` green, `deploy-dashboard` red.** The measurement landed and was pushed *before* `deploy-dashboard` started, so nothing was lost and nothing needs re-running for the archive's sake. Confirm it: `meta.json`'s `last_success` advanced and `error` is `null`. The published dashboard is one day stale until the next successful deploy; re-run the failed job, or dispatch `deploy-pages.yml`, to fix it immediately.
+- **Both green but the run is still red.** Not a state this workflow produces. Check the run for a cancelled job — a cancellation or a job timeout does not run the `if: failure()` failure path at all, so `meta.json` is untouched and `error` can read `null` for a run that never completed. `last_run` is the field that catches that.
+
+**Three outcomes that are expected and not worth chasing:**
+
+- **A `workflow_dispatch` from a branch other than `main`.** `collect` runs and pushes normally; `deploy-dashboard` is then refused at the `github-pages` environment gate, whose branch policy allows only `main` and `gh-pages`, and the run goes red. That is the platform reporting a policy accurately. It is deliberately not guarded with an `if:` on the ref: that would duplicate a policy stored in repository settings this file cannot read, and would silently skip the deploy if the policy ever changed. Scheduled runs always execute on the default branch, so the nightly path never reaches this.
+- **A fork.** `collect`'s `if: ${{ !github.event.repository.fork }}` skips the job, and GitHub skips the dependents of a skipped job, so `deploy-dashboard` skips too. The run is neutral, not red.
+- **A no-op collection.** When there is nothing to commit, `collect` still exits 0 and `deploy-dashboard` still runs, republishing an identical site with a fresh `generated_at`. Harmless and idempotent; it means one `github-pages` deployment per day forever.
+
+### What a rejected push means
+
+`metrics.yml`'s commit-and-push step retries a rejected (non-fast-forward) push up to three times, running `git pull --rebase origin metrics-data` between attempts, and fails the job loudly if all three are rejected. `backfill.yml`'s commit-and-push step does **not** have this retry loop — it pushes once and fails on rejection. This asymmetry is intentional given the shared `concurrency: { group: metrics-data, cancel-in-progress: false }` on both workflows: that group already serializes the two workflows so they never run at the same time, which is the scenario the retry loop exists to survive. A push rejection on `metrics.yml` in practice means something *external* to these two workflows wrote to `metrics-data` (a manual commit, a ruleset bypass, direct API use) between checkout and push; a rejection on `backfill.yml` means the same, and the fix in both cases is to re-run the workflow.
+
+### Reading `meta.json`
+
+See §3.3 for the two-writer (one per outcome) mechanics. In short: fetch `meta.json` from the tip of `metrics-data` and check `error` — `null` means `collect()` itself last wrote this file, with `last_success` set to that run's timestamp; any other value is a `run <job status> — <run url>` string recorded by the failure path (`recordFailure()`/`cli-record-failure.ts`) for the most recent run that did not succeed, and `last_success`/`series_last_date` in that case still reflect whatever the last *successful* `collect()` run left them at — the failure path never touches either. `series_last_date` gives the newest date present in each `.csv` file as of the last run that actually wrote it (a written series advances to today; a skipped one keeps its previous entry — see §3.3), which is a faster way to spot a stalled series than diffing the files themselves.
+
+**`error` alone is not sufficient — always read it together with `last_run`.** The failure path runs
+under `if: failure()`, which does not cover a job that was **cancelled or hit its timeout**. Those runs
+leave `meta.json` completely untouched: `error` stays whatever it was, so a run that never happened can
+read as `null` — "last night succeeded" — when in fact nothing ran at all. The reliable check is
+`last_run` against the current date. If `last_run` is not from the most recent scheduled window, that
+run did not complete, regardless of what `error` says.
+
+A second case where `meta.json` cannot tell you what went wrong: if `meta.json` itself is corrupt, both
+writers refuse it. `collect()` reads it through the same validator before writing anything, and
+`recordFailure()` reads it the same way — so neither can record "meta.json is corrupt" *inside*
+`meta.json` without performing exactly the unvalidated rewrite this design exists to prevent. The
+symptom on the data branch is only that `last_run` stops advancing; the cause is visible in the Actions
+tab, where both steps go red every day. This is a deliberate consequence of failing loudly rather than
+fabricating a replacement, not an oversight.
+
+One case worth naming explicitly: `error` can be non-null while `last_success` is recent. That happens when `collect()` itself succeeds but a later step in the same job fails (e.g. the data commit/push, after all three retry attempts) — the failure path still runs and records `error`, but `last_success`/`series_last_date` correctly show that the measurement itself landed; only getting it committed and pushed did not.
+
+---
+
+## 10. The dashboard
+
+`site/insights/index.html` is the public read side of the archive, published by GitHub Pages at `https://backspacechat.com/insights/`. It is **one HTML file** with its CSS and JavaScript inline, plus two vendored uPlot files next to it (§10.4). No framework, no bundler, no build step, no network request of any kind except the single relative, same-origin `fetch("data.json")` — which is aborted at 15 seconds.
+
+Six sections, each registered against a slot and re-rendered on every range change: **lead figures** (the row of four at the top of the page), **reach** (page views as the hero, repository clones beside it, and the two ranked dimension cards, referring sites and popular paths, in the detail band below them), **following** (stars as the hero, with forks and watchers beside it), **adoption** (app downloads, update checks, and the opt-in fleet figures behind their threshold), **delivery** (CI activity with the release markers, contributors, and a dated list of every release), and **method coverage** (the archive coverage line, in `#method`). Their slots are `lead-figures`, `reach-body`, `following-body`, `adoption-body`, `delivery-body` and `method-coverage`; the four group slots carry the `-body` suffix because the anchors `#reach`, `#following`, `#adoption` and `#delivery` belong to the sections that contain them. The range control offers `30d`, `90d`, `1y` and `all`, defaulting to `all`, the only one that cannot imply a window wider than what was actually measured.
+
+**The lead figure row is the page's table of contents.** Four figures, in page order: page views linking to `#reach`, stars to `#following`, app downloads to `#adoption` and releases shipped to `#delivery`. Each is an `<a>` rather than a div, so it is keyboard reachable and announced as a link, and each is printed a second time as its group's own headline above that group's hero. Both printings come out of one `INSIGHTS_FIGURES.figure` call per figure per render, which is why that surface exists: the row and a group head printing different numbers for the same series is a failure nothing else on the page would catch. Each value is all-time, every measured day of its series; the 30-day delta printed beside it is a fixed window ending on the archive's newest measured day rather than the selected range. Neither half answers to the range control, so the four stay comparable to each other whatever it shows, and the row sits **above** it for that reason. Nothing is curated: a figure is printed at whatever value it holds and at full precision, and a refused trend never suppresses the figure beside it.
+
+**The at-a-glance grid is gone and none of its eight cards went with it.** Three are lead figures now (views, stars, app downloads) and five are compact card heads (forks and watchers in following, clones in reach with its standing CI-checkout note, contributors in delivery, update checks in adoption). Releases shipped is the fourth lead figure and was never one of the eight: it is a count of rows in an array the page already carried. The grid's `.window-note` line moved into `#method` as the archive coverage line, and the rule its standing paragraph stated moved into `#method` under "Provenance and coverage": a 30-day change is shown only when the archive covers the window it describes, otherwise the chip is a dash that says why, and a figure assembled from a different span is labelled with the span it actually covers. That paragraph's opening was an inventory of the eight cards, so what moved is the rule and not the sentence; the rule is also carried per chip, in its `title` and in a visually hidden span, but a rule that exists only inside a tooltip is not a statement a reader or a crawler meets.
+
+**Referring sites and popular paths are detail cards inside reach, not sections of their own.** They were `#referrers` and `#paths` until they moved, and nothing about how they render changed with the move: all three states are intact (a movement chart when the archive holds two differenceable snapshots or more, signed bars when it holds exactly one difference, and a stated reason when it holds neither), every conditional hint is emitted as before, and the figures are still one snapshot's trailing 14-day totals that do not move with the range control. Each card is one `.chart-card` carrying the ranked list, the movement chart or its stated reason, and every hint, under a single `<h3>`; the movement chart inside it is drawn at the `compact` profile because it is a subordinate reading of the list above it. The block that builds them registers no section and exports `window.INSIGHTS_DIMENSIONS`, and it sits above the reach block in the file because the reach block reads that global at IIFE scope. The trailing-14-day basis that stood in the two section headers is now stated once for both under "Referrers and paths" in `#method`.
+
+**Following exists because reach was answering two questions.** Page views, clones, referring sites and popular paths are traffic: people finding the project. Stars, forks and watchers are people who clicked a button to keep track of it. The two sat together only because the dissolved growth section had nowhere else to go, and left together reach would hold seven of the page's twelve cards while being the first group a reader meets. Its hero is the one **hero** on the page drawn on a fitted axis with **no area fill**: all three of its series are cumulative counters, a fill reads as area measured from zero, and an axis that does not start at zero cannot carry one honestly. Forks, watchers, contributors and the two dimension movement charts are fitted and unfilled too; the rule is that a fill and a zero-based axis go together, and the heroes are where that costs something, because every other hero is filled. That costs the hero one of the four devices that mark it as the hero at a single column, and the other three (the 280px plot against 150, the `--chat` panel against the lighter recessive one, and the group's lead figure directly above it) still apply.
+
+The page has **no automated tests**. It is the untested side of a contract whose other side is heavily tested, which is why §10.2 is written as a contract rather than as a description, and why the page validates the payload strictly before rendering a single figure.
+
+### 10.1 What the archive gives up on the way to the page
+
+The bundler reads the nine archive files described in §3 and emits one JSON object. Three things do not survive the trip, all deliberately:
+
+- **`meta.json`'s `series_last_date` is not published.** It is a per-file resume cursor — collector internals. Shipping it would hand a static page a map of the collector's file layout and invite the page to start depending on it. `DashboardMeta` carries `last_run`, `last_success` and `error`, and nothing else.
+- **Most of the dimensional history is discarded.** The archive holds every row of every snapshot; the bundle keeps only the *latest* snapshot's ranking plus a differenced trajectory for its top five dimensions, per file. Everything else in `referrers.ndjson`/`paths.ndjson` exists only on the `metrics-data` branch.
+- **Daily resolution of the seven dated series, but only under pressure.** They are published day-by-day until the bundle would exceed its size budget, at which point every one of them is reduced to weekly buckets (§10.3). `releases` and `dimensions` are never bucketed.
+
+`bundle.ts` also declares its own types rather than reusing `types.ts`. `types.ts` describes what the collector writes; `bundle.ts` describes what the page reads. They coincide today — a `ReleaseEntry` and a `ReleaseRow` are the same three fields — but they are two contracts with two consumers, and the page must not silently acquire a field because a collector type grew one.
+
+### 10.2 The `data.json` contract
+
+`scripts/metrics/src/bundle.ts` is authoritative. Reproduced here so a change to one can be checked against the other:
+
+```ts
+interface DashboardData {
+  /** ISO timestamp (with milliseconds) the bundle was generated. */
+  generated_at: string;
+  /** Earliest date present in ANY of the seven dated series, or null. */
+  collection_started: string | null;
+  /** From meta.json, or null when the archive has none. */
+  meta: { last_run: string; last_success: string | null; error: string | null } | null;
+  /** True when the archive is missing or holds no rows at all. */
+  empty: boolean;
+  /** True when the WHOLE payload was reduced to weekly buckets to fit the budget. */
+  downsampled: boolean;
+  series: {
+    views: TrafficSeries;  clones: TrafficSeries;
+    stars: CountSeries;    forks: CountSeries;   contributors: CountSeries;
+    repo: RepoSeries;
+    workflows: WorkflowSeries;
+  };
+  releases: Array<{ date: string; tag: string; name: string }>;
+  dimensions: { referrers: DimensionSeries; paths: DimensionSeries };
+  /** Instance telemetry. Every field empty until the first ping is archived. */
+  telemetry: TelemetryBlock;
+}
+
+/** Parallel arrays, index-aligned with `dates`. */
+interface TrafficSeries { dates: string[]; count: Array<number | null>; uniques: Array<number | null>; }
+interface CountSeries   { dates: string[]; total: Array<number | null>; }
+interface WorkflowSeries{ dates: string[]; runs: Array<number | null>; }
+interface RepoSeries    { dates: string[]; subscribers: Array<number | null>;
+                          open_issues: Array<number | null>; downloads_total: Array<number | null>;
+                          downloads_app: Array<number | null>; downloads_updates: Array<number | null>; }
+
+interface DimensionSeries {
+  /** Snapshot dates, ascending. */
+  snapshots: string[];
+  /** The most recent snapshot's rows, count descending, dimension ascending as the tie-break. */
+  latest: Array<{ dimension: string; title: string; count: number; uniques: number }>;
+  /** Top 5 dimensions of `latest` only, differenced between CONSECUTIVE snapshots. */
+  trajectories: Array<{ dimension: string; delta: Array<number | null> }>;
+}
+
+interface TelemetryBlock {
+  network: TelemetryNetworkSeries;
+  versions: DimensionSeries; countries: DimensionSeries; clients: DimensionSeries;
+  /** The LATEST day's `instances_7d`, or null. The publication threshold, precomputed. */
+  instances7d: number | null;
+}
+
+/** Parallel arrays, index-aligned with `dates`. Every column is a GAUGE, never a daily total. */
+interface TelemetryNetworkSeries {
+  dates: string[];
+  instances_1d: Array<number | null>; instances_7d: Array<number | null>; instances_30d: Array<number | null>;
+  users_registered: Array<number | null>; users_active1d: Array<number | null>;
+  users_active7d: Array<number | null>; users_active30d: Array<number | null>;
+  messages7d: Array<number | null>; storage_mib: Array<number | null>;
+  voice_instances: Array<number | null>; federation_instances: Array<number | null>;
+}
+```
+
+**The telemetry block reads `telemetry/network.csv` and the three
+`telemetry/*.ndjson` files, and an archive that has none of them yields empty
+arrays and `instances7d: null` rather than a thrown bundle.** That absence is
+the normal state, not an edge case: telemetry was added after collection had
+already been running, so every archived day before the first ping has no
+`telemetry/` directory at all, and a reader that treated it as corruption
+would take the whole dashboard down for the state it is in today.
+
+`instances7d` is carried as its own field so the page can apply the
+publication threshold (charts only once the latest `instances_7d` is 10 or
+more, spec section 9) with a comparison instead of arithmetic over a parallel
+array. It is the LAST day's value, not the last measured one: the threshold is
+a claim about the trailing seven days, and answering it from an older row
+would publish charts on a bar that is no longer cleared. A last day that did
+not measure the column reads as `null`, which fails the threshold, and it
+reads as `null` on the weekly path too: `downsampleWeekly` carries the daily
+figure through rather than recomputing it. The two agree in every other case,
+because the final bucket's last measured value is the final day whenever that
+day measured anything, and recomputing would differ only by reaching back up
+to six days for a value the threshold is not about.
+
+**The data tables under `site/insights/data/` are public from the first
+archived ping, whatever the charts do.** The threshold governs drawing a line,
+not disclosing a figure: three points plotted as a trend claim a shape the
+data does not have, while three rows in a table state their own size.
+`telemetry` is also excluded from both `empty` and `collection_started`. The
+collector only ever writes the telemetry files inside a run that also wrote
+the traffic series, so a telemetry-only archive is not a state it can produce,
+and telemetry cannot hold the earliest date in an archive it postdates.
+
+**`null` means "not measured". `0` means "measured as zero".** This is the rule the whole subsystem exists to enforce, and it holds at every layer without exception:
+
+| Layer | How absence is written | The trap it avoids |
+|---|---|---|
+| Collector | blank CSV field, never `0` (§4.3) | a failed `/releases` fetch reading as zero downloads |
+| Bundle read | `toNumberOrNull` returns `null` for a blank *or absent* column | `Number('')` and `Number('   ')` are both `0` |
+| Weekly buckets | `sumBucket` starts at `null`, not `0` (§10.3) | "the collector did not run that week" becoming "that week had no traffic" |
+| Dimensions | a missing dimension yields `null`, never `0` | a referrer dropping out of the top 10 reading as zero referrals |
+| Page | `null` and an absent row both break the line; a measured `0` plots as `0` | a real zero rendering as a gap |
+| Page, held series | `contributors` alone holds its value across the steps between its rows and draws stepped | a series whose rows are its *changes* rendering as loose dots |
+
+**The held row is not a softening of the rule; it is a different fact.** Every other series on the page is a sample: a row means "read on this day", so a step without one is a step nobody read, and a line drawn across it would be invented. `contributors.csv` is not sampled. It is recomputed in full from the commit history on every successful run and rewritten wholesale (§4.3), one row per contributor's first-commit week, so its rows are the breakpoints of a step function and every date between two of them has a known value: the earlier row's. Breaking the line there hides something the archive holds rather than declining to invent something it does not. The page resolves those nulls in the data before the plot is handed anything (`holdForward` in `INSIGHTS_CHARTS`) and draws the series stepped, flat across the hold and vertical on the day a change was recorded; `spanGaps` stays `false` for every series, so no gap anywhere is closed at the render layer. The fill runs forward only — before the first row what the total stood at is genuinely unrecorded, and the page does not assume a cumulative count began at zero. The figure layer has always read the series this way; `stepDelta` is where that reasoning is argued, and the chart layer disagreeing with it for a while is what published a card whose own caption said the total holds between rows above four unconnected dots.
+
+**This is also why §4.3 densified `stars`/`forks` instead.** Those are point-in-time API counters, so a day with no row is a day the collector did not read them, and holding a value forward across it would manufacture a measurement. The densification put the carry-forward where the knowledge is, in the collector. The same move is not available to `contributors` and is not needed: writing ~200 derived rows a day to re-state a six-row step function would inflate a file whose sparse form is already lossless, and it would destroy the vocabulary the figure layer is built on, where a row means a recorded change and the page can say "latest change recorded" and "4 recorded changes" rather than "last read".
+
+A field that is present, non-blank, and does not parse is **corruption, not absence**, and throws. Substituting `null` there would quietly downgrade a damaged file to "not measured" and publish the gap as though it were real.
+
+**Two invariants the page depends on that `validateBundle` deliberately does not enforce.** `validateBundle` (in `site/insights/index.html`) checks types and length alignment for every array a renderer indexes into, because the page is the untested side. It stops short of these two:
+
+1. **`trajectories[].delta[0]` is always `null`.** There is no snapshot before the first to difference against. A number there would be a difference taken against nothing — a figure the archive cannot hold.
+2. **A dimension absent from a snapshot yields `null` at that index *and at the one after it*.** The second null is the less obvious half and matters just as much: differencing a present value against a missing one has no defined answer, and both ways to fake one are fabrications. Reaching back past the gap reports a multi-snapshot change as a single-step one; treating the missing value as `0` invents a jump the size of the whole window.
+
+Neither is checked, and that is a decision rather than an oversight: rejecting a whole bundle over a cosmetic contract violation would trade it for a total outage — a blank page where a slightly wrong chart would have done. The invariants are instead enforced where they are consumed. `buildLines` in the movement section drops a non-null `delta[0]` to `null` rather than plotting it, and raises a caution line naming the dimension, so a fabricated figure is neither published nor hidden.
+
+**`validateBundle` does not range-check `snapshot_date` either**, and that has a visible consequence worth knowing before it is diagnosed as a page bug. A single implausibly far-future snapshot date passes validation, then extends the movement chart's axis to reach it, via the `snapshotWindow` mechanism described immediately below. The axis builder caps itself at 20 000 steps — roughly 55 years of daily steps — and reports an overrun rather than throwing, so the section draws nothing and says why. The result is that **one corrupt date suppresses the movement charts**, and the fault is in the data, not in the page.
+
+**`downsampleWeekly`, `rangeWindow` and `snapshotWindow` are one mechanism in three parts. Do not "fix" any of them in isolation.**
+
+- `downsampleWeekly` buckets the seven dated series onto their UTC Monday and leaves `dimensions` **unbucketed**, on their own daily snapshot dates. Bucketing them would silently redefine "the difference between consecutive snapshots" into something else with the same name.
+- `rangeWindow` anchors every window on the newest **dated series** row, deliberately excluding dimension snapshots, so a trailing 14-day aggregate cannot stretch a window past the last real daily measurement.
+- Those two are compatible on a daily bundle, where the two dates coincide. On a **downsampled** bundle they are not: series dates become Monday bucket keys while snapshots keep their daily dates, so the newest series day can sit up to six days *before* the newest snapshot. In the fixture that found this, every snapshot in the trailing partial week fell outside every window, `all` included — both dimension sections drew nothing, reported "N of the M the archive holds", and offered "a wider range takes in more", which no range did.
+- `snapshotWindow` exists to close exactly that gap. It extends only the **end** of the shared window, and only as far as a snapshot that actually exists; the start is left where the range control put it, and `extendedFrom` is set so the section states that the axis runs past the range's anchor rather than quietly drawing a wider span than the control implies.
+
+### 10.3 The 2 MB budget
+
+`BUNDLE_BUDGET_BYTES` is `2 * 1024 * 1024` = **2 097 152 bytes**, measured as the UTF-8 byte length of the serialised JSON, **uncompressed**, and the check is inclusive (`bytes <= BUDGET` passes).
+
+Uncompressed on purpose. Pages serves the file gzipped, so a visitor downloads less — but the number that decides whether the page is usable is the one the browser must parse and hold in memory. Measuring the compressed size would also make the budget depend on how well one particular archive happens to compress, which is not a property of the dashboard. Bytes come from `Buffer.byteLength`, not `String#length`, which counts UTF-16 code units and would under-count an emoji or an accent in an upstream referrer title.
+
+`serialiseWithinBudget` runs one fixed sequence:
+
+1. Build the daily bundle, serialise it, measure it.
+2. Under budget: publish it, and report `data.downsampled` rather than a hardcoded `false` — a caller that already downsampled must not have that erased on the way out.
+3. Over budget: downsample to weekly buckets, re-serialise, re-measure.
+4. Still over budget: **throw**.
+
+Downsampling only on failure is the point of the order. Doing it unconditionally would publish weekly buckets for the many years this archive will spend comfortably under 2 MB, throw away resolution nobody needed to save, and light up the page's "weekly" label over data that is daily.
+
+**Weekly bucketing applies a different rule to each group of fields, and the first two must never be swapped:**
+
+- **Traffic counts sum within a bucket** (`sumBucket`): `views` and `clones`, both `count` and `uniques`. `uniques` summing is an acknowledged over-count — someone who visited Monday and Thursday is counted twice, and a true weekly unique figure is not recoverable from daily rows at any resolution — but it is an upper bound that moves with the quantity it describes, where taking the last day's uniques would report one day as if it were seven.
+- **Cumulative counters take the week's last measured value** (`lastBucket`): `stars`, `forks`, `contributors`, and every field of `repo`. Summing these would be meaningless in a way that looks entirely plausible on a chart — seven daily readings of a star count that sat at 66 all week would publish 462 stars. "Last **measured**", not "last element": a week whose final days are null was still measured earlier in the week. The pick is by highest *date*, not highest index.
+- **Every column of `telemetry.network` takes the week's last measured value** (`lastBucket`), for the same reason the cumulative counters do: they are gauges describing the fleet on a day, so summing seven readings of a steady twelve instances would publish 84. The trap is sharper here than for `stars`, because two of the names (`messages7d`, `users_active7d`) read like per-day event counts and are not. They are trailing-window figures the instances themselves computed, each already covering seven days, so summing a week of them would over-count by roughly a further factor of seven. The buckets are keyed on the UTC Monday like every other series: a telemetry series keyed on bucket END dates would sit up to six days ahead of the rest of the bundle and silently widen every window `rangeWindow` anchors. `telemetry`'s three dimension series are left daily, exactly as `referrers` and `paths` are, and `instances7d` is carried through from the daily bundle, which is the same value as the final bucket's whenever the final day measured the column and is `null` when it did not.
+- **`releases` and `dimensions` are not bucketed at all.** Releases are sparse, so there is no space to save, and merging two tags published in one week into one marker would destroy the annotation the growth chart exists for. Dimensions are already bounded at top-10-per-snapshot.
+- **`collection_started` and `empty` are carried through, not recomputed.** A first measurement on a Wednesday buckets under the preceding Monday, and recomputing from the bucket keys would back-date the page's "since <date>" label onto a day on which nothing was measured. A bucket key labels a week; `collection_started` is a claim about a measurement.
+
+**The 80 % warning.** `BUNDLE_WARN_BYTES` is `Math.floor(BUNDLE_BUDGET_BYTES * 0.8)` = **1 677 721 bytes**. At or above it, `cli-bundle.ts` prints `budgetWarning`'s message to **stderr** as the last line of an otherwise-green run, and the build still passes. The threshold is picked from what the archive actually does rather than from habit: it grows by roughly 68 KB a year, so the 419 431 bytes between the mark and the budget are about **six years** of lead time — enough to schedule the decision instead of meeting it as a fait accompli in a deploy log. A lower mark would fire for a decade before it meant anything, and a warning nobody reads by the time it matters is not a warning. The message says which side of the cliff the bundle is on, because the next event differs: a daily bundle nearing the budget gets downsampled, while a bundle that is *already* weekly has no reduction left and the next step is a failed build.
+
+**The throw is the designed terminal state, not a gap in the design.** Nothing is ever truncated to fit: dropping the oldest history would silently destroy the only surviving copy of data GitHub deletes after 14 days, which is what this archive exists to prevent, and publishing an oversized bundle moves the regression from a red CI run to a visitor's first paint. **`dimensions` is the unbounded component.** Every other part of the payload is either bounded or downsamplable. Within `dimensions`, two of the three parts are bounded: `trajectories` at five per file by `TRAJECTORY_LIMIT`, and `latest` by GitHub's own top-10-per-snapshot response shape (§3.2) rather than by any cap in this package. The third is not. `snapshots` gains one element per day forever, every trajectory's `delta` gains one alongside it, and weekly bucketing cannot touch either without redefining what a trajectory means. So the error message names the right lever — cap the release list or the dimension history, or raise the budget deliberately — rather than suggesting a reduction that does not exist. At the live bundle's current size the mark is over two decades away.
+
+### 10.4 Vendoring
+
+uPlot is committed to the repository rather than installed, at **1.6.32**, as `site/insights/vendor/uplot.min.js` and `site/insights/vendor/uplot.min.css`. The page loads them by relative path, so a published dashboard depends on no CDN and no third-party host at runtime.
+
+`scripts/metrics/vendor.json` records, per package, the exact `version`, the immutable npm tarball URL it was fetched from (`https://registry.npmjs.org/uplot/-/uplot-1.6.32.tgz`), the `license`, and a map of committed file path to the SHA-256 of that file's bytes, prefixed `sha256-`. `src/vendor-check.test.ts` reads the manifest and asserts, for every entry, that the file exists and hashes to exactly what is recorded. It runs in the package's ordinary `test` script and therefore in CI, and has its own script for running it alone:
+
+```bash
+pnpm --filter @backspace/metrics run vendor:check
+```
+
+**To update the vendored version:** fetch the new tarball from `registry.npmjs.org`, replace both files verbatim from it, update `version` and `source` in `vendor.json`, recompute both digests (`shasum -a 256 <file>`), and record them with the `sha256-` prefix. The test's failure message says the same thing, because that is when it is read: an in-place edit of a vendored file is not allowed, and a deliberate version bump has to move the recorded hash with it.
+
+**Manifest coverage is opt-in per file, and nothing else guards `site/`.** A file is protected only because someone listed it in `vendor.json`. A second vendored library dropped into `site/insights/vendor/` without a manifest entry is checked by nothing at all — `vendor-check.test.ts` iterates the manifest, not the directory. Adding a dependency to the site means adding its manifest entry in the same change.
+
+### 10.5 Deploy wiring
+
+The dashboard is published by `.github/workflows/deploy-pages.yml`, reached two ways: a push to `main` touching `site/**`, `scripts/metrics/**` or the workflow file itself (a bundler change must redeploy, or the site silently serves stale data); and a `workflow_call` from `metrics.yml`'s `deploy-dashboard` job after a successful collection. Without the second path the collector would update `metrics-data` every night while the published `data.json` was rebuilt only when someone happened to push a site change.
+
+**The archive checkout is conditional and non-fatal.** `actions/checkout` asked for a ref that does not exist hard-fails the job, and no `if:` *inside* that step can rescue it — so the probe has to be a preceding step. An unconditional checkout would break every landing-page deploy until `metrics-data` was created, and permanently again if it were ever deleted.
+
+The probe is `git ls-remote --exit-code --heads origin metrics-data`, against `origin` rather than a `gh api` call on a repo slug, so it stays correct through a rename or transfer and needs no token handling. It has **three** outcomes, not two:
+
+| Exit | Meaning | Action |
+|---|---|---|
+| `0` | branch present | `present=true`; check it out into `.metrics-data` |
+| `2` | talked to the remote, no such branch | `present=false`; `::notice::`, publish the empty state |
+| anything else (e.g. `128`) | could not talk to the remote | print git's own error, `::error::`, **fail the job** |
+
+Collapsing the last two into one `else` is the bug this shape exists to prevent: a network blip or an auth failure would publish a blank dashboard over a live archive and log that the branch does not exist — a lie the run would carry all the way to the page. It is the same rule `cli-bundle.ts` follows with `ENOENT` versus every other errno: absent is a fact and gets the empty state; unknown is not, and fails loudly.
+
+The bundle step itself is **unconditional**, because a missing archive directory is the empty case (§9, "Building the dashboard bundle locally"). Both paths are absolute and match `metrics.yml`: `METRICS_DATA_DIR` is `${{ github.workspace }}/.metrics-data`, `METRICS_OUTPUT_PATH` is `${{ github.workspace }}/site/insights/data.json`. `actions/upload-pages-artifact` then uploads `./site`, which by that point carries the generated `insights/data.json`.
+
+**`deploy-dashboard` in `metrics.yml`** is necessarily a separate job. `uses:` is a job-level key, so a reusable workflow cannot be a step inside `collect` even if that were wanted. It also must not be `collect` with a widened grant: permissions in a called workflow are the **intersection** of the calling job's grant and the called workflow's declaration — reducible, never elevatable — so calling from `collect` (which holds `contents: write` and `actions: write` and no Pages scopes) would hand `deploy-pages.yml` `pages: none` and `id-token: none` and fail on the missing OIDC token. Widening `collect` to fix that would give the job that writes the archive a Pages write scope and an OIDC identity it has no use for. `deploy-dashboard` therefore holds a *narrower* grant: `contents: read`, `pages: write`, `id-token: write`.
+
+It carries **no `if:`**, deliberately. `needs: collect` is both gates it wants: a failed collection skips it via the implicit `success()`, and a *skipped* collection skips it too, because GitHub skips the dependents of a skipped job — which is exactly right for the fork case, where `collect`'s own `if:` already declined.
+
+The local reusable-workflow reference `uses: ./.github/workflows/deploy-pages.yml` **carries no SHA and cannot**. GitHub rejects `@ref` on a `./` path and always resolves the file from the calling run's own commit, which pins it more tightly than a SHA would. It is not a missed pin, and the repo's SHA-pinning convention (`docs/systems/security-scanning.md`) does not apply to it. Every `uses:` in both files that *can* be pinned is pinned to a full commit SHA with a trailing `# vX.Y.Z` comment.
+
+**The `pages` concurrency group lives on `deploy-pages.yml`'s `deploy` job**, not at workflow level and not on `deploy-dashboard`. On the job it applies identically however the workflow is reached; GitHub's documentation does not state whether a workflow-level `concurrency` is honoured for a `workflow_call` invocation, and putting the group on the job removes the need for an answer. `cancel-in-progress` is `false`: cancelling `actions/deploy-pages` mid-flight strands a deployment in the `github-pages` environment and blocks the next one.
+
+**`timeout-minutes: 15` on that job — and what it does not bound.** The ceiling exists because `metrics.yml` holds the `metrics-data` concurrency group for the whole duration of the called deploy, and that group is shared with `backfill.yml` and with the collector's own next scheduled run. GitHub's 6-hour default would let one stalled deploy hold the group deep into the next day and, since only one run per group stays pending, delay and then **drop** a scheduled collection. A normal run is 1–2 minutes.
+
+Two limits, stated so they are not rediscovered as surprises:
+
+- **It bounds job execution, not a wait at the `github-pages` environment gate.** A required-reviewer rule or a wait timer on that environment holds the run *before* the job starts, so `timeout-minutes` never applies. That is the one unbounded path left in this subsystem, and it ends in a dropped collection — permanent history loss. **Check the environment for required reviewers and a wait timer before merging, and after any change to repository settings.** As of 2026-09-01 the `github-pages` environment carries a branch policy only (allowing `main` and `gh-pages`), with no reviewers and no wait timer, which is the configuration this design assumes.
+- **A timeout cancels the job**, which is the same stranding `cancel-in-progress: false` exists to avoid. If a deploy ever hits the ceiling, check the environment for a stuck in-progress deployment before re-running. Both are accepted: a bounded chance of a stranded deploy beats an unbounded chance of a dropped collection.
+
+### 10.6 Empty state, missing bundle, and the staleness banner
+
+`data.json` is a **build artefact**. It is written into the workspace at deploy time and is gitignored (`site/insights/data.json`); the `metrics-data` branch is the single source of truth and the bundle is never committed. Nothing in the repository holds a copy.
+
+**A 404 on `data.json` and `empty: true` are different conditions and the page says different things about them.** Conflating them would be the page making a claim about data it has not seen.
+
+There is a third, per-chart case worth stating because it is the normal state of any newly added series: a bundle can be perfectly healthy while one series inside it is empty. A series enters the `data.json` contract the moment the collector gains it, but enters the archive only on the next successful collection run, so on the deploy that introduces it there is nothing to plot. uPlot answers that with an empty frame on an invented 0..1 axis — a chart that looks broken while its own caption reads "measured 0 of 15 days". So a chart card whose primary series has no measured step inside the window renders a sentence in place of the plot, and the section still reports the span and the unmeasured count above it. That is also what the CI chart shows if the runs fetch is denied — see §7 for which credential reaches that endpoint.
+
+A card whose series carries exactly one measured step also states its reading instead of drawing: one point has no direction and no rate, and where the window holds nothing else uPlot invents an x range of its own, measured here as an axis running two and a half years past the last recorded day. `contributors` is the live case rather than a hypothetical, because it records a row when its total changes and the archive holds one.
+
+**Both refusals are page-wide, and every card decides by counting measured positions against the same threshold of two.** Two functions implement that count: the toolkit exports `C.measuredPositions(axis, offset)`, which the shared builder and the fleet cards read, and the dimensions block declares a private `measuredPositions(axis, lines)` for the movement charts, taking a list of lines rather than one offset. The rule is one rule; the shared name across two signatures is a hazard worth retiring. That includes the two fleet cards in Adoption, which are built outside `chartCard` (§10.8) and for one branch of this project's history guarded only against zero: with a single archived telemetry day at or above the threshold, both drew a plot whose meta line said one measured day of one and whose axis ran to 2029. The one difference between the two builders is what they count across. `chartCard` counts positions on its first declared line, which is the card's subject with the rest as context; a fleet card counts the largest across its three, because there the three lines are the same quantity over three windows and are peers.
+
+| Page status | Cause | What it says |
+|---|---|---|
+| `unavailable` | the fetch failed: 404, non-2xx, timeout, unparseable JSON, or a payload `validateBundle` rejected | "The archive is not available here" — the bundle is generated at deploy time and is not committed, so when the archive or the deploy step is unavailable there are no figures, and inventing them would be worse |
+| `empty` | the bundle loaded and validated, and `empty` is `true` | "Collection has not produced any rows yet" — the archive holds no traffic, no growth snapshots, no releases; figures appear after the collector's first successful run |
+| `ok` | loaded, validated, non-empty | the lead figure row, the four groups and the coverage line render |
+
+`empty` is true when all seven dated series, `releases`, and both dimension snapshot lists are empty — the state an archive is in immediately after the branch is bootstrapped, when it holds only `meta.json`. Note that `empty` and `collection_started` answer different questions: an archive holding only releases or only dimension snapshots is **not** empty yet has no dated series, so `collection_started` is `null` and the range control has nothing to anchor on. `renderSlots` writes its note into the **four group slots only**. The lead figure row and the method coverage line are left empty: the coverage line is metadata about the archive rather than a figure, the lead row is a table of contents rather than a panel, and the status region above both has already stated the problem in full, so repeating the sentence six times would be noise.
+
+Below the page status there are two further layers, and a failure in either is contained to the thing that failed. **A group** states its own reason when the archive holds no dated measurement to anchor a window to, and when no series it holds carries a row inside the selected range; in both cases the cards that need no window still render, which is why the release list and the two ranked lists survive a page with no time axis. Following is the one group with no such card, so it renders the sentence and nothing else. **A card** states its own reason when its series carries no measured step inside the window, and when it carries exactly one; a card builder that throws is replaced by its own `slot-note-error` note reading "This card could not be rendered", and every other card in the band is unaffected. Adoption's telemetry state note is an empty state inside a band rather than a group-shaped hole, because that group always has a hero and a compact card whatever the pings say.
+
+The **staleness banner** is separate from all three and is evaluated on any bundle that loaded, empty or not. It fails closed — anything it cannot confirm counts as stale, and the reason says which:
+
+- `meta` is `null` (the archive has no collector status file at all).
+- `meta.error` is non-null — *any* non-null value, not merely a non-empty string, so a serialised error object or a bare `500` cannot pass as healthy. This raises the banner to its error severity.
+- `meta.last_run` is unreadable, or is more than **48 hours** before the bundle's `generated_at`.
+- `generated_at` itself is unreadable, in which case freshness is measured against the visitor's clock and the banner says so.
+
+Whenever the banner fires it also reports `last_success`, because when the collector is failing the age of the newest trustworthy figures is the thing a reader actually needs. The reference clock is `generated_at` rather than the visitor's clock on purpose — but see §8 for the failure this cannot catch.
+
+**One thing the bundle carries no evidence of.** A persistent `202` from `/stats/contributors` (§5) makes the collector skip `contributors.csv` for that run without recording an error anywhere. The contributors card and its coverage line therefore **understate** — never overstate — and nothing in `data.json` distinguishes "the count did not move" from "the count was not measured that day". The card's `step` kind exists partly for this: a contributors row is written when the total *changes*, so the age of its newest row says nothing about freshness and the daily-sample staleness test is deliberately not applied to it.
+
+### 10.7 Each chart is drawn on its own span, not on the section's
+
+**The rule: a chart's x axis spans the days *that chart* was measured on. Two charts share an axis only when they share a history.**
+
+`expand` in the chart toolkit lays a set of columns onto one evenly stepped axis running from the earliest to the latest day any of those columns holds. Handing it every card in a section gives them one axis, which is right for cards that started collecting together. Stars and forks did, and while a single set of release markers was painted across both they additionally *needed* one axis, because the markers were the comparison. Nothing on the page is in that position now. The markers sit on the Delivery hero, and in the Following group stars, forks and watchers are each expanded on their own columns and drawn on their own x and y axes, like every other card in a group: stars and forks differ by an order of magnitude in the live archive, so a shared y axis would have flattened the fork line onto the floor for no remaining gain. The release-marker lane is an option of `mount` rather than a section's own drawing code: `settings.releases` takes the output of `collectReleases`, reserves the room above the plot and installs the painter, so any hero card can carry markers and there is one copy of the three rules that keep them honest. The release lane sits on the Delivery hero rather than on the star history it was painted over before. The lane needs a release inside the chart's span, and the CI series is reconstructed from the Actions API back to the first release where the star history begins on the day the collector first ran, so on the current archive the markers draw here and would not draw there.
+
+Reach is the case where it is wrong, and the isolation it forced now happens per card inside a group rather than per card inside a section: every card built through `chartCard` is isolated, by the one `isolate(bound, card)` call in that helper rather than by a call in each group, and expanded on its own columns. The series that made it necessary has moved to Delivery; the rule it forced stays, and now applies to every card on the page. Reach's traffic series begin on the day the collector first ran; `workflows` is reconstructed from the Actions API and reaches back as far as that API still retains, 47 days further, when the CI chart shipped. Expanded together, all three cards got the CI series' span, and both traffic charts were drawn with their entire history crushed into the right-hand quarter of an otherwise blank frame. Every caption was accurate ("measured 15 of 62 days · unmeasured 47 days") and both charts still read as broken.
+
+**What that gives up, and what it does not.** Peaks can no longer be compared across cards by their horizontal position — two charts on different spans put the same day at different pixels. Everything else survives, because the comparison never depended on the axis:
+
+- The cursor group syncs on scale **values**, not pixels, so hovering 08-25 anywhere lands on 08-25 in every chart whose span covers it. A chart that does not cover that day shows a dash rather than a value, which is the honest answer.
+- Drag-zoom propagates as a value range too, so dragging across any chart puts them all on that span.
+- Double-click returns **each** chart to its own span, not to a shared one.
+
+Each card's caption states the span it drew, and the CI card's note says outright that its span reaches further back than the traffic charts in Reach and why.
+
+**Two traps this creates for a later series.**
+
+1. `SERIES_NAMES` in the page's range control is the list of dated series allowed to move the window. A series left out of it can hold a row outside every other series' history, and that row is measured, bundled, and then silently clipped out of every range including `all`. `workflows` was added to that list for exactly this reason; add any new dated series to it in the same commit.
+2. `validateBundle` must gain a `checkSeries` line for any new series. Without one the bundle validates, and the failure surfaces later and further away — as a section-wide error note, or a throw inside the range control that is outside any section's error boundary. `series.workflows` was missing from it until this rule was written down.
+
+### 10.8 The telemetry band and its publication threshold
+
+The Adoption group's detail band, in slot `adoption-body`, draws the opt-in
+fleet figures. Two rules govern it and neither is negotiable from inside the
+band.
+
+**The `telemetry` block may be absent, and that is valid.** `validateBundle`
+checks it only when it is present (`checkTelemetry`). A bundle built before the
+key entered the contract must still load: rejecting it would answer an old
+artefact with "the archive is not available", which is a claim about the
+archive made because of a key the archive predates. Present and malformed is
+still rejected, for the reason every other series is checked -- the section
+indexes these arrays without re-checking them.
+
+**Nothing is charted until the latest `instances_7d` reaches 10** (spec section
+9). The gate reads `telemetry.instances7d`, which the bundler carries as its own
+field so the page compares rather than computes, and which is the last DAY's
+value rather than the last measured one. Below the mark the section prints the
+count and the threshold in a `slot-note-detail`, in one of three wordings: no
+block at all, a block whose latest day did not measure the column, and a real
+count below ten. They are three different statements and the page does not
+collapse them into one. Printing nothing would read as a broken collector, and
+the figures are public in `/insights/data/` from the first archived ping either
+way: the threshold governs drawing a line, not disclosing a figure. The group
+always has a hero and a compact card whatever telemetry does, so the state note
+is an empty state inside a band rather than a group-shaped hole in the page.
+
+**`telemetry.network` is deliberately absent from `SERIES_NAMES`**, the list of
+dated series allowed to anchor the range window (section 10.7, trap 1). That
+list reads `data.series[name]` and telemetry is a sibling of `series`, not a
+member of it -- but the substantive reason is that it must not anchor: the
+collector writes the telemetry files only inside a run that also wrote the
+traffic series, so a telemetry date can never lie outside the traffic history
+and can never be clipped by a window the traffic anchored. Trap 1 does not
+apply here, and adding it would be the change that makes it apply.
+
+**The two time-series cards do not go through `bind`.** `bind` resolves a
+card's declared columns out of `data.series[...]`, and `telemetry.network` is a
+sibling of `series` rather than a member of it. The section builds its
+`[{ series, field }]` array directly and hands it to `expand`, which takes that
+shape as its argument. Everything `bind` exists to prevent is still prevented:
+each card names its own columns in its own declaration and the lines are built
+from that same declaration in the same loop, so a card cannot be drawn from a
+column it does not name.
+
+Each card is expanded on its own columns, so its axis spans the days that card
+was measured on. In practice both cards share a history, since a network row
+carries every gauge or none, but the per-card expansion costs nothing and keeps
+the section on the same rule as Reach (section 10.7).
+
+**Both fleet cards are drawn at the `compact` profile and sit in the detail
+band's own tracks**, beside the three rankings, exactly like the detail cards in
+Reach. They were hero-profile cards in a full-width stack until the whole-branch
+review measured them: 280 pixels of plot on a 1072-pixel panel, the same height,
+width and surface as the App downloads hero above them, which left the group's
+two most detailed charts reading as its headline. Every other group carries its
+hierarchy in the plot height, 280 against 150, and this was the one that did
+not. The stack the cards used to sit in is gone with them, and so is the CSS
+rule that had to span it across every track: a compact plot's 240-pixel floor
+fits a 420-pixel track, where a hero's 520 did not and scrolled sideways inside
+its own card.
+
+**The three rankings render `latest` only, with no trajectory chart.** They use
+the same `.rank-*` markup as the referrer and path sections, and every bar takes
+the neutral fill rather than a palette colour, because on this page a palette
+colour means "this row has a line below it in this colour" and this section
+draws no per-dimension lines. A ranking's `count` is not the same unit across
+the three: versions and countries count INSTANCES, clients counts PEOPLE, and
+each card names its own unit on every row. The rankings are a snapshot rather
+than a window, so the range control does not move them, and each card states the
+snapshot date it drew.
+
+---
+
+## 11. Testing
+
+`scripts/metrics`'s `test` script is `tsc --noEmit && vitest run` — it runs through the existing root `pnpm -r test` step with no `ci.yml` change required, and covers both types and behavior in one script. All tests are fixture-driven and touch no network; filesystem tests use a per-test `mkdtempSync` directory, cleaned up in `afterEach`. As of this writing there are **411 tests across 15 files**, all passing:
+
+```
+src/sitemap.test.ts            5
+src/vendor-check.test.ts       6
+src/collect.telemetry.test.ts  8
+src/no-runtime-deps.test.ts    9
+src/bundle.telemetry.test.ts  13
+src/datapage.test.ts          21
+src/github.test.ts            21
+src/telemetry.test.ts         22
+src/store.test.ts             23
+src/backfill.test.ts          28
+src/summary.test.ts           34
+src/collect.test.ts           35
+src/cli-support.test.ts       41
+src/series.test.ts            55
+src/bundle.test.ts            90
+```
+
+`collect.telemetry.test.ts` is separate from `collect.test.ts` rather than folded into it because the two need different fixtures: the telemetry tests want a fleet of pings and the smallest possible GitHub payload, and the traffic tests want the reverse. `bundle.telemetry.test.ts` splits off `bundle.test.ts` for the same reason: it reads four archive paths no other series touches, and the publication threshold the page applies (`instances7d`) has no counterpart anywhere else in `DashboardData`.
+
+`bundle.test.ts` is the largest of them because it carries the whole of §10.2's contract: the null-versus-zero rule at every read, the trajectory invariants, the two weekly aggregators, and the budget sequence. `vendor-check.test.ts` is not a unit test at all — it hashes the committed uPlot files against `vendor.json` (§10.4) and has its own `vendor:check` script for running it alone.
+
+**The dashboard page itself has no tests.** `site/insights/index.html` is not exercised by anything in CI; the contract in §10.2 and the page's own `validateBundle` are what stand in for them. What stands in for them by hand is the pair of scripts in `scripts/metrics/fixtures/`, neither of which adds a dependency: `insights-fixture.mjs` writes a throwaway archive in one of eleven states (`none`, `low`, `threshold`, `high`, `high-other`, `high-nodims`, `sparse`, `dimensions-only`, `long`, `no-releases`, `release-edge`) plus a copy of `site/` to serve, and `insights-check.mjs` loads that copy in whatever Chrome the machine has and reports the console, the failed requests, **every** slot on the page with its figures and cards, which is what lets a whole-page claim be walked against one report rather than assembled from several: the eight at-a-glance cards' destinations, three lead figures and five compact card heads, are all in the same reading, and so is the check that each lead figure equals its group's head field for field. A figure is reported with the element it was presented as and the target it links to, because a lead figure and a group head are otherwise identical in every field the report carries. It also reports the page head's lead sentence and the four provenance values, each plot's rendered geometry (its canvas size, the plot area's offset inside the chart root, and whether its scroll container overflows), each plot's y range, the span its x axis actually drew, and the fill declared on each of its series, the rankings, the archive coverage line and every chart card's drawn span under each range button, and whether a drag on one chart rezoomed the rest. A card reports **every** one of its `.chart-meta` lines rather than only the first, because a card carrying a release caption after its own span line has two, and a report that reads only the first cannot see the caption at all. It reports every one of its `.stat-note` lines and every link inside it for the same reason: the figure head's own note is the first `.stat-note` in the card, so a standing caveat rendered below the head in the same idiom, which the Reach clones card carries, was invisible to a report that read only the first, and a caveat whose whole job is to point at the chart that measures the confound has to be checkable on its link target rather than by hand. Four readings in that report are worth naming: two for what they cannot show, one for what nothing else can show, and one for where it has to come from. The range sweep's per-range column states the span every chart card drew, keyed by slot id and card title, rather than the first `.chart-window` line on the page: the window line was removed from every group by design, so a column pointed at it drifted from group to group as the sections came down and would now read empty, while a card's own span line is on every card the page will still have at the end. And a plot's reported `canvasWidth` is **not** evidence that its band was in the document before the chart was built. A chart constructed in a detached container is built at its profile minimum and repaired by the `ResizeObserver` before the walk reads it, so both orderings report the same width; measured on this page, the correct ordering and the broken one both report 1034 and 311. The reading that separates them is construction-time state at the `mount` call site (`inDoc` and `clientWidth`), which has to be instrumented for the occasion. The drawn x span is the third, and it is there because the card's own meta line is not evidence of it: a card can say it covers one measured day and render an axis running to 2029, with its canvas size, its y range, its legend and its notes all exactly what a correct card produces, which is the shape the two fleet cards were in when the whole-branch review found them. How much of each series was plotted, and in how many unbroken runs, is the fourth reading of that kind: a line and a scatter of loose points produce identical fills, ranges, canvas sizes, legends and captions, so nothing in the report could separate a card that correctly breaks across unmeasured days from one drawing its whole series as isolated dots. `contributors` was the second shape and drew four dots for months. That reading is only worth having because one committed state can fail it: every mode wrote every series densely, so with no gap anywhere a page that joined its lines across every null would have produced a byte-identical report to one that broke across them correctly. `high-nodims` now carries a two-day hole in its clones series, which is the only committed state in which any chart on the page draws a broken line, and it reports `38 of 40 in 2 runs` against every other card's `N of N in 1 run`. The y range, the drawn x span, the per-series stroke coverage and the per-series fill are the one part of the report that is not read out of the DOM at all: uPlot paints its axis ticks and its area fills onto the canvas, so a card drawn on a fitted axis and the same card drawn on another card's axis produce byte-identical reports, and so do a filled line and an unfilled one. Both are read off the live uPlot instances instead, reached through the page's cursor-sync group, which keeps an array of every plot registered under its key. That has a failure mode of its own, and the report guards it in words rather than leaving it to be inferred: a page that renamed the key would report a null fill and a null range for every card, which reads exactly like a page declaring no fills, so the report states how many live plots it reached against how many chart roots are in the document and says outright when it reached none. `threshold` is the state worth keeping: it produces exactly ten reporting instances, the value the published promise turns on. `high-other` is the second: `high` gives the folded `other` row the lowest count, so only `high-other` can show that `other` ranks where its count places it rather than at the bottom. `dimensions-only` is the eighth: it writes no dated series at all, only a referrer and a path snapshot, so the bundle is non-empty while `collection_started` is null and every renderer takes its no-time-axis branch. That state is reachable in production and no other mode reaches it. `long` is the ninth: ninety days of traffic and four releases at different distances, two of them inside the last thirty days, one in the thirty before and one before the archive begins, which is the only mode where a thirty-against-thirty release comparison has both its windows inside the archive, and the two-against-one shape means only the correct arithmetic produces the figure it states. `no-releases` is the tenth: `high` with no `releases.csv` at all, which is the state that separates "no release shipped" from "this archive cannot say", since the bundle produces the same empty array for both. It also carries three `contributors` rows where every other mode carries one, because one row is what makes the one-point rule fire and no other mode would then draw a compact plot at all. `release-edge` is the eleventh: `long`'s shape with the release dates chosen to pin **both** of `releaseTrend`'s window edges, one dated exactly on the older window's first day, one inside that window, one dated exactly on the recent window's first day, and three inside it. Both edges, because the outer one alone leaves the seam between the two windows untested: in `long` and in this mode's first draft the nearest release to that seam was fifteen days away on either side, so an off-by-one there read identically under both. Four against two rather than one against one, because the figure has to be one only the correct arithmetic produces: a trend of zero is equally what a swapped window, an off-by-one at either edge and a double count all give. The chip alone does not separate every defect, since a dropped outer boundary and a double-counted one both read `+3`; the assertion reads the `chipTitle` beside it, which states both totals. `long` cannot carry this shape, since it asserts the release lane's markers, its caption and its lead value, and a release moved onto a window edge there moves all three. A bundle with no `telemetry` key at all is not one of the eleven states, because `buildDashboardData` always writes the key; running the fixture again after the bundle step with `--strip-telemetry` deletes it from the built `data.json`, which is the only way to see the wording the page keeps for a bundle made before the pings existed. The report also compares every figure the page states twice. `renderSummaryHtml` writes eight of them into the served HTML — page views, clones, stars, forks, watchers, contributors, app downloads and the release count — and the page computes all eight again in its own language; the run reads both printings of each and says `MATCH`, `DIVERGED` or `ONE-SIDED`, because nobody ever sees both at once and a divergence is therefore invisible on the page itself. A one-sided reading is its own outcome rather than a skip: the two sides disagreeing about whether a figure is measurable is a real divergence, and it is also what a renamed card title looks like, which would otherwise retire a comparison while the report stayed green. If the served paragraph itself ever stops matching, the section says so in words rather than letting all eight rows read as an empty archive. The report's last section is measured at a different viewport from the rest of the run. The walk uses a 1440x2400 window so nothing is clipped and every card lays out at its natural size, which makes one whole class of question unobservable: a laptop is 900 tall, and nothing in the report could say whether a reader lands with the range control on screen or below it. That was argued from the CSS for a while, which is not evidence. After the drag, the run overrides the viewport to 1440x900 and then 1280x720 and reports where the lead row, the built summary, the range control and the first group land, and whether each is on the first screen. It runs last because resizing re-lays out every plot, and a re-laid-out plot is a worse thing to hash or drag. Both scripts need Node 22.18 or newer for unflagged type stripping, which the root engine range of `>=20.0.0` does not guarantee: a shell left on Node 20 satisfies the root range and still fails the fixture script with `ERR_UNKNOWN_FILE_EXTENSION`. Run `insights-check.mjs` with `--prove-console` at least once per session: it plants a `console.warn` in the page before any page script and fails if it does not come back, because a capture that was never attached and a page that logged nothing are indistinguishable otherwise. For the same reason every expression the script evaluates in the page goes through one helper that turns an exception into a failed run: CDP returns a thrown expression in the command reply as `exceptionDetails` rather than as a `Runtime.exceptionThrown` event, so reading the result alone would report `undefined` for a broken observation while the console stayed clean, no request failed and the console proof still passed. A report that is missing is worth less than one that is wrong, because two missing observations compare equal and print as a pass. Every verdict the report prints follows the same rule: where a comparison had no reading to make, because no card ranks anything, no range button exists or no chart holds a canvas, the report says that in place of the verdict instead of reporting two empty readings as a match.
+
+`cli-record-failure.ts` has no dedicated `.test.ts` of its own, matching `cli-collect.ts`, `cli-backfill.ts` and `cli-bundle.ts` — all four are thin `process.env`/clock-reading wrappers with no branching logic of their own to unit-test. Its testable core, `recordFailure()`, is covered in `cli-support.test.ts` alongside the module's other shared helpers; `collect.ts`'s corresponding `series_last_date`-seeding logic is covered in `collect.test.ts`, and `cli-bundle.ts`'s core is `buildDashboardData`/`serialiseWithinBudget` in `bundle.test.ts`.
+
+`no-runtime-deps.test.ts` is worth calling out specifically: it regex-scans every non-test source file in `src/` and fails if any import specifier is not a `node:` builtin or a relative path, if any relative import omits its `.ts` extension, or if any import of `types.ts` omits the `import type` keyword. This is the enforcement mechanism behind two of Node's type-stripping constraints (§13) — without `import type`, Node treats a type-only import as a value import and throws `SyntaxError` **at runtime**, which for this package means a red scheduled run rather than a red `tsc --noEmit`. `erasableSyntaxOnly` and `verbatimModuleSyntax` in `tsconfig.json` catch the same class of mistake at typecheck time for constructs `no-runtime-deps.test.ts` doesn't scan for (enums, namespaces with runtime code, parameter properties, decorators).
+
+---
+
+## 12. Adding a repo
+
+The repository slug is never hardcoded: `collect()` and `backfill()` both take `slug` as a parameter, and both CLI wrappers derive it from the `GITHUB_REPOSITORY` environment variable, which GitHub Actions populates from `github.repository`. Nothing in the package assumes `TheZwiss/backspace` specifically.
+
+That said, adding a second repo is not a matter of pointing a second workflow at it. Every file in §3 lives at a **flat path** at the root of `metrics-data` (`stars.csv`, not `<repo>/stars.csv`) — the schema has no per-repo namespacing at all. A second repo needs a file-layout decision made first (a subdirectory per repo slug is the obvious candidate, but it hasn't been decided or built), plus its own `METRICS_TOKEN`-equivalent PAT scoped to that repo, before any workflow could safely write its data without colliding with the first repo's files.
+
+The dashboard inherits that assumption rather than adding one of its own. `bundle.ts` names the nine archive paths as constants and emits one `DashboardData`; `site/insights/index.html` renders one `data.json`. A per-repo layout would need a bundler that takes the prefix as a parameter and either one bundle per repo or a repo dimension in the contract — a §10.2 change, not a configuration change.
+
+---
+
+## 13. Why TypeScript with no build step
+
+The collector has **zero runtime dependencies** — only `fetch` and `node:` builtins — and is executed directly by Node via native TypeScript type stripping, with no `tsc` build step in the run path (`tsc --noEmit` runs only for typechecking, in `test`/`typecheck`). `scripts/metrics/package.json` declares `"engines": { "node": ">=22.18" }`; the workflow's `setup-node` step pins `node-version: 24`.
+
+Two constraints this creates are enforced rather than left to discipline, but by different mechanisms — worth knowing, because only one of them fails at typecheck time:
+
+- **`import type` is mandatory** for any type-only import. Omitting it makes Node treat the import as a value import, which throws `SyntaxError` at runtime. `verbatimModuleSyntax` in `scripts/metrics/tsconfig.json` catches this at typecheck time, and `no-runtime-deps.test.ts` catches it again.
+- **Relative import specifiers must carry the `.ts` extension** (`import './series.ts'`, never `'./series'`). This one has **no compiler enforcement**: `allowImportingTsExtensions` permits the extension but does not require it, so a missing `.ts` typechecks cleanly and only fails when Node runs the file. The regex scan in `no-runtime-deps.test.ts` (§11) is the only thing that catches it before then.
+
+Unsupported by type stripping and therefore avoided throughout the package: enums, namespaces with runtime code, parameter properties, import aliases, decorators.
+
+---
+
+## 14. Volume
+
+Not independently re-measured for this document; carried forward from the design spec's measurement against the real API responses at the time it was written (`docs/superpowers/specs/2026-08-25-repo-metrics-design.md`, §5.5): roughly 815 KB/year across all files combined, dominated by the two NDJSON files. At that rate the archive stays well under a size where the plain-text-over-SQLite tradeoff (§2) needs revisiting.
+
+The published bundle grows far more slowly than the archive — roughly **68 KB/year**, the figure §10.3's warning threshold is derived from. The two numbers are not in tension: the archive keeps every dimensional row for every snapshot, while the bundle keeps only the newest snapshot's ranking plus five trajectories per file, so almost all of the archive's growth is discarded on the way to `data.json`.
