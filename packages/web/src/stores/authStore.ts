@@ -1,6 +1,8 @@
+import { appStorage, flushAppStorage } from '../platform/appStorage';
+import { isAndroid } from '../platform/android';
 import { create } from 'zustand';
 import type { User, UserStatus } from '@backspace/shared';
-import { api } from '../api/client';
+import { api, HttpError } from '../api/client';
 import { useChatStore } from './chatStore';
 import { useSpaceStore } from './spaceStore';
 import { useSocialStore } from './socialStore';
@@ -41,14 +43,14 @@ function resetUserStores() {
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  token: localStorage.getItem('backspace_token'),
+  token: appStorage.getItem('backspace_token'),
   user: null,
   isLoading: false,
   error: null,
 
   initSession: (token: string, user: User) => {
     resetUserStores();
-    localStorage.setItem('backspace_token', token);
+    appStorage.setItem('backspace_token', token);
     set({ token, user, isLoading: false });
     useInstanceStore.getState().autoConnectAll().catch(() => {});
   },
@@ -58,6 +60,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const response = await api.auth.login({ username, password });
       get().initSession(response.token, response.user);
+      if (isAndroid()) await flushAppStorage();
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : 'Login failed' });
       throw err;
@@ -76,7 +79,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
-    localStorage.removeItem('backspace_token');
+    appStorage.removeItem('backspace_token');
+    if (isAndroid()) {
+      const keys = Array.from({ length: appStorage.length }, (_, index) => appStorage.key(index));
+      for (const key of keys) if (key?.startsWith('backspace_instances')) appStorage.removeItem(key);
+    }
     resetUserStores();
     set({ token: null, user: null });
   },
@@ -85,14 +92,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const token = get().token;
     if (!token) return;
 
-    set({ isLoading: true });
+    set({ isLoading: true, error: null });
     try {
       const user = await api.users.me();
       set({ user, isLoading: false });
       // Auto-connect to remote instances (fire-and-forget)
       useInstanceStore.getState().autoConnectAll().catch(() => {});
-    } catch {
-      localStorage.removeItem('backspace_token');
+    } catch (error) {
+      if (isAndroid() && !(error instanceof HttpError && error.status === 401)) {
+        set({ isLoading: false, error: '无法连接服务器，请检查网络后重试' });
+        return;
+      }
+      appStorage.removeItem('backspace_token');
       set({ token: null, user: null, isLoading: false });
     }
   },
@@ -115,7 +126,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const response = await api.users.changePassword({ currentPassword, newPassword });
 
     // Update token in state and localStorage
-    localStorage.setItem('backspace_token', response.token);
+    appStorage.setItem('backspace_token', response.token);
     set({ token: response.token });
   },
 
@@ -127,7 +138,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await api.users.deleteAccount({ password, username });
 
     // Clear all state
-    localStorage.removeItem('backspace_token');
+    appStorage.removeItem('backspace_token');
     resetUserStores();
     set({ token: null, user: null });
   },

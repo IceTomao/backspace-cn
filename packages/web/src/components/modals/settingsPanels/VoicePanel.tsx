@@ -5,6 +5,8 @@ import { Toggle } from '../../ui/Toggle';
 import { VideoSection } from './VideoSection';
 import { AudioInputSection } from './AudioInputSection';
 import { AudioOutputSection } from './AudioOutputSection';
+import { isAndroid } from '../../../platform/android';
+import { AndroidAudioSettings } from '../../android/AndroidAudioSettings';
 
 export function VoicePanel() {
   const { t } = useTranslation(['settings']);
@@ -19,6 +21,7 @@ export function VoicePanel() {
   const setSoundEffectVolume = useVoiceStore((s) => s.setSoundEffectVolume);
   const messageSoundAllChannels = useVoiceStore((s) => s.messageSoundAllChannels);
   const setMessageSoundAllChannels = useVoiceStore((s) => s.setMessageSoundAllChannels);
+  if (isAndroid()) return <AndroidAudioSettings />; // i18n-check: allow-literal (code between JSX branches)
 
   return (
     <div className="space-y-5">

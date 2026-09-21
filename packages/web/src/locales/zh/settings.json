@@ -1,4 +1,14 @@
 {
+  "android": {
+    "theme": "主题", "system": "跟随系统", "light": "浅色", "dark": "深色",
+    "background": "后台在线", "server": "服务器", "switch": "切换服务器",
+    "switchConfirm": "切换服务器将结束当前通话。是否继续？", "busy": "处理中…",
+    "failed": "操作失败，请重试", "audioDevice": "音频设备",
+    "autoDevice": "自动选择", "bluetooth": "允许连接蓝牙耳机",
+    "volume": "接收音量", "allMessages": "全部频道消息提醒",
+    "offline": "暂时无法连接", "retry": "重试连接",
+    "storageFailed": "本地设置保存失败，请检查手机存储空间。此次登录可能无法保留。"
+  },
   "interfaceScale": {
     "label": "界面比例",
     "description": "调整文字、按钮和面板大小。此设置保存在当前设备的浏览器或应用中。",

@@ -1,3 +1,5 @@
+import { appStorage, flushAppStorage } from '../platform/appStorage';
+import { serverUrl, isAndroid } from '../platform/android';
 import { isErrorCode, type ErrorCode, type ErrorDetails } from '@backspace/shared/src/errors';
 import type {
   AuthResponse,
@@ -882,23 +884,25 @@ export class BackspaceApiClient {
 }
 
 function handleUnauthorized(): void {
-  localStorage.removeItem('backspace_token');
+  appStorage.removeItem('backspace_token');
   if (
     !window.location.pathname.startsWith('/login') &&
     !window.location.pathname.startsWith('/register')
   ) {
-    window.location.href = '/login';
+    if (isAndroid()) void flushAppStorage().then(() => { window.location.href = '/login'; }).catch(() => {
+      window.dispatchEvent(new CustomEvent('android-storage-error'));
+    });
+    else window.location.href = '/login';
   }
 }
 
 export const api = new BackspaceApiClient(
-  '/api',
-  () => localStorage.getItem('backspace_token'),
+  serverUrl('/api'),
+  () => appStorage.getItem('backspace_token'),
   handleUnauthorized,
 );
 
 export function createApiClient(origin: string, getToken: () => string | null, onUnauthorized?: () => void): BackspaceApiClient {
-  const baseUrl = origin ? `${origin}/api` : '/api';
+  const baseUrl = origin ? `${origin}/api` : serverUrl('/api');
   return new BackspaceApiClient(baseUrl, getToken, onUnauthorized);
 }
-

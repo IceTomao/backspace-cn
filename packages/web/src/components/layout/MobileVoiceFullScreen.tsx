@@ -14,6 +14,7 @@ import {
 } from '../../utils/voiceActions';
 import { VoiceGrid } from '../voice/VoiceGrid';
 import { deriveGridTiles } from '../../hooks/useLiveKit';
+import { isAndroid } from '../../platform/android';
 import { requestMicPermission } from '../../utils/voice';
 
 /**
@@ -474,7 +475,7 @@ export function MobileVoiceFullScreen() {
             and the camera is currently on). The chevron sits in a small
             attached pill above the bottom-right corner of the camera button —
             visible only when relevant so single-camera devices are unaffected. */}
-        <div className="relative" ref={cameraPickerAnchorRef}>
+        {!isAndroid() && <div className="relative" ref={cameraPickerAnchorRef}>
           <button
             onClick={handleCameraAction}
             className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
@@ -531,13 +532,13 @@ export function MobileVoiceFullScreen() {
               </svg>
             </button>
           )}
-        </div>
+        </div>}
 
         {/* Screen share — uses canonical handleScreenShareAction so the
             getDisplayMedia call actually fires (and propagates errors via
             voiceActions). The previous voiceStore.toggleScreenShare flipped
             only the boolean and never started capture. */}
-        <button
+        {!isAndroid() && <button
           onClick={handleScreenShareAction}
           className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
             isScreenSharing
@@ -561,7 +562,7 @@ export function MobileVoiceFullScreen() {
               d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a9 9 0 01-9 9m0 0a9 9 0 01-9-9"
             />
           </svg>
-        </button>
+        </button>}
 
         {/* Disconnect */}
         <button

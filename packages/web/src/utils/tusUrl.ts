@@ -1,3 +1,4 @@
+import { serverLocation } from '../platform/android';
 /**
  * Resolve the `Location` a tus create returned into the absolute upload URL.
  *
@@ -12,7 +13,7 @@
  * returned unchanged.
  */
 export function resolveTusUrl(location: string, origin: string | undefined): string {
-  const base = origin && origin.trim() ? origin.trim() : window.location.origin;
+  const base = origin && origin.trim() ? origin.trim() : serverLocation().origin;
   return new URL(location, base).toString();
 }
 
@@ -23,5 +24,5 @@ export function resolveTusUrl(location: string, origin: string | undefined): str
  * from, including a shell whose page origin is not the instance.
  */
 export function tusEndpoint(origin: string | undefined): string {
-  return new URL('/api/files/', origin && origin.trim() ? origin.trim() : window.location.origin).toString();
+  return new URL('/api/files/', origin && origin.trim() ? origin.trim() : serverLocation().origin).toString();
 }

@@ -1,9 +1,10 @@
+import { serverLocation } from '../platform/android';
 import { useUIStore } from '../stores/uiStore';
 import { useTransferStore } from '../stores/transferStore';
 
 function deriveFilename(url: string): string {
   try {
-    const u = new URL(url, window.location.origin);
+    const u = new URL(url, serverLocation().origin);
     const last = u.pathname.split('/').pop() || 'image';
     return last.split('?')[0] || 'image';
   } catch {

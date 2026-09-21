@@ -1,4 +1,14 @@
 {
+  "android": {
+    "theme": "Design", "system": "System", "light": "Hell", "dark": "Dunkel",
+    "background": "Im Hintergrund online bleiben", "server": "Server", "switch": "Server wechseln",
+    "switchConfirm": "Der Serverwechsel beendet den aktuellen Anruf. Fortfahren?", "busy": "Wird verarbeitet...",
+    "failed": "Vorgang fehlgeschlagen. Bitte erneut versuchen.", "audioDevice": "Audiogerät",
+    "autoDevice": "Automatisch", "bluetooth": "Bluetooth-Headsets zulassen",
+    "volume": "Empfangslautstärke", "allMessages": "Alle Kanäle benachrichtigen",
+    "offline": "Verbindung nicht möglich", "retry": "Verbindung erneut versuchen",
+    "storageFailed": "Lokale Einstellungen konnten nicht gespeichert werden. Gerätespeicher prüfen; die Anmeldung bleibt möglicherweise nicht erhalten."
+  },
   "interfaceScale": {
     "label": "Oberflächenskalierung",
     "description": "Größe von Text, Schaltflächen und Bereichen. Wird in diesem Browser oder dieser App auf diesem Gerät gespeichert.",

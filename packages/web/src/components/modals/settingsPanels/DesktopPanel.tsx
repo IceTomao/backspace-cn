@@ -1,3 +1,4 @@
+import { serverLocation } from '../../../platform/android';
 import { useState, useEffect } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -251,7 +252,7 @@ export function DesktopPanel() {
 
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm text-txt-primary font-medium">{window.location.origin}</div>
+            <div className="text-sm text-txt-primary font-medium">{serverLocation().origin}</div>
             <div className="text-xs text-txt-tertiary mt-0.5">{t('desktop.instance.current')}</div>
           </div>
           <button

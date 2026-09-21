@@ -1,3 +1,4 @@
+import { serverUrl } from '../../platform/android';
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -238,10 +239,10 @@ function SpaceCard({
     : null;
 
   const iconUrl = space.icon
-    ? (space.icon.startsWith('http') || space.icon.startsWith('/') ? space.icon : `/api/uploads/${space.icon}`)
+    ? (space.icon.startsWith('http') || space.icon.startsWith('/') ? space.icon : serverUrl(`/api/uploads/${space.icon}`))
     : null;
   const bannerUrl = space.banner
-    ? (space.banner.startsWith('http') || space.banner.startsWith('/') ? space.banner : `/api/uploads/${space.banner}`)
+    ? (space.banner.startsWith('http') || space.banner.startsWith('/') ? space.banner : serverUrl(`/api/uploads/${space.banner}`))
     : null;
 
   // Extract dominant colors from icon when no banner is set

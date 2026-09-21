@@ -6,6 +6,8 @@ import { api, RateLimitError } from '../../api/client';
 import type { InstanceInfoResponse } from '@backspace/shared';
 import { SourceCodeLink } from '../ui/SourceCodeLink';
 import { describeError } from '../../i18n/errors';
+import { isAndroid } from '../../platform/android';
+import { AndroidSettings } from '../android/AndroidSettings';
 
 export function LoginPage() {
   const { t } = useTranslation(['auth', 'common']);
@@ -85,6 +87,7 @@ export function LoginPage() {
           <p className="text-txt-tertiary mt-1">{t('auth:login.subtitle')}</p>
         </div>
 
+        {isAndroid() && <details className="mb-5"><summary className="cursor-pointer text-sm text-txt-secondary mb-3">服务器设置</summary><AndroidSettings serverOnly /></details>}
         <form onSubmit={handleSubmit}>
           {retryAfter > 0 && (
             <div className="mb-4 p-3 bg-accent-amber/10 border border-accent-amber/30 rounded text-sm">

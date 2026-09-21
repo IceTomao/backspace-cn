@@ -1,3 +1,4 @@
+import { serverUrl } from '../../platform/android';
 import { useTranslation } from 'react-i18next';
 import { useSpaceJoin } from '../../hooks/useSpaceJoin';
 import { getSpaceGradient } from '../../utils/gradients';
@@ -27,7 +28,7 @@ export function ExploreSpacePreviewCard({
 
   const fallbackGradient = getSpaceGradient(space.id, space.name, space.avatarColor).gradient;
   const iconUrl = space.icon
-    ? (space.icon.startsWith('http') || space.icon.startsWith('/') ? space.icon : `/api/uploads/${space.icon}`)
+    ? (space.icon.startsWith('http') || space.icon.startsWith('/') ? space.icon : serverUrl(`/api/uploads/${space.icon}`))
     : null;
   const originLabel = space._instanceOrigin
     ? (() => { try { return new URL(space._instanceOrigin).host; } catch { return space._instanceOrigin; } })()

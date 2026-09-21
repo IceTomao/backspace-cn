@@ -1,3 +1,5 @@
+import { serverUrl } from '../../platform/android';
+import { serverLocation } from '../../platform/android';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useUIStore } from '../../stores/uiStore';
@@ -381,7 +383,7 @@ export function MobileSpacesScreen() {
         onClick: async () => {
           try {
             const code = await useSpaceStore.getState().generateInvite(spaceId);
-            const origin = (space as TaggedSpace)._instanceOrigin || window.location.origin;
+            const origin = (space as TaggedSpace)._instanceOrigin || serverLocation().origin;
             const url = `${origin}/invite/${code}`;
             await navigator.clipboard.writeText(url);
             addToast(t('spaces:sidebar.space.inviteCopied'), 'success', 3000);
@@ -719,7 +721,7 @@ export function MobileSpacesScreen() {
           const iconUrl = space.icon
             ? (space.icon.startsWith('http') || space.icon.startsWith('/')
                 ? space.icon
-                : `/api/uploads/${space.icon}`)
+                : serverUrl(`/api/uploads/${space.icon}`))
             : null;
           const grad = getSpaceGradient(space.id, space.name, space.avatarColor);
 

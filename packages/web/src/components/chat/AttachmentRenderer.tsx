@@ -1,3 +1,4 @@
+import { serverUrl } from '../../platform/android';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Attachment } from '@backspace/shared';
@@ -46,8 +47,8 @@ const BROWSER_SUPPORTS_HEVC: boolean = (() => {
  * exported so right-click menus can use it without duplicating the rule.
  */
 export function attUrlOf(filename: string): string {
-  if (filename.startsWith('http') || filename.startsWith('/')) return filename;
-  return `/api/uploads/${filename}`;
+  if (filename.startsWith('http') || filename.startsWith('/')) return serverUrl(filename);
+  return serverUrl(`/api/uploads/${filename}`);
 }
 
 interface VideoAttachmentProps {
@@ -174,7 +175,7 @@ export function AttachmentRenderer({ attachment }: AttachmentRendererProps) {
   const thumbUrl = attachment.thumbnailFilename
     ? attachment.thumbnailFilename.startsWith('http') || attachment.thumbnailFilename.startsWith('/')
       ? attachment.thumbnailFilename
-      : `/api/uploads/${attachment.thumbnailFilename}`
+      : serverUrl(`/api/uploads/${attachment.thumbnailFilename}`)
     : null;
 
   const { mimetype, originalName, size } = attachment;

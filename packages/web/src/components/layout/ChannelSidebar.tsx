@@ -1,3 +1,4 @@
+import { appStorage } from '../../platform/appStorage';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -122,7 +123,7 @@ export function ChannelSidebar() {
   const collapseKey = `backspace:collapsed-categories:${currentSpaceId}`;
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() => {
     try {
-      const stored = localStorage.getItem(collapseKey);
+      const stored = appStorage.getItem(collapseKey);
       return stored ? new Set(JSON.parse(stored)) : new Set();
     } catch { return new Set(); }
   });
@@ -131,7 +132,7 @@ export function ChannelSidebar() {
       const next = new Set(prev);
       if (next.has(categoryId)) next.delete(categoryId);
       else next.add(categoryId);
-      try { localStorage.setItem(collapseKey, JSON.stringify([...next])); } catch {}
+      try { appStorage.setItem(collapseKey, JSON.stringify([...next])); } catch {}
       return next;
     });
   }, [collapseKey]);

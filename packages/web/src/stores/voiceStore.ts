@@ -1,3 +1,4 @@
+import { appStorage } from '../platform/appStorage';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ParticipantInfo } from '../hooks/useLiveKit';
@@ -834,7 +835,7 @@ export const useVoiceStore = create<VoiceState>()(
         }
         return persistedState;
       },
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => appStorage),
       // Only persist these keys. Maps and Sets are complex to serialize.
       // noiseSuppression is intentionally excluded — always true internally,
       // managed automatically by AudioManager based on RNNoise state.

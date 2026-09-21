@@ -1,5 +1,6 @@
 import { useInterfaceScaleStore } from '../stores/interfaceScaleStore';
 import { isElectron } from './platform';
+import { isAndroid } from './android';
 
 /** DOM rects and pointer events are visual pixels; CSS positions are unzoomed. */
 export function layoutPixels(value: number): number {
@@ -18,6 +19,7 @@ export const MOBILE_LAYOUT_BREAKPOINT = 768;
 export const NARROW_VIEWPORT_BREAKPOINT = 600;
 
 export function isMobileViewport(): boolean {
+  if (isAndroid()) return true;
   // Zooming out must not turn a physically narrow phone into the desktop shell.
   return window.innerWidth < NARROW_VIEWPORT_BREAKPOINT
     || layoutPixels(window.innerWidth) < MOBILE_LAYOUT_BREAKPOINT;

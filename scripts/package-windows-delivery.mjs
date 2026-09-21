@@ -13,6 +13,8 @@ const name = `Backspace-CN-${manifest.version}-win-x64`;
 const output = path.join(root, 'installers', name);
 const unpacked = path.join(desktop, 'dist-electron/win-unpacked');
 const archive = path.join(unpacked, 'resources/app.asar');
+const packageOnly = process.argv.includes('--package-only');
+async function verifyPackagedApp() {
 const requireDesktop = createRequire(path.join(desktop, 'package.json'));
 const requireBuilder = createRequire(requireDesktop.resolve('electron-builder'));
 const requireLib = createRequire(requireBuilder.resolve('app-builder-lib'));
@@ -22,6 +24,13 @@ const forbidden = files.filter((file) =>
   /(^|\/)\.env(?:$|\.)|\.db$|\.test\.(js|d\.ts)(\.map)?$|app-update\.yml$/.test(file));
 assert.deepEqual(forbidden, [], 'Private data or test files must not enter the client');
 assert(files.includes('/build/icon.png'), 'Window icon is missing');
+assert.equal(JSON.parse(asar.extractFile(archive, 'package.json').toString()).version, manifest.version,
+  'Installer application version differs from source');
+assert(files.includes('/dist/theme.js'), 'Theme manager is missing');
+assert(asar.extractFile(archive, 'resources/theme.css').equals(
+  readFileSync(path.join(desktop, 'resources/theme.css'))), 'Bundled theme stylesheet differs from source');
+const preload = asar.extractFile(archive, 'dist/preload.js').toString();
+assert(preload.includes('desktop-theme-styles') && preload.includes('insertCSS'), 'Theme bootstrap is missing');
 assert(!existsSync(path.join(unpacked, 'resources/app-update.yml')), 'Upstream update feed must not ship');
 const config = asar.extractFile(archive, 'dist/buildConfig.js').toString();
 assert(config.includes("defaultInstanceUrl: 'https://chat.kevz.me:2096'"));
@@ -38,6 +47,8 @@ const fuses = await getCurrentFuseWire(path.join(unpacked, 'Backspace.exe'));
 assert.equal(fuses[FuseV1Options.RunAsNode], FuseState.DISABLE);
 assert.equal(fuses[FuseV1Options.EnableNodeCliInspectArguments], FuseState.DISABLE);
 assert.equal(fuses[FuseV1Options.OnlyLoadAppFromAsar], FuseState.ENABLE);
+}
+if (!packageOnly) await verifyPackagedApp();
 
 // Archive the working source, including uncommitted implementation files, never
 // the whole directory: ignored credentials, databases and build output stay out.
@@ -63,4 +74,4 @@ const hashes = [`${name}.exe`, sourceName, 'README.md'].map((file) => {
   return `${digest}  ${file}`;
 });
 writeFileSync(path.join(output, 'SHA256SUMS.txt'), hashes.join('\n') + '\n');
-console.log(`Verified native module, defaults, private-file exclusions and Electron fuses.\nDelivery: ${output}\n${hashes.join('\n')}`);
+console.log(`${packageOnly ? 'Package-only: packaged-app verification skipped.' : 'Verified native module, defaults, private-file exclusions and Electron fuses.'}\nDelivery: ${output}\n${hashes.join('\n')}`);

@@ -1,3 +1,4 @@
+import { serverUrl } from '../../platform/android';
 import React from 'react';
 import type { User } from '@backspace/shared';
 import { getAvatarGradient } from '../../utils/gradients';
@@ -88,8 +89,8 @@ export function Avatar({ src, name, size = 40, status, className = '', onClick, 
       >
         {src ? (
           <img
-            src={(src.startsWith('http') || src.startsWith('blob:') || src.startsWith('data:') || src.startsWith('/'))
-              ? src : `/api/uploads/${src}`}
+            src={serverUrl((src.startsWith('http') || src.startsWith('blob:') || src.startsWith('data:') || src.startsWith('/'))
+              ? src : `/api/uploads/${src}`)}
             alt={name}
             loading="lazy"
             className="w-full h-full rounded-full object-cover"

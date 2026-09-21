@@ -1,3 +1,4 @@
+import { serverLocation } from '../../platform/android';
 import { layoutRect, layoutPixels } from '../../platform/interfaceScale';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -324,13 +325,13 @@ export function Message({ message, isCompact, isFirstInGroup, previousMessageId 
       // currentSrc is absolute; attUrlOf may be relative — compare via URL parse.
       let mediaPath: string;
       try {
-        mediaPath = new URL(mediaSrc, window.location.origin).pathname;
+        mediaPath = new URL(mediaSrc, serverLocation().origin).pathname;
       } catch { mediaPath = mediaSrc; }
       return persistedAttachments.find((att) => {
         if (!att.mimetype.startsWith(`${kind}/`)) return false;
         const attRaw = attUrlOf(att.filename);
         let attPath: string;
-        try { attPath = new URL(attRaw, window.location.origin).pathname; } catch { attPath = attRaw; }
+        try { attPath = new URL(attRaw, serverLocation().origin).pathname; } catch { attPath = attRaw; }
         return attPath === mediaPath;
       }) ?? null;
     };

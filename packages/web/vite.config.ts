@@ -5,11 +5,22 @@ import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 import { devCspPreamble } from './src/build/devCsp';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
+    ...(mode === 'android' ? [{
+      name: 'android-entry',
+      transformIndexHtml: {
+        order: 'pre' as const,
+        handler(html: string) {
+          return html.replace('/src/main.tsx', '/src/androidMain.ts')
+            .replace('content="dark"', 'content="light dark"')
+            .replace("object-src 'none';", "frame-src 'none'; object-src 'none';");
+        },
+      },
+    }] : []),
     devCspPreamble(),
     react(),
-    VitePWA({
+    ...(mode === 'android' ? [] : [VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icons/favicon-32.png', 'icons/favicon-16.png', 'icons/apple-touch-icon.png'],
       manifest: {
@@ -34,7 +45,7 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       },
-    }),
+    })]),
   ],
   test: {
     globals: true,
@@ -46,6 +57,9 @@ export default defineConfig({
     extensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.mts', '.json'],
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
+      ...(mode === 'android' ? {
+        'virtual:pwa-register/react': path.resolve(import.meta.dirname, './src/platform/androidPwa.ts'),
+      } : {}),
     },
   },
   server: {
@@ -61,4 +75,5 @@ export default defineConfig({
       },
     },
   },
-});
+  build: mode === 'android' ? { outDir: 'dist-android', sourcemap: false } : undefined,
+}));

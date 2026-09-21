@@ -16,6 +16,7 @@ import { Avatar } from '../ui/Avatar';
 import { AvatarStack } from '../ui/AvatarStack';
 import { useVoiceStore } from '../../stores/voiceStore';
 import { wsSend } from '../../hooks/useWebSocket';
+import { androidCall, isAndroid } from '../../platform/android';
 import { MemberListToggleButton } from './MemberListToggleButton';
 import { TransferIndicator } from './TransferIndicator';
 import { isSelf, parseFederatedUsername, isFederationGlobeApplicable } from '../../utils/identity';
@@ -220,12 +221,18 @@ export function MainContent() {
 
     const handleStartVoiceCall = () => {
       if (!currentChannelId) return;
+      if (isAndroid()) {
+        void androidCall('startCall', { channelId: currentChannelId, origin: getChannelOrigin(currentChannelId) })
+          .catch((error: unknown) => useUIStore.getState().addToast(error instanceof Error ? error.message : '呼叫失败', 'warning'));
+        return;
+      }
       useVoiceStore.getState().setOutgoingCall({ dmChannelId: currentChannelId });
       wsSend({ type: 'dm_call_start', dmChannelId: currentChannelId }, getChannelOrigin(currentChannelId));
     };
 
     const handleCancelCall = () => {
       if (!currentChannelId) return;
+      if (isAndroid()) { void androidCall('hangup'); return; }
       useVoiceStore.getState().setOutgoingCall(null);
       const { federatedCallId, callOrigin } = useVoiceStore.getState();
       const origin = callOrigin || getChannelOrigin(currentChannelId);

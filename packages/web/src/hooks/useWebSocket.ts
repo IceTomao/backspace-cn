@@ -1,3 +1,4 @@
+import { serverLocation, isAndroid, androidCall, onAndroid } from '../platform/android';
 import React, { useEffect, useRef } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { useSpaceStore, getChannelOrigin, getMyUserIdForOrigin, setMyUserIdForOrigin, resolveDmChannelId } from '../stores/spaceStore';
@@ -71,6 +72,32 @@ interface ConnectionState {
 
 // '' = home instance, 'https://remote.example.com' = remote
 const connections = new Map<string, ConnectionState>();
+const nativeConnected = new Set<string>();
+let nativeListeners: (() => void)[] = [];
+const nativeSequences = new Map<string, number>();
+function attachNativeTransport(): void {
+  if (nativeListeners.length) return;
+  nativeListeners = [
+    onAndroid<{ origin: string; event: ServerEvent; sequence: number }>('socketEvent', ({ origin, event, sequence }) => {
+      if (sequence <= (nativeSequences.get(origin) ?? 0)) return;
+      nativeSequences.set(origin, sequence);
+      try { handleEvent(origin, event); } catch { useUIStore.getState().addToast('消息同步失败，请重新打开应用', 'warning'); }
+    }),
+    onAndroid<{ origin: string; connected: boolean }>('socketStatus', ({ origin, connected }) => {
+      if (connected) nativeConnected.add(origin); else nativeConnected.delete(origin);
+      if (origin) void import('../stores/instanceStore').then(({ useInstanceStore }) =>
+        useInstanceStore.getState().setInstanceStatus(origin, connected ? 'connected' : 'disconnected'));
+    }),
+    onAndroid<{ origin: string }>('sessionExpired', ({ origin }) => {
+      if (!origin) useAuthStore.getState().logout();
+      else disconnectInstance(origin);
+    }),
+    onAndroid<{ origin: string; event: Extract<ServerEvent, { type: 'dm_call_incoming' }> | null }>('incoming', ({ origin, event }) => {
+      if (event) handleEvent(origin, event);
+      else if (useVoiceStore.getState().callOrigin === origin) useVoiceStore.getState().setIncomingCall(null);
+    }),
+  ];
+}
 
 // Track whether the home connection has been initialized via the React hook
 let homeInitialized = false;
@@ -117,7 +144,7 @@ function buildWsUrl(origin: string): string {
   if (!origin) {
     // Home instance — derive from current page
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws`;
+    return `${protocol}//${serverLocation().host}/ws`;
   }
   // Remote instance — derive from origin URL
   const url = new URL(origin);
@@ -161,7 +188,7 @@ export function teardownDmCall(): void {
   voice.setActiveDmCall(null);
   voice.clearFederatedCallData();
   // Never tear down a space voice connection in response to a DM-call signal.
-  if (voice.disconnectFn && !voice.currentVoiceChannelId) voice.disconnectFn();
+  if (!isAndroid() && voice.disconnectFn && !voice.currentVoiceChannelId) voice.disconnectFn();
 }
 
 function handleEvent(origin: string, event: ServerEvent): void {
@@ -462,7 +489,7 @@ function handleEvent(origin: string, event: ServerEvent): void {
             }
           }
         } else {
-          if (activeDmCall) {
+          if (activeDmCall && !isAndroid()) {
             setActiveDmCall(null);
             if (disconnectFn) disconnectFn();
           }
@@ -668,6 +695,7 @@ function handleEvent(origin: string, event: ServerEvent): void {
     }
 
     case 'voice_moved': {
+      if (isAndroid()) break;
       // The local user was moved to a different channel by a moderator
       const myMovedId = isHome ? useAuthStore.getState().user?.id : getMyUserIdForOrigin(origin);
       if (event.userId === myMovedId) {
@@ -1116,7 +1144,7 @@ function handleEvent(origin: string, event: ServerEvent): void {
       // also gate on `!isLiveKitConnected`: a caller who is currently sitting in
       // a space voice channel is LiveKit-connected, and gating on it would skip
       // the DM connect entirely, stranding them in the space channel.
-      if (connectFn && wasOutgoingCall && callDmId) {
+      if (connectFn && wasOutgoingCall && callDmId && !isAndroid()) {
         connectFn(callDmId, true).catch((err: unknown) => {
           console.error('[WS] DM call connect failed:', err);
         });
@@ -1410,6 +1438,12 @@ function getOrCreateConnection(origin: string, token: string): ConnectionState {
 
 function connectToOrigin(origin: string, token: string): void {
   const conn = getOrCreateConnection(origin, token);
+  if (isAndroid()) {
+    attachNativeTransport();
+    void androidCall('connect', { origin, token }).catch(() =>
+      useUIStore.getState().addToast('无法连接服务器，请检查网络后重试', 'warning'));
+    return;
+  }
 
   if (conn.ws && (conn.ws.readyState === WebSocket.OPEN || conn.ws.readyState === WebSocket.CONNECTING)) {
     return;
@@ -1463,6 +1497,12 @@ function connectToOrigin(origin: string, token: string): void {
 }
 
 function disconnectFromOrigin(origin: string): void {
+  if (isAndroid()) {
+    void androidCall('disconnect', { origin }).catch(() => {});
+    connections.delete(origin);
+    nativeConnected.delete(origin);
+    return;
+  }
   const conn = connections.get(origin);
   if (!conn) return;
 
@@ -1504,12 +1544,18 @@ export function disconnectAllRemote(): void {
 
 /** Read-only home WS connection status — safe to call from any component without managing lifecycle. */
 export function getHomeWsConnected(): boolean {
+  if (isAndroid()) return nativeConnected.has(HOME_ORIGIN);
   const conn = connections.get(HOME_ORIGIN);
   return !!conn?.ws && conn.ws.readyState === WebSocket.OPEN;
 }
 
 /** Send an event over the WebSocket. Can be used outside of React components. */
 export function wsSend(event: ClientEvent, origin: string = HOME_ORIGIN): void {
+  if (isAndroid()) {
+    void androidCall('send', { origin, event }).catch((error: unknown) =>
+      useUIStore.getState().addToast(error instanceof Error ? error.message : '发送失败，请重试', 'warning'));
+    return;
+  }
   const conn = connections.get(origin);
   if (conn?.ws && conn.ws.readyState === WebSocket.OPEN) {
     conn.ws.send(JSON.stringify(event));
@@ -1518,6 +1564,10 @@ export function wsSend(event: ClientEvent, origin: string = HOME_ORIGIN): void {
 
 /** Send an event to ALL connected WebSocket instances (home + remotes). */
 export function wsSendAll(event: ClientEvent): void {
+  if (isAndroid()) {
+    for (const origin of nativeConnected) wsSend(event, origin);
+    return;
+  }
   for (const [_origin, conn] of connections) {
     if (conn.ws && conn.ws.readyState === WebSocket.OPEN) {
       conn.ws.send(JSON.stringify(event));
@@ -1551,11 +1601,17 @@ export function useWebSocket() {
 
   useEffect(() => {
     const checkStatus = setInterval(() => {
-      const conn = connections.get(HOME_ORIGIN);
-      setIsConnected(!!conn?.ws && conn.ws.readyState === WebSocket.OPEN);
+      setIsConnected(getHomeWsConnected());
     }, 500);
     return () => {
       clearInterval(checkStatus);
+      if (isAndroid()) {
+        nativeListeners.forEach(remove => remove());
+        nativeListeners = [];
+        // Native owns connection and call lifetime, not a React mount.
+        homeInitialized = false;
+        return;
+      }
       homeInitialized = false;
       disconnectFromOrigin(HOME_ORIGIN);
     };

@@ -1,3 +1,4 @@
+import { appStorage } from '../platform/appStorage';
 import { create } from 'zustand';
 import type { InstanceStreamingLimits, InstanceAdminSettings, TelemetryPayload, TelemetryStatus, InstanceUpdateStatus } from '@backspace/shared';
 import { api } from '../api/client';
@@ -138,7 +139,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setTelemetryEnabled: async (enabled: boolean) => {
     const telemetry = await api.admin.telemetry.set(enabled);
     set({ telemetry });
-    clearDismissal(localStorage);
+    clearDismissal(appStorage);
   },
 
   setIsAdmin: (isAdmin: boolean) => set({ isAdmin }),
@@ -156,7 +157,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
    * pipeline into every test that touches settings.
    */
   setUpdateAckUser: (userId) => {
-    set({ updateAckUserId: userId, updateAck: readUpdateAck(localStorage, userId) });
+    set({ updateAckUserId: userId, updateAck: readUpdateAck(appStorage, userId) });
   },
 
   /**
@@ -188,7 +189,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         const result = await api.admin.updateStatus(refresh);
         set({
           updateStatus: result,
-          updateAck: readUpdateAck(localStorage, useSettingsStore.getState().updateAckUserId),
+          updateAck: readUpdateAck(appStorage, useSettingsStore.getState().updateAckUserId),
           updateStatusError: '',
         });
       } catch (err) {
@@ -211,7 +212,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     if (version === null) return;
     const userId = useSettingsStore.getState().updateAckUserId;
     const next: UpdateAck = { ...useSettingsStore.getState().updateAck, seenVersion: version };
-    writeUpdateAck(localStorage, userId, next);
+    writeUpdateAck(appStorage, userId, next);
     set({ updateAck: next });
   },
 
@@ -220,7 +221,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     if (version === null) return;
     const userId = useSettingsStore.getState().updateAckUserId;
     const next: UpdateAck = { ...useSettingsStore.getState().updateAck, toastShownFor: version };
-    writeUpdateAck(localStorage, userId, next);
+    writeUpdateAck(appStorage, userId, next);
     set({ updateAck: next });
   },
 

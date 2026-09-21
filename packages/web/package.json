@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "node ../../scripts/check-i18n.mjs && tsc && vite build",
+    "build:android": "tsc && vite build --mode android",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -15,6 +16,7 @@
     "e2e:identity-deletion": "playwright test e2e/identity-deletion.spec.ts"
   },
   "dependencies": {
+    "@capacitor/core": "8.5.2",
     "@backspace/shared": "workspace:*",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",

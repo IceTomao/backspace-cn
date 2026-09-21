@@ -7,6 +7,7 @@ import { ScreenShareSettingsPopover } from './ScreenShareSettingsPopover';
 import { ConnectionInfoPopover } from './ConnectionInfoPopover';
 import { hasPermissionBit, PermissionBits } from '../../utils/permissions';
 import { handleCameraAction, handleScreenShareAction } from '../../utils/voiceActions';
+import { isAndroid } from '../../platform/android';
 
 /**
  * VoiceControls renders the voice status + button rows.
@@ -179,7 +180,7 @@ export function VoiceControls() {
       </div>
 
       {/* Row 2: Camera, Screen Share, Noise Suppression */}
-      <div className="relative flex items-center gap-1 px-3 pb-2 pt-1">
+      {!isAndroid() && <div className="relative flex items-center gap-1 px-3 pb-2 pt-1">
         {canSpeak && (
           <button
             onClick={handleCameraAction}
@@ -260,7 +261,7 @@ export function VoiceControls() {
           anchorRef={shareBtnRef}
           onStopSharing={handleStopSharing}
         />
-      </div>
+      </div>}
     </>
   );
 }

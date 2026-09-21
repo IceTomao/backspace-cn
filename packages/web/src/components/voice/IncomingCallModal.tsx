@@ -7,6 +7,8 @@ import { parseFederatedUsername } from '../../utils/identity';
 import { useCanonicalUserView } from '../../utils/userViewLookup';
 import { Avatar } from '../ui/Avatar';
 import type { User } from '@backspace/shared';
+import { androidCall, isAndroid } from '../../platform/android';
+import { useUIStore } from '../../stores/uiStore';
 
 export function IncomingCallModal() {
   const { t } = useTranslation(['voice', 'common']);
@@ -16,7 +18,7 @@ export function IncomingCallModal() {
 
   // Auto-dismiss after 30 seconds
   useEffect(() => {
-    if (incomingCall) {
+    if (incomingCall && !isAndroid()) {
       timerRef.current = setTimeout(() => {
         // Auto-reject after timeout
         const { callOrigin, federatedCallId } = useVoiceStore.getState();
@@ -56,6 +58,16 @@ export function IncomingCallModal() {
     const { callOrigin, federatedCallId, setActiveDmCall, connectFn } = useVoiceStore.getState();
     const origin = callOrigin || (dmChannelId ? getChannelOrigin(dmChannelId) : undefined);
     const callDmId = dmChannelId || federatedCallId!;
+    if (isAndroid()) {
+      const voice = useVoiceStore.getState();
+      void androidCall('acceptCall', {
+        channelId: callDmId, dmChannelId, federatedCallId, origin: origin ?? '',
+        livekitToken: voice.federatedCallToken, livekitUrl: voice.federatedCallUrl,
+        muted: voice.isMuted, deafened: voice.isDeafened,
+      }).then(() => setIncomingCall(null)).catch((error: unknown) =>
+        useUIStore.getState().addToast(error instanceof Error ? error.message : '接听失败', 'warning'));
+      return;
+    }
 
     // Immediately transition to active call state — don't wait for server response.
     // The dm_call_accepted event races with connectFn's async AudioContext resume,

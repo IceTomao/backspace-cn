@@ -1,4 +1,14 @@
 {
+  "android": {
+    "theme": "Theme", "system": "Follow system", "light": "Light", "dark": "Dark",
+    "background": "Stay online in background", "server": "Server", "switch": "Switch server",
+    "switchConfirm": "Switching servers ends the current call. Continue?", "busy": "Working...",
+    "failed": "Operation failed. Please try again.", "audioDevice": "Audio device",
+    "autoDevice": "Automatic", "bluetooth": "Allow Bluetooth headsets",
+    "volume": "Receive volume", "allMessages": "Notify for all channels",
+    "offline": "Unable to connect", "retry": "Retry connection",
+    "storageFailed": "Could not save local settings. Check device storage; this login may not persist."
+  },
   "interfaceScale": {
     "label": "Interface scale",
     "description": "Resize text, buttons, and panels. Saved in this browser or app on this device.",

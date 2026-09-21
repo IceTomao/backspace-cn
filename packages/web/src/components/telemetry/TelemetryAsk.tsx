@@ -1,3 +1,4 @@
+import { appStorage } from '../../platform/appStorage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../../stores/authStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -34,7 +35,7 @@ export function TelemetryAsk() {
 
   useEffect(() => {
     if (!isAdmin || asked.current) return;
-    if (!shouldShowAsk(telemetry, isAdmin, localStorage, Date.now())) return;
+    if (!shouldShowAsk(telemetry, isAdmin, appStorage, Date.now())) return;
     asked.current = true;
     setOpen(true);
     void fetchPreview().catch(() => setPreviewFailed(true));
@@ -47,7 +48,7 @@ export function TelemetryAsk() {
     // An answer is stored on the instance and settles the ask for every admin,
     // so only a closing without one snoozes the ask in this browser.
     if (useSettingsStore.getState().telemetry?.askDue === true) {
-      recordDismissal(localStorage, Date.now());
+      recordDismissal(appStorage, Date.now());
     }
     setOpen(false);
   }, []);

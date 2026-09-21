@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { appStorage } from '../platform/appStorage';
 
 export interface Keybind {
   actionId: string;
@@ -64,6 +65,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: 'backspace-keybinds',
+      storage: createJSONStorage(() => appStorage),
       version: 1,
     }
   )

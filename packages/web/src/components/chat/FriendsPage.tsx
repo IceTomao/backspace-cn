@@ -1,3 +1,5 @@
+import { serverUrl } from '../../platform/android';
+import { serverLocation } from '../../platform/android';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { User } from '@backspace/shared';
@@ -534,7 +536,7 @@ function AddFriendTab({
   // Bare handle gets the home host appended for display only — submission
   // still uses the raw trimmed query.
   const directAddDisplay = directAt === -1
-    ? `${trimmedQuery}@${window.location.host}`
+    ? `${trimmedQuery}@${serverLocation().host}`
     : trimmedQuery;
 
   // Direct Add handler
@@ -701,10 +703,10 @@ function UserDiscoverCard({
     : null;
 
   const avatarUrl = user.avatar
-    ? (user.avatar.startsWith('http') || user.avatar.startsWith('/') ? user.avatar : `/api/uploads/${user.avatar}`)
+    ? (user.avatar.startsWith('http') || user.avatar.startsWith('/') ? user.avatar : serverUrl(`/api/uploads/${user.avatar}`))
     : null;
   const bannerUrl = user.banner
-    ? (user.banner.startsWith('http') || user.banner.startsWith('/') ? user.banner : `/api/uploads/${user.banner}`)
+    ? (user.banner.startsWith('http') || user.banner.startsWith('/') ? user.banner : serverUrl(`/api/uploads/${user.banner}`))
     : null;
 
   const handleSendRequest = async () => {

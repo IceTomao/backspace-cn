@@ -1,0 +1,205 @@
+/* Desktop-only compatibility layer for the current Backspace web client.
+   User-origin !important declarations also cover existing inline colors.
+   Never invert content or recolor media, avatars, or user-assigned colors. */
+@media (forced-colors: none) {
+  @scope (html:is([data-theme="aether-drift"], [data-backspace-page])) {
+    @media (prefers-color-scheme: dark) {
+      :scope { color-scheme: dark !important; }
+    }
+
+    @media (prefers-color-scheme: light) {
+      :scope {
+        color-scheme: light !important;
+        --bg-base: 243 244 246 !important;
+        --bg-channel: 235 237 240 !important;
+        --bg-chat: 255 255 255 !important;
+        --bg-members: 246 247 249 !important;
+        --bg-elevated: 255 255 255 !important;
+        --bg-input: 245 246 248 !important;
+        --bg-overlay: rgba(21, 24, 29, 0.48) !important;
+        --border-hard: 193 199 208 !important;
+        --border-soft: 218 222 228 !important;
+        --accent-mint: 20 112 76 !important;
+        --accent-peach: 168 60 54 !important;
+        --accent-lavender: 112 65 167 !important;
+        --accent-sky: 22 103 151 !important;
+        --accent-amber: 145 94 0 !important;
+        --accent-rose: 175 46 73 !important;
+        --accent-coral: 173 74 16 !important;
+        --accent-primary: 88 70 190 !important;
+        --accent-primary-hover: 74 56 167 !important;
+        --accent-primary-active: 63 47 147 !important;
+        --text-primary: 37 39 44 !important;
+        --text-secondary: 78 83 92 !important;
+        --text-tertiary: 99 105 116 !important;
+        --text-category: 85 91 103 !important;
+        --text-message: 45 49 57 !important;
+        --text-link: 20 91 163 !important;
+        --text-positive: 20 112 76 !important;
+        --text-warning: 145 94 0 !important;
+        --text-danger: 175 46 73 !important;
+        --interactive-hover: rgba(32, 39, 51, 0.06) !important;
+        --interactive-active: rgba(32, 39, 51, 0.10) !important;
+        --interactive-selected: rgba(32, 39, 51, 0.14) !important;
+        --interactive-muted: 157 165 178 !important;
+        --status-online: 22 128 82 !important;
+        --status-idle: 160 110 6 !important;
+        --status-dnd: 188 52 65 !important;
+        --status-offline: 114 122 134 !important;
+        --glass-bg: rgba(255, 255, 255, 0.96) !important;
+        --glass-modal-bg: rgba(255, 255, 255, 0.98) !important;
+        --glass-border: rgba(40, 47, 59, 0.16) !important;
+        --glass-highlight: rgba(255, 255, 255, 0.7) !important;
+        --notification: 188 52 65 !important;
+        background-color: rgb(var(--bg-base)) !important;
+        color: rgb(var(--text-primary)) !important;
+      }
+
+      body {
+        background-color: rgb(var(--bg-base)) !important;
+        color: rgb(var(--text-message)) !important;
+      }
+      ::selection { background: #cde4d7 !important; color: #183728 !important; }
+      ::-webkit-scrollbar-thumb { background-color: #b6bdc7 !important; }
+      ::-webkit-scrollbar-thumb:hover { background-color: #969fac !important; }
+      input:-webkit-autofill {
+        -webkit-text-fill-color: rgb(var(--text-primary)) !important;
+        -webkit-box-shadow: 0 0 0 1000px rgb(var(--bg-input)) inset !important;
+      }
+      .titlebar-drag { background-color: rgb(var(--bg-base)) !important; }
+      :is(.glass, .glass-modal, .glass-strip, .glass-bubble) {
+        border-color: var(--glass-border) !important;
+        box-shadow: 0 3px 16px rgba(25, 33, 46, 0.12) !important;
+      }
+      .glass-pill {
+        background: var(--interactive-hover) !important;
+        border-color: var(--glass-border) !important;
+        box-shadow: none !important;
+      }
+      .glass-pill:hover { background: var(--interactive-active) !important; }
+      .glass-pill-mine { background: #e0f1e8 !important; border-color: #85b49a !important; }
+      .glass-pill-mine:hover { background: #d0e8dc !important; }
+      :is(.input-standard, .input-search, .input-danger) {
+        border-color: rgb(var(--border-soft)) !important;
+        box-shadow: inset 0 1px 2px rgba(20, 27, 37, 0.05) !important;
+      }
+      :is(.shadow-header, .shadow-elevation-low) {
+        box-shadow: 0 1px 0 rgb(var(--border-soft)) !important;
+      }
+      :is(.shadow-elevation-high, .shadow-glass) {
+        box-shadow: 0 4px 20px rgba(25, 33, 46, 0.14) !important;
+      }
+      .skeleton {
+        background: linear-gradient(90deg, #e5e8ed 0%, #f4f5f7 40%, #e5e8ed 80%) !important;
+        background-size: 400px 100% !important;
+      }
+
+      /* Neutral chrome only: do not remap white-on-accent or media controls. */
+      :is(.bg-surface-channel, .bg-surface-members, .bg-surface-chat) :is(.bg-interactive-selected, .bg-interactive-active).text-white,
+      .bg-surface-elevated.text-white {
+        color: rgb(var(--text-primary)) !important;
+      }
+      .bg-surface-channel button.text-white.hover\:bg-interactive-hover,
+      .bg-surface-channel .bg-interactive-selected > svg.text-white {
+        color: rgb(var(--text-primary)) !important;
+      }
+      .bg-surface-channel button.bg-surface-elevated > .absolute.bg-white {
+        background-color: rgb(var(--accent-primary)) !important;
+      }
+      :is(.bg-status-online, .bg-accent-amber).text-\[\#13131a\] {
+        color: #fff !important;
+      }
+      :is(.bg-surface-channel, .bg-surface-members) .text-white:not(button):not([style]) > svg {
+        color: rgb(var(--text-primary)) !important;
+      }
+      :is(.bg-surface-channel, .bg-surface-members) span[style="color: rgb(72, 72, 84);"] {
+        color: rgb(var(--text-category)) !important;
+      }
+      :is(.bg-surface-channel, .bg-surface-members) .text-\[\#6e6e7a\] {
+        color: rgb(var(--text-secondary)) !important;
+      }
+      :is(.border-white\/\[0\.06\], .border-white\/\[0\.08\], .border-white\/10) {
+        border-color: rgb(var(--border-soft)) !important;
+      }
+      :is(.bg-surface-channel, .bg-surface-members, .glass, .glass-modal) .hover\:bg-white\/\[0\.06\]:hover {
+        background-color: var(--interactive-hover) !important;
+      }
+
+      /* The existing Emoji Mart shadow tree inherits these supported tokens. */
+      .emoji-picker-wrapper em-emoji-picker {
+        --rgb-background: 255, 255, 255 !important;
+        --rgb-input: 245, 246, 248 !important;
+        --rgb-color: 37, 39, 44 !important;
+        --color-border: rgba(40, 47, 59, 0.16) !important;
+        --color-border-over: rgba(40, 47, 59, 0.25) !important;
+        --em-rgb-background: 255, 255, 255 !important;
+        --em-rgb-input: 245, 246, 248 !important;
+        --em-rgb-color: 37, 39, 44 !important;
+        --em-color-border: rgba(40, 47, 59, 0.16) !important;
+        --em-color-border-over: rgba(40, 47, 59, 0.25) !important;
+        --em-rgb-accent: 88, 70, 190 !important;
+        --rgb-accent: 88, 70, 190 !important;
+      }
+      pre.font-mono { background: #f4f6f8 !important; color: #303540 !important; }
+      pre.font-mono .token { color: #303540 !important; }
+      pre.font-mono :is(.comment, .prolog, .doctype, .cdata) { color: #5c6572 !important; }
+      pre.font-mono :is(.keyword, .operator, .atrule) { color: #75428f !important; }
+      pre.font-mono :is(.string, .char, .attr-value, .regex) { color: #236b40 !important; }
+      pre.font-mono :is(.function, .class-name) { color: #155f99 !important; }
+      pre.font-mono :is(.number, .boolean, .constant) { color: #945309 !important; }
+      pre.font-mono :is(.tag, .property, .attr-name, .deleted) { color: #a43a41 !important; }
+      code.bg-\[\#111115\] { background: #eef0f5 !important; }
+
+      /* The renderer cannot distinguish its pale fallback from an identical
+         role color. Keep that foreground intact on a small dark backing. */
+      [id^="msg-"] span:is([style="color: rgb(216, 216, 222);"], [style="color: rgb(253, 164, 175);"]):is(.font-semibold, .font-bold) {
+        background-color: #34343e !important;
+        border-radius: 2px;
+        box-decoration-break: clone;
+      }
+
+      /* Local picker and recovery pages have their own hard-coded palette. */
+      :scope[data-backspace-page] .titlebar { background: rgb(var(--bg-base)) !important; }
+      :scope[data-backspace-page] body::before { background: none !important; }
+      :scope[data-backspace-page] .card {
+        background: rgb(var(--bg-elevated)) !important;
+        box-shadow: 0 4px 20px rgba(25, 33, 46, 0.12) !important;
+      }
+      :scope[data-backspace-page] :is(h1, .instance-info .name) { color: rgb(var(--text-primary)) !important; }
+      :scope[data-backspace-page] :is(.hint, .header p, .field label, .loading-text, details, .instance-info .version) {
+        color: rgb(var(--text-secondary)) !important;
+      }
+      :scope[data-backspace-page] .field input {
+        background: rgb(var(--bg-input)) !important;
+        color: rgb(var(--text-primary)) !important;
+        border-color: rgb(var(--border-soft)) !important;
+        box-shadow: none !important;
+      }
+      :scope[data-backspace-page] .field input::placeholder { color: rgb(var(--text-tertiary)) !important; }
+      :scope[data-backspace-page] :is(.cancel-btn, button.action) {
+        color: rgb(var(--text-primary)) !important;
+        background: rgb(var(--bg-input)) !important;
+        border-color: rgb(var(--border-soft)) !important;
+      }
+      :scope[data-backspace-page] :is(.cancel-btn, button.action):hover:not(:disabled) {
+        background: var(--interactive-active) !important;
+      }
+      :scope[data-backspace-page] :is(.connect-btn, button.action.primary) {
+        background: rgb(var(--accent-primary)) !important;
+        color: #fff !important;
+      }
+      :scope[data-backspace-page] :is(.connect-btn, button.action.primary):hover:not(:disabled) {
+        background: rgb(var(--accent-primary-hover)) !important;
+      }
+      :scope[data-backspace-page] button.action.subtle { background: transparent !important; }
+      :scope[data-backspace-page] .error-box {
+        color: #a52d48 !important;
+        background: #fff0f2 !important;
+        border-color: #e4acb8 !important;
+      }
+      :scope[data-backspace-page] .instance-info { background: #edf8f1 !important; border-color: #9cc7ad !important; }
+      :scope[data-backspace-page] .divider { background: rgb(var(--border-soft)) !important; }
+      :scope[data-backspace-page] details pre { background: rgb(var(--bg-input)) !important; }
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { serverLocation } from '../platform/android';
 import { create } from 'zustand';
 import type { Space, Channel, ChannelCategory, MemberWithUser, SpaceWithChannelsAndMembers, Role, SpaceFolder, SpaceLayoutItem, DmChannel, User, UpdateSpaceRequest, CreateSpaceRequest } from '@backspace/shared';
 import { api, BackspaceApiClient } from '../api/client';
@@ -597,7 +598,7 @@ export const useSpaceStore = create<SpaceState>((set, get) => ({
   joinByCode: async (inviteCode: string, origin?: string) => {
     // Normalize: an explicit home origin is equivalent to undefined (local).
     // Mirrors inviteParser's same normalization at the URL boundary.
-    if (origin && typeof window !== 'undefined' && origin === window.location.origin) {
+    if (origin && typeof window !== 'undefined' && origin === serverLocation().origin) {
       origin = undefined;
     }
     if (origin) {
@@ -1359,7 +1360,7 @@ export {
  */
 export function resolveUserOrigin(user: { homeInstance?: string | null }): string {
   const host = user.homeInstance;
-  if (!host || host === window.location.host) return '';
+  if (!host || host === serverLocation().host) return '';
   return resolveOriginFromHostname(host);
 }
 

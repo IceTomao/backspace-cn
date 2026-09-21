@@ -1,3 +1,4 @@
+import { serverLocation } from '../../platform/android';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -178,7 +179,7 @@ export function InviteModal() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const inviteUrl = inviteCode
-    ? `${instanceOrigin || window.location.origin}/join/${inviteCode}`
+    ? `${instanceOrigin || serverLocation().origin}/join/${inviteCode}`
     : '';
 
   // Fetch / generate the per-space invite code on open.

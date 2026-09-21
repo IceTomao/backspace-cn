@@ -37,6 +37,8 @@ import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useFederationToasts } from '../../hooks/useFederationToasts';
 import { useLiveKit } from '../../hooks/useLiveKit';
+import { isAndroid } from '../../platform/android';
+import { AndroidRecovery } from '../android/AndroidLifecycle';
 import { useKeybinds } from '../../hooks/useKeybinds';
 import { useDeepLinkHandler } from '../../platform/deepLink';
 import { initActivityBridge, teardownActivityBridge } from '../../platform/activityBridge';
@@ -44,6 +46,7 @@ import { useSpaceStore } from '../../stores/spaceStore';
 import { useChatStore } from '../../stores/chatStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useVoiceStore } from '../../stores/voiceStore';
+import { useAuthStore } from '../../stores/authStore';
 import { AudioManager } from '../../audio/AudioManager';
 
 export function AppLayout() {
@@ -95,6 +98,7 @@ export function AppLayout() {
   // so this is safe to call before any user interaction.
   const outputDeviceId = useVoiceStore((s) => s.outputDeviceId);
   useEffect(() => {
+    if (isAndroid()) return;
     AudioManager.getInstance().setOutputDevice(outputDeviceId);
   }, [outputDeviceId]);
 
@@ -113,6 +117,7 @@ export function AppLayout() {
   //   (4) Toast on a *new* audioinput appearance (debounced + dedupe by groupId).
   //       Removals do not toast — the user already knows they unplugged it.
   useEffect(() => {
+    if (isAndroid()) return;
     const prune = useVoiceStore.getState().pruneStaleDevices;
     let lastInputGroupIds = new Set<string>();
     const recentToastByGroup = new Map<string, number>(); // groupId -> timestamp ms
@@ -345,6 +350,7 @@ export function AppLayout() {
   }, [spaceId, channelId, channels, navigate]);
 
   if (!user || showBootSkeleton) {
+    if (isAndroid() && !user && useAuthStore.getState().error) return <AndroidRecovery />; // i18n-check: allow-literal (code between JSX branches)
     return (
       <div className="h-full flex bg-surface-base" role="status" aria-label={t('app.loading')}>
         {/* Space strip */}

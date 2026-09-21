@@ -1,3 +1,4 @@
+import { serverLocation } from '../../platform/android';
 import React, { useEffect, useState } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -1397,7 +1398,7 @@ export function ConnectedInstances() {
                 {t('federation:connections.home.title')}
               </div>
               <div className="text-xs text-txt-tertiary truncate">
-                {window.location.host}
+                {serverLocation().host}
                 {user?.username && (
                   <span className="ml-1">{t('federation:connections.home.asUser', { username: user.username })}</span>
                 )}

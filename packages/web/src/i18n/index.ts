@@ -1,3 +1,4 @@
+import { appStorage } from '../platform/appStorage';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { LazyCatalogBackend } from './loader';
@@ -19,7 +20,7 @@ const i18n = i18next;
 
 function readStoredLanguage(): string | null {
   try {
-    return window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    return appStorage.getItem(LANGUAGE_STORAGE_KEY);
   } catch {
     // Storage can be disabled by browser privacy settings; detection continues without it.
     return null;
@@ -28,7 +29,7 @@ function readStoredLanguage(): string | null {
 
 function writeStoredLanguage(language: SupportedLanguage): void {
   try {
-    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+    appStorage.setItem(LANGUAGE_STORAGE_KEY, language);
   } catch {
     // The in-memory selection still applies for this session.
   }

@@ -3,6 +3,7 @@ import { useVoiceStore } from '../stores/voiceStore';
 import { useUIStore } from '../stores/uiStore';
 import { getActiveRoom } from '../hooks/useLiveKit';
 import { wsSend } from '../hooks/useWebSocket';
+import { isAndroid } from '../platform/android';
 import { getChannelOrigin } from '../stores/spaceStore';
 import { broadcastVoiceStatus, broadcastDeafenViaLiveKit } from './voice';
 import { CAMERA_PRESET, stopScreenShare } from './screenShare';
@@ -56,6 +57,7 @@ export function handleDeafenAction(isSpaceDeafened: boolean): void {
  * the voice-bar button, mobile button, and keybind all funnel through here.
  */
 export async function handleCameraAction(): Promise<void> {
+  if (isAndroid()) return;
   const room = getActiveRoom();
   if (!room) return;
   const isCameraOn = useVoiceStore.getState().isCameraOn;
@@ -105,6 +107,7 @@ export async function handleCameraAction(): Promise<void> {
  * new voice status itself, so neither is repeated here.
  */
 export async function handleScreenShareAction(): Promise<void> {
+  if (isAndroid()) return;
   const room = getActiveRoom();
   if (!room) return;
   if (!useVoiceStore.getState().isScreenSharing) {

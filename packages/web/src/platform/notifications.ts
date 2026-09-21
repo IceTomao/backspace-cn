@@ -1,6 +1,8 @@
 import { isElectron } from './platform';
+import { androidCall, isAndroid, onAndroid } from './android';
 
 export interface NotificationOptions {
+  origin?: string;
   channelId?: string;
   spaceId?: string;
   userId?: string;
@@ -10,6 +12,10 @@ const clicks = new EventTarget();
 
 /** One subscription per mounted controller, including older desktop bridges. */
 export function onNotificationClick(callback: (options: NotificationOptions) => void): () => void {
+  if (isAndroid()) return onAndroid<NotificationOptions>('notification', options => {
+    callback(options);
+    void androidCall('ackNotification');
+  });
   const handler = (event: Event) => callback((event as CustomEvent<NotificationOptions>).detail);
   clicks.addEventListener('click', handler);
   const unsubscribe = window.backspace?.onNotificationClick?.(callback);
@@ -20,6 +26,7 @@ export function onNotificationClick(callback: (options: NotificationOptions) => 
 }
 
 export function sendNotification(title: string, body: string, options?: NotificationOptions): void {
+  if (isAndroid()) return;
   if (isElectron()) {
     window.backspace!.showNotification(title, body, options);
   } else if ('Notification' in window && Notification.permission === 'granted') {
@@ -33,6 +40,7 @@ export function sendNotification(title: string, body: string, options?: Notifica
 }
 
 export function requestNotificationPermission(): Promise<boolean> {
+  if (isAndroid()) return Promise.resolve(false);
   if (isElectron()) return Promise.resolve(true);
   if (!('Notification' in window)) return Promise.resolve(false);
   return Notification.requestPermission().then((p) => p === 'granted');

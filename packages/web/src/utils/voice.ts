@@ -3,6 +3,7 @@ import { getChannelOrigin, getMyUserIdForOrigin, useSpaceStore } from '../stores
 import { wsSend } from '../hooks/useWebSocket';
 import { AudioManager } from '../audio/AudioManager';
 import { useUIStore } from '../stores/uiStore';
+import { androidCall, isAndroid } from '../platform/android';
 
 // ---------------------------------------------------------------------------
 // Effective-state helpers — single source of truth for broadcasts
@@ -16,6 +17,7 @@ import { useUIStore } from '../stores/uiStore';
  *                        knows the origin. Omit to derive from currentVoiceChannelId.
  */
 export function broadcastVoiceStatus(overrideOrigin?: string): void {
+  if (isAndroid()) return;
   const vs = useVoiceStore.getState();
   const {
     isMuted, isDeafened, isCameraOn, isScreenSharing, currentVoiceChannelId,
@@ -170,6 +172,13 @@ export function joinVoiceChannel(
   // Optimistic: immediately show self in new channel (using origin-aware ID)
   const myNewId = getMyUserIdForOrigin(getChannelOrigin(channelId));
   if (myNewId) addVoiceUser(channelId, myNewId);
+  if (isAndroid()) {
+    void connectFn?.(channelId).catch(() => {
+      setCurrentVoiceChannel(null);
+      if (myNewId) removeVoiceUser(channelId, myNewId);
+    });
+    return;
+  }
 
   // Pre-arm the microphone INSIDE the user-gesture context. This must
   // happen before `connectFn` so the call to `setInputDevice` (which is
@@ -236,6 +245,13 @@ export function joinVoiceChannel(
  * (NotAllowedError, NotFoundError, etc.).
  */
 export async function requestMicPermission(): Promise<boolean> {
+  if (isAndroid()) {
+    try { await androidCall('prepareVoice'); return true; }
+    catch (error) {
+      useUIStore.getState().addToast(error instanceof Error ? error.message : '麦克风权限被拒绝', 'warning');
+      return false;
+    }
+  }
   const audioManager = AudioManager.getInstance();
   const inputDeviceId = useVoiceStore.getState().inputDeviceId;
   // Clear AudioManager's cached denial so the next `setInputDevice` call

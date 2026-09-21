@@ -1,4 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb';
+import { profileDatabaseName } from '../platform/appStorage';
 
 const DB_NAME = 'backspace-transfers';
 const STORE = 'fs-handles';
@@ -8,7 +9,7 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
 
 function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, VERSION, {
+    dbPromise = openDB(profileDatabaseName(DB_NAME), VERSION, {
       upgrade(db) {
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE);

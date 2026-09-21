@@ -1,4 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { isAndroid } from '../platform/android';
+import { useAndroidVoice } from './useAndroidVoice';
 import {
   Room,
   RoomEvent,
@@ -210,7 +212,8 @@ async function republishMicrophone(r: Room, lastMicGenRef: { current: number }):
   lastMicGenRef.current = currentGen;
 }
 
-export function useLiveKit() {
+export const useLiveKit = isAndroid() ? useAndroidVoice : useBrowserLiveKit;
+function useBrowserLiveKit() {
   const [room, setRoom] = useState<Room | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);

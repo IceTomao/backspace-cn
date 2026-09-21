@@ -14,6 +14,8 @@ import { DesktopDownloadPanel } from '../modals/settingsPanels/DesktopDownloadPa
 import { MobileScreenHeader } from './MobileScreenHeader';
 import { TransferIndicator } from './TransferIndicator';
 import { isElectron } from '../../platform/platform';
+import { isAndroid } from '../../platform/android';
+import { AndroidSettings } from '../android/AndroidSettings';
 import { useInstanceUpdateBadge } from '../../hooks/useInstanceUpdateBadge';
 
 interface MobileSettingsScreenProps {
@@ -50,7 +52,7 @@ const panelConfig: Record<
   desktop: {
     titleKey: 'settings:nav.tabs.desktop',
     body: (instanceVersion) =>
-      isElectron() ? <DesktopPanel /> : <DesktopDownloadPanel version={instanceVersion} />,
+      isAndroid() ? <AndroidSettings /> : isElectron() ? <DesktopPanel /> : <DesktopDownloadPanel version={instanceVersion} />, // i18n-check: allow-literal (conditional code)
   },
 };
 
@@ -106,7 +108,7 @@ export function MobileSettingsScreen({ initialPanel }: MobileSettingsScreenProps
   // The browser's Desktop panel builds its download links from the instance
   // version, the same source the settings modal reads them from. Nothing else
   // on this screen needs it, so no other panel starts the request.
-  const needsInstanceVersion = initialPanel === 'desktop' && !isElectron();
+  const needsInstanceVersion = initialPanel === 'desktop' && !isElectron() && !isAndroid();
   const [instanceVersion, setInstanceVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -149,7 +151,7 @@ export function MobileSettingsScreen({ initialPanel }: MobileSettingsScreenProps
     { id: 'privacy', label: t('settings:nav.tabs.privacy') },
     { id: 'connections', label: t('settings:nav.tabs.connections') },
     ...(isElectron() ? [{ id: 'keybinds', label: t('settings:nav.tabs.keybinds') }] : []),
-    { id: 'desktop', label: t('settings:nav.tabs.desktop') },
+    ...(!isAndroid() ? [{ id: 'desktop', label: t('settings:nav.tabs.desktop') }] : []),
     ...(isAdmin ? [{ id: 'instance', label: t('settings:nav.tabs.instance'), dot: updateBadge }] : []),
   ];
 

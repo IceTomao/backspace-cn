@@ -11,6 +11,8 @@ import {
   session,
   desktopCapturer,
   dialog,
+  nativeTheme,
+  systemPreferences,
 } from 'electron';
 import path from 'path';
 import fs from 'fs';
@@ -60,6 +62,7 @@ import {
 } from './screenSharePolicy';
 import { getDesktopLanguage, isDesktopLanguage, saveStoredLanguage, translateDesktop } from './l10n';
 import { DESKTOP_BUILD } from './buildConfig';
+import { ThemeManager, registerThemeStyles, registerThemeControls, windowThemeColors, type ThemeMode } from './theme';
 
 function showManagedUpdateNotice(): void {
   const language = getDesktopLanguage();
@@ -97,6 +100,26 @@ const keybindManager = new KeybindManager();
 let tray: Tray | null = null;
 let isQuitting = false;
 let pendingDeepLink: string | null = null;
+let themeManager: ThemeManager | null = null;
+let disposeThemeStyles: (() => void) | null = null;
+let disposeThemeControls: (() => void) | null = null;
+
+function getWindowThemeColors(): { color: string; symbolColor: string } {
+  if (process.platform === 'win32' && nativeTheme.shouldUseHighContrastColors) {
+    return {
+      color: systemPreferences.getColor('window'),
+      symbolColor: systemPreferences.getColor('window-text'),
+    };
+  }
+  return windowThemeColors(themeManager?.isDark() ?? true);
+}
+
+function applyWindowTheme(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const colors = getWindowThemeColors();
+  mainWindow.setBackgroundColor(colors.color);
+  if (process.platform !== 'darwin') mainWindow.setTitleBarOverlay(colors);
+}
 
 const knownInstanceOrigins = new Set<string>();
 
@@ -363,6 +386,7 @@ function loadTrayIcon(): Electron.NativeImage {
 
 function createWindow(): void {
   const savedState = validateWindowBounds(loadWindowState());
+  const themeColors = getWindowThemeColors();
 
   mainWindow = new BrowserWindow({
     width: savedState.width,
@@ -377,12 +401,11 @@ function createWindow(): void {
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     ...(process.platform !== 'darwin' ? {
       titleBarOverlay: {
-        color: '#0b0b10',
-        symbolColor: '#d8d8de',
+        ...themeColors,
         height: 32,
       },
     } : {}),
-    backgroundColor: '#313338',
+    backgroundColor: process.platform === 'win32' ? themeColors.color : '#313338',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1229,6 +1252,15 @@ if (!gotTheLock) {
   // ─── App Lifecycle ──────────────────────────────────────────────────────────
 
   app.whenReady().then(async () => {
+    if (process.platform === 'win32') {
+      themeManager = new ThemeManager(nativeTheme, path.join(app.getPath('userData'), 'theme.json'));
+      disposeThemeControls = registerThemeControls(ipcMain, () => mainWindow, themeManager);
+      const themeStyles = fs.readFileSync(path.join(__dirname, '..', 'resources', 'theme.css'), 'utf8');
+      disposeThemeStyles = registerThemeStyles(ipcMain, () => mainWindow, themeStyles, new Set([
+        pathToFileURL(getPickerPath()).href,
+        pathToFileURL(path.join(__dirname, '..', 'resources', 'recovery.html')).href,
+      ]));
+    }
     // Win/Linux: frameless window has no menu bar, but we still need an
     // application menu so keyboard accelerators (Ctrl+C/V/X/Z/A) work.
     // The macOS app menu is owned by the recoveryStore subscriber below
@@ -1385,12 +1417,22 @@ if (!gotTheLock) {
       onOpenReleases: () => handleRecoveryAction('open-releases'),
       onOpenSource: () => openSourceCode(),
       onQuit: () => requestQuit(),
+      onSetTheme: (mode: ThemeMode) => {
+        if (!themeManager?.setMode(mode)) {
+          void dialog.showMessageBox({
+            type: 'error',
+            title: translateDesktop(getDesktopLanguage(), 'theme.title'),
+            message: translateDesktop(getDesktopLanguage(), 'theme.saveFailed'),
+          });
+          applyMenusForState(recoveryStore.get());
+        }
+      },
     };
 
     const applyMenusForState = (state: RecoveryState): void => {
       const language = getDesktopLanguage();
       if (tray) {
-        tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate(state, trayActions, language)));
+        tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate(state, trayActions, language, themeManager?.getMode())));
       }
       if (process.platform === 'darwin') {
         Menu.setApplicationMenu(Menu.buildFromTemplate(buildAppMenuTemplate(app.name, state, trayActions, language)));
@@ -1403,6 +1445,10 @@ if (!gotTheLock) {
 
     recoveryStore.subscribe(applyMenusForState);
     applyMenusForState(recoveryStore.get());  // initial fire — subscribers don't auto-fire on subscribe
+    themeManager?.subscribe(() => {
+      applyWindowTheme();
+      applyMenusForState(recoveryStore.get());
+    });
 
     // The renderer owns the language choice (settings → Language). Remember
     // it so the tray is right from the first paint next launch, and relabel
@@ -1483,6 +1529,9 @@ if (!gotTheLock) {
 
   app.on('before-quit', () => {
     isQuitting = true;
+    themeManager?.dispose();
+    disposeThemeStyles?.();
+    disposeThemeControls?.();
     stopActivityDetection();
     keybindManager.stop();
   });

@@ -6,6 +6,7 @@ import { getResolvedInstanceUrl, getPickerPath } from './instanceUrl';
 import { DESKTOP_BUILD } from './buildConfig';
 import { RELEASES_URL } from './updateStatus';
 import { getDesktopLanguage, translateDesktop, type DesktopLanguage } from './l10n';
+import type { ThemeMode } from './theme';
 
 export type RecoveryReasonCode =
   | 'load-failed'
@@ -115,6 +116,7 @@ interface MenuActions {
   // AGPL-3.0 § 13: open the Corresponding Source of the running instance.
   onOpenSource: () => void;
   onQuit: () => void;
+  onSetTheme: (mode: ThemeMode) => void;
 }
 
 function checkForUpdatesItem(
@@ -185,12 +187,24 @@ export function buildTrayMenuTemplate(
   state: RecoveryState,
   actions?: Partial<MenuActions>,
   language: DesktopLanguage = 'en',
+  theme?: ThemeMode,
 ): MenuItemConstructorOptions[] {
   const t = (key: Parameters<typeof translateDesktop>[1]) => translateDesktop(language, key);
   const items: MenuItemConstructorOptions[] = [
     { label: t('tray.show'), click: actions?.onShow },
     { label: t('tray.hide'), click: actions?.onHide },
   ];
+  if (theme) items.push({
+    id: 'theme',
+    label: t('theme.title'),
+    submenu: (['system', 'light', 'dark'] as const).map((mode) => ({
+      id: `theme-${mode}`,
+      label: t(`theme.${mode}`),
+      type: 'radio' as const,
+      checked: theme === mode,
+      click: () => actions?.onSetTheme?.(mode),
+    })),
+  });
 
   const checkItem = checkForUpdatesItem(state, () => actions?.onCheckForUpdates?.(), language);
   if (checkItem) items.push({ type: 'separator' }, checkItem);

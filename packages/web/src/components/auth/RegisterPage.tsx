@@ -1,3 +1,4 @@
+import { appStorage } from '../../platform/appStorage';
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
@@ -363,7 +364,7 @@ export function RegisterPage() {
         avatarColor: ac,
         ...(tokenForRegister ? { inviteToken: tokenForRegister } : {}),
       });
-      localStorage.setItem('backspace_token', response.token);
+      appStorage.setItem('backspace_token', response.token);
 
       // Step 2: Upload avatar while still on the register page
       let finalUser = response.user;

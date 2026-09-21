@@ -9,6 +9,8 @@ import { TelemetryAsk } from './components/telemetry/TelemetryAsk';
 import { ScreenShareSetup } from './components/voice/ScreenShareSetup';
 import { useAuthStore } from './stores/authStore';
 import { isElectron } from './platform/platform';
+import { isAndroid } from './platform/android';
+import { AndroidLifecycle } from './components/android/AndroidLifecycle';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -56,9 +58,9 @@ export function App() {
           style={{ height: 'var(--titlebar-inset)', borderBottomWidth: 'calc(1px / var(--interface-scale))' }} />
       )}
       <div className={showTitleBar ? 'flex-1 min-h-0' : 'contents'}>
-        <SwAutoUpdate />
+        {isAndroid() ? <AndroidLifecycle /> : <SwAutoUpdate />}
         <TelemetryAsk />
-        <ScreenShareSetup />
+        {!isAndroid() && <ScreenShareSetup />}
         <Routes>
           <Route
             path="/login"

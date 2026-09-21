@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { appStorage } from '../platform/appStorage';
 
 export const INTERFACE_SCALES = [50, 75, 100, 125, 150, 175, 200, 225, 250] as const;
 
@@ -16,6 +17,7 @@ export const useInterfaceScaleStore = create<InterfaceScaleState>()(persist(
   set => ({ scale: 100, setScale: scale => set({ scale: normalizeInterfaceScale(scale) }) }),
   {
     name: 'backspace-interface-scale',
+    storage: createJSONStorage(() => appStorage),
     partialize: state => ({ scale: state.scale }),
     merge: (stored, current) => ({
       ...current,

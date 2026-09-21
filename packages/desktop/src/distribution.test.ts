@@ -37,6 +37,23 @@ describe('Chinese distribution', () => {
     expect(JSON.stringify([tray, menu])).not.toMatch(/check-for-updates|restart-to-install|download-update/);
   });
 
+  it('adds a mutually exclusive theme submenu with the selected mode checked', () => {
+    const onSetTheme = vi.fn();
+    const state = new RecoveryStateStore().get();
+    const tray = buildTrayMenuTemplate(state, { onSetTheme }, 'zh', 'light');
+    const theme = tray.find((item) => item.id === 'theme');
+    expect(theme?.label).toBe('主题');
+    expect(theme?.submenu).toEqual([
+      expect.objectContaining({ id: 'theme-system', label: '跟随系统', checked: false, type: 'radio' }),
+      expect.objectContaining({ id: 'theme-light', label: '浅色', checked: true, type: 'radio' }),
+      expect.objectContaining({ id: 'theme-dark', label: '深色', checked: false, type: 'radio' }),
+    ]);
+    const items = theme?.submenu as Electron.MenuItemConstructorOptions[];
+    for (const item of items) item.click?.({} as never, undefined, {} as never);
+    expect(onSetTheme.mock.calls).toEqual([['system'], ['light'], ['dark']]);
+    expect(buildTrayMenuTemplate(state).find((item) => item.id === 'theme')).toBeUndefined();
+  });
+
   it('blocks every recovery update action before invoking updater or shell', () => {
     const updater = { checkForUpdates: vi.fn(), quitAndInstall: vi.fn() };
     setAutoUpdater(updater as never);
@@ -66,22 +83,26 @@ const preload = ts.transpileModule(readFileSync(path.join(__dirname, 'preload.ts
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-function runPreload(protocol: string, stored: string | null, blocked = false) {
+function runPreload(protocol: string, stored: string | null, blocked = false, mainFrame = false, platform = 'win32', cssFails = false) {
   const storage = {
     getItem: vi.fn(() => { if (blocked) throw new Error('blocked'); return stored; }),
     setItem: vi.fn(),
   };
   const exposeInMainWorld = vi.fn();
+  const insertCSS = vi.fn(() => { if (cssFails) throw new Error('CSS unavailable'); return 'css-key'; });
+  const sendSync = vi.fn(() => 'fixed-theme-css');
   vm.runInNewContext(preload, {
     exports: {},
     require: (name: string) => {
       if (name !== 'electron') throw new Error(`Sandbox forbids ${name}`);
-      return { contextBridge: { exposeInMainWorld }, ipcRenderer: {} };
+      return { contextBridge: { exposeInMainWorld }, ipcRenderer: { sendSync }, webFrame: { insertCSS } };
     },
-    process: { platform: 'win32', argv: ['electron', '--backspace-default-language=zh'] },
+    process: { platform, isMainFrame: mainFrame, argv: ['electron', '--backspace-default-language=zh'] },
     window: { location: { protocol }, localStorage: storage },
+    document: { readyState: 'loading', addEventListener: vi.fn() },
+    console: { warn: vi.fn() },
   });
-  return { storage, exposeInMainWorld };
+  return { storage, exposeInMainWorld, insertCSS, sendSync };
 }
 
 describe('sandboxed language bootstrap', () => {
@@ -96,6 +117,22 @@ describe('sandboxed language bootstrap', () => {
   });
   it('still exposes the bridge when storage is blocked', () => {
     expect(runPreload('https:', null, true).exposeInMainWorld).toHaveBeenCalledWith('backspace', expect.any(Object));
+  });
+  it('inserts the fixed theme CSS only in a Windows main frame', () => {
+    const main = runPreload('https:', null, false, true);
+    expect(main.sendSync).toHaveBeenCalledWith('desktop-theme-styles');
+    expect(main.insertCSS).toHaveBeenCalledWith('fixed-theme-css', { cssOrigin: 'user' });
+    const subframe = runPreload('https:', null, false, false);
+    expect(subframe.sendSync).not.toHaveBeenCalled();
+    expect(subframe.insertCSS).not.toHaveBeenCalled();
+    expect(runPreload('https:', null, false, true, 'linux').sendSync).not.toHaveBeenCalled();
+    const bridge = main.exposeInMainWorld.mock.calls[0]![1];
+    expect(Object.keys(bridge).filter((key) => /theme|css/i.test(key))).toEqual([]);
+    expect(main.insertCSS.mock.invocationCallOrder[0]).toBeLessThan(main.exposeInMainWorld.mock.invocationCallOrder[0]!);
+  });
+  it('preserves the existing bridge if the style bootstrap fails', () => {
+    const result = runPreload('https:', null, false, true, 'win32', true);
+    expect(result.exposeInMainWorld).toHaveBeenCalledWith('backspace', expect.any(Object));
   });
 });
 

@@ -1,3 +1,4 @@
+import { appStorage } from '../platform/appStorage';
 import { create } from 'zustand';
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 import type { MessageWithUser, Attachment } from '@backspace/shared';
@@ -71,7 +72,7 @@ function setBubble(
 // Mirrors composerStore's mapAwareStorage; only the `bubbles` slice is persisted.
 const mapAwareStorage: PersistStorage<Pick<PendingMessageStoreState, 'bubbles'>> = {
   getItem: (name) => {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(name) : null;
+    const raw = typeof appStorage !== 'undefined' ? appStorage.getItem(name) : null;
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as {
@@ -89,17 +90,17 @@ const mapAwareStorage: PersistStorage<Pick<PendingMessageStoreState, 'bubbles'>>
     }
   },
   setItem: (name, value) => {
-    if (typeof localStorage === 'undefined') return;
+    if (typeof appStorage === 'undefined') return;
     const entries = Array.from(value.state.bubbles.entries());
     const payload = JSON.stringify({ state: { bubbles: entries }, version: value.version });
     try {
-      localStorage.setItem(name, payload);
+      appStorage.setItem(name, payload);
     } catch (err) {
       console.warn(`[pendingMessageStore] persist failed:`, err);
     }
   },
   removeItem: (name) => {
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(name);
+    if (typeof appStorage !== 'undefined') appStorage.removeItem(name);
   },
 };
 

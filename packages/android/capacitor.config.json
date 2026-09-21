@@ -1,0 +1,17 @@
+{
+  "appId": "me.kevz.backspace",
+  "appName": "Backspace",
+  "webDir": "../web/dist-android",
+  "loggingBehavior": "none",
+  "server": {
+    "hostname": "localhost",
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false,
+    "minWebViewVersion": 118,
+    "backgroundColor": "#0b0b10"
+  }
+}

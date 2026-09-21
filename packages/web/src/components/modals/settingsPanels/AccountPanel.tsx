@@ -1,3 +1,4 @@
+import { serverLocation } from '../../../platform/android';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../../../stores/authStore';
@@ -113,7 +114,7 @@ export function AccountPanel() {
     try {
       // Target domain = THIS instance (where the detached account lives).
       // Portless hostname to match the server's extractDomain contract.
-      const { token } = await homeConnection.api.auth.attachProof(window.location.hostname);
+      const { token } = await homeConnection.api.auth.attachProof(serverLocation().hostname);
       const res = await api.users.reattach({ token });
       useAuthStore.getState().setUser(res.user);
       // Re-attach reconciled this (home) account's 1-on-1 DM federatedIds on the

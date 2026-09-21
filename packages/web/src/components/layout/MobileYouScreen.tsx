@@ -1,3 +1,4 @@
+import { serverUrl } from '../../platform/android';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useUIStore } from '../../stores/uiStore';
@@ -17,8 +18,8 @@ export function MobileYouScreen() {
 
   if (!user) return null;
 
-  const avatarUrl = user.avatar ? `/api/uploads/${user.avatar}` : null;
-  const bannerUrl = user.banner ? `/api/uploads/${user.banner}` : null;
+  const avatarUrl = user.avatar ? serverUrl(`/api/uploads/${user.avatar}`) : null;
+  const bannerUrl = user.banner ? serverUrl(`/api/uploads/${user.banner}`) : null;
 
   const actionRows = [
     {
@@ -85,7 +86,7 @@ export function MobileYouScreen() {
           className="h-24 relative"
           style={{
             background: bannerUrl
-              ? `url(/api/uploads/${user.banner}) center/cover`
+              ? `url("${serverUrl(`/api/uploads/${user.banner}`)}") center/cover`
               : user.accentColor || 'linear-gradient(135deg, rgb(var(--accent-primary)), rgb(var(--accent-lavender)))',
           }}
         />

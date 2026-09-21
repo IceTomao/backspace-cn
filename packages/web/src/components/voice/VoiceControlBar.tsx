@@ -8,6 +8,7 @@ import { ScreenShareSettingsPopover } from './ScreenShareSettingsPopover';
 import { hasPermissionBit, PermissionBits } from '../../utils/permissions';
 import { handleMuteAction, handleDeafenAction, handleCameraAction, handleScreenShareAction, handleDisconnectAction } from '../../utils/voiceActions';
 import { VOICE_CHROME_ATTR } from '../../hooks/usePointerReveal';
+import { isAndroid } from '../../platform/android';
 
 const btnBase = 'w-10 h-10 flex items-center justify-center rounded-full transition-colors';
 const btnDefault = `${btnBase} bg-surface-channel text-txt-secondary hover:bg-surface-elevated hover:text-txt-primary`;
@@ -147,7 +148,7 @@ export function VoiceControlBar({ revealed = false }: { revealed?: boolean }) {
         </button>
 
         {/* Camera */}
-        {canSpeak && (
+        {!isAndroid() && canSpeak && (
           <button
             onClick={handleCamera}
             className={isCameraOn ? btnGreen : btnDefault}
@@ -167,7 +168,7 @@ export function VoiceControlBar({ revealed = false }: { revealed?: boolean }) {
         )}
 
         {/* Screen Share — picker when idle, settings + stop menu when live */}
-        {canStream && (
+        {!isAndroid() && canStream && (
           <>
             <button
               ref={shareBtnRef}

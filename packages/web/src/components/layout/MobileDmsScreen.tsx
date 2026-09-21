@@ -1,3 +1,4 @@
+import { serverUrl } from '../../platform/android';
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFormatters } from '../../i18n/formatters';
@@ -33,7 +34,7 @@ function MobileFriendBubble({
   // _instanceOrigin lives on TaggedFriend, not on the canonical User. Use the
   // canonical avatar value but source the origin from the original friend.
   const avatarUrl = canonical.avatar
-    ? resolveAssetUrl(canonical.avatar, friend._instanceOrigin) ?? `/api/uploads/${canonical.avatar}`
+    ? resolveAssetUrl(canonical.avatar, friend._instanceOrigin) ?? serverUrl(`/api/uploads/${canonical.avatar}`)
     : null;
   const displayName = canonical.displayName ?? parseFederatedUsername(canonical.username).baseName;
 
@@ -110,7 +111,7 @@ function MobileDmRow({
   const preview = formatDmSidebarPreview(dm, authUser ?? null);
   const previewTime = dm.lastMessage?.createdAt;
 
-  const avatarUrl = mainUser?.avatar ? `/api/uploads/${mainUser.avatar}` : null;
+  const avatarUrl = mainUser?.avatar ? serverUrl(`/api/uploads/${mainUser.avatar}`) : null;
 
   return (
     <button

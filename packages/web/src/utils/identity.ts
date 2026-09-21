@@ -1,3 +1,4 @@
+import { serverLocation } from '../platform/android';
 import type { User } from '@backspace/shared';
 
 /**
@@ -41,7 +42,7 @@ export function isSelf(
   if (_knownSelfIds.has(user.id)) return true;
   // Replicated user: homeInstance matches our origin
   if (!user.homeInstance) return false;
-  if (user.homeInstance !== window.location.host) return false;
+  if (user.homeInstance !== serverLocation().host) return false;
   // Username: "erin" or "erin@nova.ddns.net" → base must match
   const { baseName } = parseFederatedUsername(user.username);
   const { baseName: homeBase } = parseFederatedUsername(homeUser.username);
@@ -96,7 +97,7 @@ export function normalizeOriginToHost(input: string | null | undefined): string 
  * connection). All other inputs are normalized via {@link normalizeOriginToHost}.
  */
 function deliveringHost(origin: string): string {
-  if (origin === '') return typeof window === 'undefined' ? '' : window.location.host;
+  if (origin === '') return typeof window === 'undefined' ? '' : serverLocation().host;
   return normalizeOriginToHost(origin);
 }
 
@@ -164,7 +165,7 @@ export function isFederationGlobeApplicable(
   const { domain } = parseFederatedUsername(user.username);
   if (!domain) return false;
   if (typeof window === 'undefined') return true; // SSR fallback
-  return domain !== window.location.host;
+  return domain !== serverLocation().host;
 }
 
 /**
@@ -192,7 +193,7 @@ export function canonicalUserMatch(
   const bHome = b.homeInstance ?? bBase.domain ?? null;
 
   if (!aHome && !bHome) return true;                    // Both native to home instance
-  if (!aHome) return bHome === window.location.host;     // a native, b federated
-  if (!bHome) return aHome === window.location.host;     // b native, a federated
+  if (!aHome) return bHome === serverLocation().host;     // a native, b federated
+  if (!bHome) return aHome === serverLocation().host;     // b native, a federated
   return aHome === bHome;                                // Both have explicit homes
 }

@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { LanguageSection } from './LanguageSection';
 import { InterfaceScaleSection } from './InterfaceScaleSection';
+import { isAndroid } from '../../../platform/android';
+import { AndroidSettings } from '../../android/AndroidSettings';
 
 /**
  * Presentation preferences that belong to this browser or app rather than to
@@ -14,6 +16,7 @@ export function AppearancePanel() {
     <div className="space-y-5">
       <h2 className="text-lg font-semibold text-txt-primary mb-6">{t('settings:appearance.title')}</h2>
       <LanguageSection />
+      {isAndroid() && <AndroidSettings />}
       <InterfaceScaleSection />
     </div>
   );

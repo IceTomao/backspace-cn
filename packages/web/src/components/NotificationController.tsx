@@ -4,6 +4,7 @@ import { useChatStore } from '../stores/chatStore';
 import { useVoiceStore } from '../stores/voiceStore';
 import { useAuthStore } from '../stores/authStore';
 import { isElectron } from '../platform/platform';
+import { isAndroid, androidCall } from '../platform/android';
 import { onNotificationClick, sendNotification, updateBadgeCount } from '../platform/notifications';
 import { useSpaceStore, getMyUserIdForOrigin } from '../stores/spaceStore';
 import { useUIStore } from '../stores/uiStore';
@@ -18,11 +19,11 @@ export function NotificationController() {
   const isInitialMount = useRef(true);
   const windowFocused = useRef(true);
 
-  useEffect(() => onNotificationClick(({ channelId, spaceId, userId }) => {
-    if (!channelId || !userId || userId !== useAuthStore.getState().user?.id) return;
+  useEffect(() => onNotificationClick(({ channelId, spaceId, userId, origin }) => {
+    if (!channelId || !userId || userId !== (isAndroid() ? getMyUserIdForOrigin(origin ?? '') : useAuthStore.getState().user?.id)) return;
     const spaces = useSpaceStore.getState();
     const targetSpace = spaces.channelToSpaceMap.get(channelId);
-    if (targetSpace !== spaceId || (!targetSpace && !spaces.dmChannels.some(dm => dm.id === channelId))) return;
+    if ((!isAndroid() && targetSpace !== spaceId) || (!targetSpace && !spaces.dmChannels.some(dm => dm.id === channelId))) return;
     const resolvedSpace = targetSpace || '@me';
     const ui = useUIStore.getState();
     if (ui.isMobile) {
@@ -33,6 +34,7 @@ export function NotificationController() {
     }
     navigate(`/channels/${targetSpace ? encodeURIComponent(targetSpace) : '@me'}/${encodeURIComponent(channelId)}`);
   }), [navigate]);
+  useEffect(() => { if (isAndroid()) void androidCall('sync'); }, []);
 
   // Track window focus state
   useEffect(() => {

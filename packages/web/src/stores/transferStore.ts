@@ -1,3 +1,5 @@
+import { appStorage } from '../platform/appStorage';
+import { androidCall, isAndroid, serverUrl } from '../platform/android';
 import { create } from 'zustand';
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 import { Upload, type UploadOptions } from 'tus-js-client';
@@ -109,7 +111,7 @@ const liveDownloads = new Map<string, AbortController>();
 // Only the `transfers` slice is persisted; partialize controls which entries.
 const mapAwareStorage: PersistStorage<Pick<TransferStoreState, 'transfers'>> = {
   getItem: (name) => {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(name) : null;
+    const raw = typeof appStorage !== 'undefined' ? appStorage.getItem(name) : null;
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as { state: { transfers: [string, Transfer][] }; version?: number };
@@ -122,17 +124,17 @@ const mapAwareStorage: PersistStorage<Pick<TransferStoreState, 'transfers'>> = {
     }
   },
   setItem: (name, value) => {
-    if (typeof localStorage === 'undefined') return;
+    if (typeof appStorage === 'undefined') return;
     const entries = Array.from(value.state.transfers.entries());
     const payload = JSON.stringify({ state: { transfers: entries }, version: value.version });
     try {
-      localStorage.setItem(name, payload);
+      appStorage.setItem(name, payload);
     } catch (err) {
       console.warn(`[transferStore] persist failed:`, err);
     }
   },
   removeItem: (name) => {
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(name);
+    if (typeof appStorage !== 'undefined') appStorage.removeItem(name);
   },
 };
 
@@ -476,6 +478,7 @@ export const useTransferStore = create<TransferStore>()(
       },
 
       startDownload: async (url, opts) => {
+        url = serverUrl(url);
         const fileLike = {
           name: opts.filename,
           size: opts.size ?? 0,
@@ -503,6 +506,11 @@ export const useTransferStore = create<TransferStore>()(
         // from byte 0 instead of continuing from the offset we'd reached.
         let writable: FileSystemWritableFileStream | undefined;
         try {
+          if (isAndroid()) {
+            const result = await androidCall<{ cancelled: boolean }>('saveFile', { url, name: opts.filename });
+            get().setState_(id, result.cancelled ? 'aborted' : 'completed');
+            return id;
+          }
           if (supportsFs) {
             const showSavePicker = (window as unknown as {
               showSaveFilePicker: (opts: { suggestedName: string }) => Promise<FileSystemFileHandle>;

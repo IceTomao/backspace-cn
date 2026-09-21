@@ -1,3 +1,4 @@
+import { serverLocation } from '../platform/android';
 /**
  * Parse invite input into a code and optional remote origin.
  *
@@ -28,7 +29,7 @@ export function parseInviteInput(input: string): { code: string; origin?: string
     const code = match[1]!;
 
     // If the URL points at our own instance, treat as a bare code
-    if (parsed.origin === window.location.origin) {
+    if (parsed.origin === serverLocation().origin) {
       return { code };
     }
 
@@ -49,7 +50,7 @@ export function parseInviteInput(input: string): { code: string; origin?: string
 
     // If it resolves to our own instance, treat as bare code
     try {
-      if (new URL(origin).origin === window.location.origin) {
+      if (new URL(origin).origin === serverLocation().origin) {
         return { code };
       }
     } catch {

@@ -6,6 +6,16 @@ node_modules/
 dist/
 dist-electron/
 installers/
+packages/web/dist-android/
+**/.gradle/
+packages/android/android/**/build/
+packages/android/android/local.properties
+packages/android/android/app/src/main/assets/public/
+packages/android/android/app/src/main/assets/capacitor.config.json
+packages/android/android/app/src/main/assets/capacitor.plugins.json
+*.jks
+*.keystore
+signing.properties
 packages/web/dist/
 packages/server/dist/
 packages/shared/dist/

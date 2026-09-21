@@ -1,3 +1,4 @@
+import { appStorage } from '../platform/appStorage';
 import { create } from 'zustand';
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 
@@ -28,7 +29,7 @@ const EMPTY: ComposerState = { draftText: '', replyTo: null, stagedTransferIds: 
 // Mirrors transferStore's mapAwareStorage pattern; only the `states` slice is persisted.
 const mapAwareStorage: PersistStorage<Pick<ComposerStoreState, 'states'>> = {
   getItem: (name) => {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(name) : null;
+    const raw = typeof appStorage !== 'undefined' ? appStorage.getItem(name) : null;
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as { state: { states: [string, ComposerState][] }; version?: number };
@@ -41,17 +42,17 @@ const mapAwareStorage: PersistStorage<Pick<ComposerStoreState, 'states'>> = {
     }
   },
   setItem: (name, value) => {
-    if (typeof localStorage === 'undefined') return;
+    if (typeof appStorage === 'undefined') return;
     const entries = Array.from(value.state.states.entries());
     const payload = JSON.stringify({ state: { states: entries }, version: value.version });
     try {
-      localStorage.setItem(name, payload);
+      appStorage.setItem(name, payload);
     } catch (err) {
       console.warn(`[composerStore] persist failed:`, err);
     }
   },
   removeItem: (name) => {
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(name);
+    if (typeof appStorage !== 'undefined') appStorage.removeItem(name);
   },
 };
 

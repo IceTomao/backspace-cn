@@ -1,3 +1,4 @@
+import { appStorage } from '../../platform/appStorage';
 import { useState, useEffect } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { useAuthStore } from '../../stores/authStore';
@@ -89,7 +90,7 @@ export function DeleteAccountModal({ isOpen, onClose }: DeleteAccountModalProps)
   useEffect(() => {
     if (deletionComplete && step === 'complete') {
       const timer = setTimeout(() => {
-        localStorage.removeItem('backspace_token');
+        appStorage.removeItem('backspace_token');
         window.location.href = '/login';
       }, 3000);
       return () => clearTimeout(timer);

@@ -1,3 +1,4 @@
+import { serverLocation } from '../platform/android';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
@@ -181,7 +182,7 @@ export function JoinPage() {
 
     // Build the qualified invite code: code@originHost
     // If the invite is already qualified (arrived via redirect), preserve the original origin
-    const originHost = parsed?.origin ? new URL(parsed.origin).host : window.location.host;
+    const originHost = parsed?.origin ? new URL(parsed.origin).host : serverLocation().host;
     const code = parsed?.code || rawInviteCode || '';
     const qualifiedCode = `${code}@${originHost}`;
 

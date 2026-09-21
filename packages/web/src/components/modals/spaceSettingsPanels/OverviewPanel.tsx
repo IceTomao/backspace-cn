@@ -1,3 +1,4 @@
+import { serverUrl } from '../../../platform/android';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { ImageCropModal } from '../../ui/ImageCropModal';
@@ -518,7 +519,7 @@ export function OverviewPanel({ spaceId }: OverviewPanelProps) {
                         ) : (
                           transferCandidates.map((member) => {
                             const avatarUrl = member.user.avatar
-                              ? (member.user.avatar.startsWith('http') || member.user.avatar.startsWith('/') ? member.user.avatar : `/api/uploads/${member.user.avatar}`)
+                              ? (member.user.avatar.startsWith('http') || member.user.avatar.startsWith('/') ? member.user.avatar : serverUrl(`/api/uploads/${member.user.avatar}`))
                               : null;
                             return (
                               <button
