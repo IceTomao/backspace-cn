@@ -64,7 +64,11 @@ jobs:
               echo "::error::Release $TAG is already public; refusing to replace published assets."
               exit 1
             fi
-            echo "Reusing existing draft release for $TAG."
+            echo "Reusing existing draft release for $TAG; removing stale assets before rebuilding."
+            gh release view "$TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' |
+              while IFS= read -r asset; do
+                [ -z "$asset" ] || gh release delete-asset "$TAG" "$asset" --repo "$GH_REPO" --yes
+              done
             exit 0
           fi
 

@@ -62,7 +62,7 @@ importers:
         specifier: ^6.8.9
         version: 6.8.9
       sharp:
-        specifier: 0.35.4
+        specifier: ^0.35.4
         version: 0.35.4(@types/node@26.5.1)
       uiohook-napi:
         specifier: ^1.5.5
