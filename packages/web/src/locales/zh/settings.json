@@ -270,7 +270,11 @@
     "activity": {
       "sectionTitle": "活动状态",
       "label": "分享活动状态",
-      "description": "让其他人看到您在做什么，比如您正在玩的游戏或正在听的音乐。"
+      "description": "让其他人看到您在做什么，比如您正在玩的游戏或正在听的音乐。",
+      "gamesLabel": "分享游戏状态",
+      "gamesDescription": "分享正在玩的游戏、游戏模式和游戏时长。",
+      "musicLabel": "分享音乐状态",
+      "musicDescription": "分享正在播放的歌曲和艺术家信息。"
     }
   },
   "connections": {

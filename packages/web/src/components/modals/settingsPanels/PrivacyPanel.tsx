@@ -12,10 +12,28 @@ export function PrivacyPanel() {
   const showActivity = useActivityStore((s) => s.showActivity);
   const [discoverable, setDiscoverable] = useState(user?.discoverable !== false);
   const [saving, setSaving] = useState(false);
+  const [activityPreferences, setActivityPreferences] = useState({ showGames: true, showMusic: true });
+  const hasDesktopPreferences = Boolean(window.backspace?.getActivityPreferences);
 
   useEffect(() => {
     setDiscoverable(user?.discoverable !== false);
   }, [user?.discoverable]);
+
+  useEffect(() => {
+    window.backspace?.getActivityPreferences?.().then(setActivityPreferences).catch(() => {});
+  }, []);
+
+  const setActivityPreference = async (patch: { showGames?: boolean; showMusic?: boolean }) => {
+    const previous = activityPreferences;
+    const next = { ...previous, ...patch };
+    setActivityPreferences(next);
+    try {
+      const saved = await window.backspace?.setActivityPreferences?.(patch);
+      if (saved) setActivityPreferences(saved);
+    } catch {
+      setActivityPreferences(previous);
+    }
+  };
 
   const handleToggle = async (enabled: boolean) => {
     setDiscoverable(enabled);
@@ -79,6 +97,24 @@ export function PrivacyPanel() {
               }}
             />
           </div>
+          {hasDesktopPreferences && (
+            <div className="border-t border-white/[0.04] mt-3 pt-2 space-y-2">
+              <div className="flex items-center justify-between py-1">
+                <div className="flex-1 mr-4">
+                  <div className="text-sm text-txt-primary">{t('settings:privacy.activity.gamesLabel')}</div>
+                  <div className="text-xs text-txt-tertiary mt-0.5">{t('settings:privacy.activity.gamesDescription')}</div>
+                </div>
+                <Toggle enabled={activityPreferences.showGames} onChange={(showGames) => void setActivityPreference({ showGames })} />
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <div className="flex-1 mr-4">
+                  <div className="text-sm text-txt-primary">{t('settings:privacy.activity.musicLabel')}</div>
+                  <div className="text-xs text-txt-tertiary mt-0.5">{t('settings:privacy.activity.musicDescription')}</div>
+                </div>
+                <Toggle enabled={activityPreferences.showMusic} onChange={(showMusic) => void setActivityPreference({ showMusic })} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

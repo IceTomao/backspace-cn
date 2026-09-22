@@ -1,6 +1,7 @@
 import type { Activity } from '@backspace/shared';
 import { getPrimaryActivity } from '@backspace/shared/src/activities.js';
 import type { TFunction } from 'i18next';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface ActivityCardProps {
@@ -8,14 +9,25 @@ interface ActivityCardProps {
   fallbackCustomStatus?: string | null;
 }
 
-function formatElapsed(startMs: number, t: TFunction<'common'>): string {
-  const elapsed = Date.now() - startMs;
+function formatElapsed(startMs: number, now: number, t: TFunction<'common'>): string {
+  const elapsed = Math.max(0, now - startMs);
   const minutes = Math.floor(elapsed / 60000);
   const hours = Math.floor(minutes / 60);
   const duration = hours > 0
     ? t('time.hoursMinutesShort', { hours, minutes: minutes % 60 })
     : t('time.minutesShort', { minutes });
   return t('time.elapsed', { duration });
+}
+
+function useActivityClock(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
 }
 
 /** Returns the accent border color class for an activity type */
@@ -42,6 +54,7 @@ export function hasRichActivity(activities: Activity[]): boolean {
 export function ActivityCard({ activities, fallbackCustomStatus }: ActivityCardProps) {
   const { t } = useTranslation('common');
   const primary = getPrimaryActivity(activities);
+  const now = useActivityClock(Boolean(primary?.timestamps?.start));
 
   if (!primary) {
     if (fallbackCustomStatus) {
@@ -55,15 +68,33 @@ export function ActivityCard({ activities, fallbackCustomStatus }: ActivityCardP
     return <div className="text-[11px] leading-[1.3] text-txt-tertiary truncate">{primary.name}</div>;
   }
 
-  // Rich activity — app name + elapsed (card wrapper is on the parent row)
+  const music = primary.type === 'listening' ? null : activities.find((activity) => activity.type === 'listening');
+  const publicImage = primary.assets?.largeImage?.startsWith('https://') ? primary.assets.largeImage : null;
+
+  // Rich activity — details, status, and elapsed (card wrapper is on the parent row)
   return (
     <>
-      <div className="text-[11px] leading-[1.3] text-txt-secondary truncate">
-        {primary.name}
+      <div className="flex min-w-0 gap-2">
+        {publicImage && (
+          <img src={publicImage} alt="" className="w-8 h-8 shrink-0 rounded object-cover" />
+        )}
+        <div className="min-w-0">
+          <div className="text-[11px] leading-[1.3] text-txt-secondary truncate">
+            {primary.name}
+          </div>
+          {primary.details && <div className="text-[10px] leading-[1.3] text-txt-primary truncate">{primary.details}</div>}
+          {primary.state && <div className="text-[10px] leading-[1.3] text-txt-tertiary truncate">{primary.state}</div>}
+        </div>
       </div>
       {primary.timestamps?.start && (
         <div className="text-[10px] leading-[1.3] text-txt-tertiary">
-          {formatElapsed(primary.timestamps.start, t)}
+          {formatElapsed(primary.timestamps.start, now, t)}
+        </div>
+      )}
+      {music && (
+        <div className="mt-1 text-[10px] leading-[1.3] text-txt-tertiary truncate">
+          {music.details ? `${music.name} · ${music.details}` : music.name}
+          {music.state ? ` · ${music.state}` : ''}
         </div>
       )}
     </>

@@ -28,23 +28,22 @@ afterEach(() => {
 });
 
 describe('activityStore fan-out', () => {
-  it('pushActivities caches myActivities immediately before debounce', () => {
+  it('pushActivities caches and sends the first activity immediately', () => {
     useActivityStore.getState().pushActivities([GAME_ACTIVITY]);
 
-    // myActivities should be set immediately (before the 5s debounce)
     expect(useActivityStore.getState().myActivities).toEqual([GAME_ACTIVITY]);
-
-    // wsSendAll should NOT have been called yet (debounce hasn't fired)
-    expect(mockWsSendAll).not.toHaveBeenCalled();
+    expect(mockWsSendAll).toHaveBeenCalledWith({ type: 'activity_update', activities: [GAME_ACTIVITY] });
   });
 
-  it('pushActivities calls wsSendAll (not wsSend) after debounce', () => {
+  it('pushActivities coalesces a rapid follow-up within the server rate limit', () => {
     useActivityStore.getState().pushActivities([GAME_ACTIVITY]);
-    vi.advanceTimersByTime(5000);
+    const updated = { ...GAME_ACTIVITY, details: 'Survival' };
+    useActivityStore.getState().pushActivities([updated]);
+    vi.advanceTimersByTime(3100);
 
-    expect(mockWsSendAll).toHaveBeenCalledWith({
+    expect(mockWsSendAll).toHaveBeenLastCalledWith({
       type: 'activity_update',
-      activities: [GAME_ACTIVITY],
+      activities: [updated],
     });
     expect(mockWsSend).not.toHaveBeenCalled();
   });

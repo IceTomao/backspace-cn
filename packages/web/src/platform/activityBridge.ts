@@ -7,6 +7,16 @@ export function initActivityBridge(): void {
   if (unsubscribe) return; // already initialized
   if (!window.backspace?.onActivityDetected) return; // not Electron
 
+  if (window.backspace.onActivitiesDetected) {
+    unsubscribe = window.backspace.onActivitiesDetected((activities) => {
+      useActivityStore.getState().pushActivities(activities as Activity[]);
+    });
+    window.backspace.getCurrentActivities?.().then((activities: unknown) => {
+      useActivityStore.getState().pushActivities(Array.isArray(activities) ? activities as Activity[] : []);
+    }).catch(() => {});
+    return;
+  }
+
   // Subscribe to future activity changes from main process
   unsubscribe = window.backspace.onActivityDetected((activity) => {
     if (activity) {
