@@ -19,6 +19,7 @@ import fs from 'fs';
 import os from 'os';
 import { pathToFileURL } from 'url';
 import { startActivityDetection, stopActivityDetection, getCurrentActivities } from './activityDetector';
+import { getLegacyActivity } from './activityCompatibility';
 import { loadActivityPreferences, registerActivityPreferenceHandlers, type ActivityPreferences } from './activityPreferences';
 import type { DesktopActivity } from './activityTypes';
 import { KeybindManager } from './keybindManager';
@@ -113,7 +114,7 @@ function publishActivities(): void {
   const activities = publishedActivities();
   mainWindow?.webContents.send('activities-detected', activities);
   // Keep the legacy bridge functional for installed web clients during a shell-only update.
-  mainWindow?.webContents.send('activity-detected', activities[0] ?? null);
+  mainWindow?.webContents.send('activity-detected', getLegacyActivity(activities));
 }
 const keybindManager = new KeybindManager();
 let tray: Tray | null = null;
