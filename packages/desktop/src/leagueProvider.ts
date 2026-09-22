@@ -15,6 +15,7 @@ const POLL_INTERVAL_MS = 3_000;
 let processScanWarned = false;
 let connectionWarned = false;
 let noProcessWarned = false;
+let gameClientWarned = false;
 const lcuFailureWarned = new Set<string>();
 const QUEUES: Record<number, string> = {
   0: '自定义模式', 400: '匹配模式', 420: '排位单人/双人', 430: '普通征召',
@@ -82,6 +83,50 @@ function warnLcuFailure(endpoint: string, reason: string): void {
   console.warn(`[league] LCU request failed for ${endpoint}: ${reason}`);
 }
 
+interface LiveGameData {
+  activePlayer?: { summonerName?: string };
+  gameData?: { gameMode?: string; gameType?: string; mapName?: string };
+  playerList?: Array<{ summonerName?: string; championName?: string }>;
+}
+
+export interface LiveGamePresence {
+  championName?: string;
+  mode?: string;
+}
+
+/** Extract the local champion and a readable mode from Riot's in-game API. */
+export function parseLiveGamePresence(data: LiveGameData): LiveGamePresence {
+  const activeName = data.activePlayer?.summonerName;
+  const player = data.playerList?.find((candidate) => candidate.summonerName === activeName);
+  const game = data.gameData;
+  let mode: string | undefined;
+  if (game?.gameType === 'PRACTICE_GAME') mode = '训练模式';
+  else if (game?.gameMode === 'ARAM' || game?.mapName === 'Map12') mode = '极地大乱斗';
+  else if (game?.gameMode === 'CLASSIC' || game?.mapName === 'Map11') mode = '经典模式';
+  else if (game?.gameMode) mode = game.gameMode;
+  return { championName: player?.championName, mode };
+}
+
+function liveGameRequest<T>(endpoint: string): Promise<T | null> {
+  return new Promise((resolve) => {
+    const request = https.request({
+      hostname: '127.0.0.1', port: 2999, path: endpoint, method: 'GET',
+      rejectUnauthorized: false, timeout: 1_500,
+    }, (response) => {
+      if (response.statusCode !== 200) { response.resume(); resolve(null); return; }
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      response.on('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T); }
+        catch { resolve(null); }
+      });
+    });
+    request.on('timeout', () => { request.destroy(); resolve(null); });
+    request.on('error', () => resolve(null));
+    request.end();
+  });
+}
+
 export function createLeagueActivity(start: number): DetectedActivity {
   return { source: 'game', type: 'playing', name: 'League of Legends', timestamps: { start } };
 }
@@ -140,8 +185,28 @@ export class LeagueProvider implements ActivityProvider {
       connectionWarned = true;
       console.warn('[league] LOL detected, but no LCU connection was found; game phase and champion details will be unavailable. Run the desktop client at the same privilege level as League or expose the LeagueClient lockfile.');
     }
-    if (connection) await this.enrich(next, connection);
+    if (connection) {
+      await this.enrich(next, connection);
+    } else if (hasGame) {
+      await this.enrichFromLiveGame(next);
+    }
     this.publish(next, onChange);
+  }
+
+  private async enrichFromLiveGame(activity: DetectedActivity): Promise<void> {
+    const data = await liveGameRequest<LiveGameData>('/liveclientdata/allgamedata');
+    if (!data) {
+      if (!gameClientWarned) {
+        gameClientWarned = true;
+        console.warn('[league] in-game API unavailable on 127.0.0.1:2999; publishing base League activity');
+      }
+      return;
+    }
+    gameClientWarned = false;
+    const presence = parseLiveGamePresence(data);
+    this.matchContext = updateLeagueMatchContext(this.matchContext, 'InProgress', presence.mode, presence.championName ? { name: presence.championName } : undefined);
+    activity.state = [this.matchContext.mode, '游戏中'].filter(Boolean).join(' · ') || undefined;
+    if (this.matchContext.champion?.name) activity.details = `使用：${this.matchContext.champion.name}`;
   }
 
   private async enrich(activity: DetectedActivity, connection: LcuConnection): Promise<void> {
