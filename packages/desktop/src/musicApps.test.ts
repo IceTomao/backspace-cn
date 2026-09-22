@@ -11,6 +11,7 @@ describe('getMusicApp', () => {
     const app = getMusicApp(source);
     expect(app?.name).toBe(name);
     expect(app?.iconUrl).toMatch(/^https:\/\//);
+    if (name === 'QQ 音乐') expect(app?.iconUrl).toBe('https://y.qq.com/favicon.ico');
   });
 
   it('does not publish unknown players', () => {

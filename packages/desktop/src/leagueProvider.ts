@@ -5,22 +5,17 @@ import path from 'path';
 import { app } from 'electron';
 import type { ActivityProvider, DetectedActivity } from './activityTypes';
 import { updateLeagueMatchContext, type LeagueChampionPresence, type LeagueMatchContext } from './leagueMatchContext';
-
-interface LeagueProcess {
-  commandLine: string;
-  startedAt: number;
-}
-
-interface LcuConnection {
-  port: number;
-  token: string;
-}
+import { parseLeagueProcessRows, resolveLcuConnection, type LcuConnection, type LeagueProcessSnapshot } from './leagueConnection';
 
 interface ChampionRecord { key: string; name: string; image?: { full?: string } }
 
 const CLIENT_PROCESSES = new Set(['leagueclient.exe', 'leagueclientux.exe']);
 const GAME_PROCESSES = new Set(['league of legends.exe', 'leagueoflegends.exe']);
 const POLL_INTERVAL_MS = 3_000;
+let processScanWarned = false;
+let connectionWarned = false;
+let noProcessWarned = false;
+const lcuFailureWarned = new Set<string>();
 const QUEUES: Record<number, string> = {
   0: '自定义模式', 400: '匹配模式', 420: '排位单人/双人', 430: '普通征召',
   440: '排位灵活组排', 450: '极地大乱斗', 490: '快速模式', 700: '冠军杯赛',
@@ -37,45 +32,58 @@ function execPowerShell(command: string): Promise<string> {
   });
 }
 
-async function readProcesses(): Promise<{ clients: LeagueProcess[]; hasGame: boolean }> {
+async function readProcesses(): Promise<{ clients: LeagueProcessSnapshot[]; hasGame: boolean }> {
   if (process.platform !== 'win32') return { clients: [], hasGame: false };
-  // CreationDate is converted in PowerShell so Node never needs to parse WMI's date format.
-  const command = "$n=@('LeagueClient.exe','LeagueClientUx.exe','League of Legends.exe','LeagueofLegends.exe'); Get-CimInstance Win32_Process | Where-Object {$n -contains $_.Name} | ForEach-Object {[PSCustomObject]@{name=$_.Name;commandLine=$_.CommandLine;startedAt=([System.Management.ManagementDateTimeConverter]::ToDateTime($_.CreationDate).ToUniversalTime()-[datetime]'1970-01-01').TotalMilliseconds}} | ConvertTo-Json -Compress";
+  // Get-CimInstance already exposes CreationDate as a DateTime. The old code
+  // passed it through ManagementDateTimeConverter (which expects a DMTF string)
+  // and consequently threw on every matching League process.
+  const command = "$n=@('LeagueClient.exe','LeagueClientUx.exe','League of Legends.exe','LeagueofLegends.exe'); Get-CimInstance Win32_Process | Where-Object {$n -contains $_.Name} | ForEach-Object {[PSCustomObject]@{name=$_.Name;commandLine=$_.CommandLine;executablePath=$_.ExecutablePath;startedAt=([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress";
   try {
     const output = (await execPowerShell(command)).trim();
     if (!output) return { clients: [], hasGame: false };
-    const rows = (Array.isArray(JSON.parse(output)) ? JSON.parse(output) : [JSON.parse(output)]) as Array<Record<string, unknown>>;
-    const clients = rows.flatMap((row) => {
-      const name = typeof row.name === 'string' ? row.name.toLowerCase() : '';
-      const commandLine = typeof row.commandLine === 'string' ? row.commandLine : '';
-      const startedAt = typeof row.startedAt === 'number' ? row.startedAt : Date.now();
-      return CLIENT_PROCESSES.has(name) ? [{ commandLine, startedAt }] : [];
-    });
-    return { clients, hasGame: rows.some((row) => GAME_PROCESSES.has(String(row.name).toLowerCase())) };
-  } catch {
+    const rows = parseLeagueProcessRows(output);
+    processScanWarned = false;
+    const clients = rows.filter((row) => CLIENT_PROCESSES.has(row.name.toLowerCase()));
+    return { clients, hasGame: rows.some((row) => GAME_PROCESSES.has(row.name.toLowerCase())) };
+  } catch (error) {
+    if (!processScanWarned) {
+      processScanWarned = true;
+      console.warn('[league] process scan failed:', error instanceof Error ? error.message : String(error));
+    }
     return { clients: [], hasGame: false };
   }
-}
-
-function parseConnection(commandLine: string): LcuConnection | null {
-  const port = /--app-port=(\d+)/.exec(commandLine)?.[1];
-  const token = /--remoting-auth-token=([^\s"]+)/.exec(commandLine)?.[1];
-  if (!port || !token) return null;
-  return { port: Number(port), token };
 }
 
 function lcuRequest<T>(connection: LcuConnection, endpoint: string): Promise<T | null> {
   return new Promise((resolve) => {
     const request = https.request({ hostname: '127.0.0.1', port: connection.port, path: endpoint, method: 'GET', rejectUnauthorized: false, auth: `riot:${connection.token}`, timeout: 2_000 }, (response) => {
-      if (response.statusCode !== 200) { response.resume(); resolve(null); return; }
+      if (response.statusCode !== 200) {
+        response.resume();
+        warnLcuFailure(endpoint, `HTTP ${response.statusCode ?? 'unknown'}`);
+        resolve(null);
+        return;
+      }
       const chunks: Buffer[] = [];
       response.on('data', (chunk: Buffer) => chunks.push(chunk));
-      response.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T); } catch { resolve(null); } });
+      response.on('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T); }
+        catch { warnLcuFailure(endpoint, 'invalid JSON response'); resolve(null); }
+      });
     });
-    request.on('timeout', () => { request.destroy(); resolve(null); });
-    request.on('error', () => resolve(null));
+    request.on('timeout', () => { request.destroy(); warnLcuFailure(endpoint, 'request timed out'); resolve(null); });
+    request.on('error', (error) => { warnLcuFailure(endpoint, error.message); resolve(null); });
     request.end();
   });
+}
+
+function warnLcuFailure(endpoint: string, reason: string): void {
+  if (lcuFailureWarned.has(endpoint)) return;
+  lcuFailureWarned.add(endpoint);
+  console.warn(`[league] LCU request failed for ${endpoint}: ${reason}`);
+}
+
+export function createLeagueActivity(start: number): DetectedActivity {
+  return { source: 'game', type: 'playing', name: 'League of Legends', timestamps: { start } };
 }
 
 function phaseLabel(phase: unknown): string | undefined {
@@ -112,11 +120,26 @@ export class LeagueProvider implements ActivityProvider {
   private async refresh(onChange: () => void): Promise<void> {
     const { clients, hasGame } = await readProcesses();
     const client = clients.sort((a, b) => a.startedAt - b.startedAt)[0];
-    if (!client && !hasGame) { if (this.activity) { this.activity = null; onChange(); } return; }
+    if (!client && !hasGame) {
+      if (!noProcessWarned) {
+        noProcessWarned = true;
+        console.info('[league] no LeagueClient or League of Legends process detected');
+      }
+      if (this.activity) { this.activity = null; onChange(); }
+      return;
+    }
+    noProcessWarned = false;
 
     const start = client?.startedAt ?? this.activity?.timestamps?.start ?? Date.now();
-    const next: DetectedActivity = { source: 'game', type: 'playing', name: 'League of Legends', timestamps: { start } };
-    const connection = client ? parseConnection(client.commandLine) : null;
+    const next = createLeagueActivity(start);
+    const connection = clients
+      .map((candidate) => resolveLcuConnection(candidate.commandLine, candidate.executablePath))
+      .find((candidate): candidate is LcuConnection => candidate !== null) ?? null;
+    if (connection) connectionWarned = false;
+    if ((client || hasGame) && !connection && !connectionWarned) {
+      connectionWarned = true;
+      console.warn('[league] LOL detected, but no LCU connection was found; game phase and champion details will be unavailable. Run the desktop client at the same privilege level as League or expose the LeagueClient lockfile.');
+    }
     if (connection) await this.enrich(next, connection);
     this.publish(next, onChange);
   }
@@ -149,7 +172,9 @@ export class LeagueProvider implements ActivityProvider {
       }
     }
 
-    this.matchContext = updateLeagueMatchContext(this.matchContext, phase, mode, championPresence);
+    if (phase !== null && phase !== undefined) {
+      this.matchContext = updateLeagueMatchContext(this.matchContext, phase, mode, championPresence);
+    }
     const phaseText = phaseLabel(phase);
     activity.state = [this.matchContext.mode, phaseText].filter(Boolean).join(' · ') || undefined;
     if (this.matchContext.champion) {
