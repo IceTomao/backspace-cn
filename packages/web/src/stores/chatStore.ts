@@ -53,8 +53,10 @@ interface ChatState {
   realtimeMessageEvents: RealtimeMessageEvent[];
   channelAccessTimes: Map<string, number>;
   scrollPositions: Map<string, string>;
+  bottomScrollRequests: Map<string, string>;
   setCurrentChannel: (channelId: string | null) => void;
   saveScrollPosition: (channelId: string, messageId: string) => void;
+  requestBottomScroll: (channelId: string, marker: string) => void;
   setReplyTo: (message: MessageWithUser | null) => void;
   setEditingMessage: (messageId: string | null) => void;
   loadMessages: (channelId: string, force?: boolean) => Promise<void>;
@@ -112,6 +114,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   realtimeMessageEvents: [],
   channelAccessTimes: new Map(),
   scrollPositions: new Map(),
+  bottomScrollRequests: new Map(),
 
   saveScrollPosition: (channelId, messageId) => {
     set((state) => {
@@ -163,6 +166,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   setReplyTo: (message) => set({ replyTo: message }),
   setEditingMessage: (messageId) => set({ editingMessageId: messageId }),
+  requestBottomScroll: (channelId, marker) => set((state) => {
+    const bottomScrollRequests = new Map(state.bottomScrollRequests);
+    bottomScrollRequests.set(channelId, marker);
+    return { bottomScrollRequests };
+  }),
 
   clearAllMessages: () => set({
     messages: new Map(),
@@ -173,6 +181,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     realtimeMessageEvents: [],
     channelAccessTimes: new Map(),
     scrollPositions: new Map(),
+    bottomScrollRequests: new Map(),
     currentChannelId: null,
     replyTo: null,
     editingMessageId: null,
@@ -366,6 +375,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         setDmChannels(sortDmChannels(updatedDms, get().unreadChannels, get().currentChannelId));
       }
     }
+
+    // This marker is local-only. MessageList uses it to distinguish an action
+    // initiated in this composer from history loads, remote messages and
+    // persisted pending-message recovery.
+    get().requestBottomScroll(channelId, `message:${tempId}`);
 
     set({ replyTo: null });
 
@@ -785,13 +799,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const newReadStates = new Map(state.readStates);
       const newMessages = new Map(state.messages);
       const newHasMore = new Map(state.hasMore);
+      const bottomScrollRequests = new Map(state.bottomScrollRequests);
       for (const channelId of channelIds) {
         newUnread.delete(channelId);
         newReadStates.delete(channelId);
         newMessages.delete(channelId);
         newHasMore.delete(channelId);
+        bottomScrollRequests.delete(channelId);
       }
-      return { unreadChannels: newUnread, readStates: newReadStates, messages: newMessages, hasMore: newHasMore };
+      return { unreadChannels: newUnread, readStates: newReadStates, messages: newMessages, hasMore: newHasMore, bottomScrollRequests };
     });
   },
 
@@ -810,6 +826,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const readStates = copyDelete(state.readStates);
       const channelAccessTimes = copyDelete(state.channelAccessTimes);
       const scrollPositions = copyDelete(state.scrollPositions);
+      const bottomScrollRequests = copyDelete(state.bottomScrollRequests);
 
       let unreadChannels = state.unreadChannels;
       if (state.unreadChannels.has(oldId)) {
@@ -827,6 +844,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         readStates,
         channelAccessTimes,
         scrollPositions,
+        bottomScrollRequests,
         unreadChannels,
         currentChannelId,
       };

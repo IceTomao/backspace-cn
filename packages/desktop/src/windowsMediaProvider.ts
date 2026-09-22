@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import type { ActivityProvider, DetectedActivity } from './activityTypes';
+import { getMusicApp } from './musicApps';
 
 interface MediaSnapshot {
   source?: string;
@@ -12,18 +13,7 @@ interface MediaSnapshot {
   status?: 'playing' | 'paused' | 'stopped';
 }
 
-const APP_NAMES: Array<[RegExp, string]> = [
-  [/spotify/i, 'Spotify'],
-  [/apple.*music|music.*apple/i, 'Apple Music'],
-  [/cloudmusic|netease/i, '网易云音乐'],
-  [/qqmusic|qq.*music/i, 'QQ 音乐'],
-];
 const PAUSE_GRACE_MS = 120_000;
-
-function playerName(source: string | undefined): string | null {
-  if (!source) return null;
-  return APP_NAMES.find(([pattern]) => pattern.test(source))?.[1] ?? null;
-}
 
 function helperSourcePath(): string {
   if (app.isPackaged) return path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'windows-media.cs');
@@ -37,7 +27,7 @@ function compileHelper(): string | null {
   const metadata = path.join(windows, 'System32', 'WinMetadata');
   const source = helperSourcePath();
   const directory = path.join(app.getPath('userData'), 'windows-media-helper');
-  const output = path.join(directory, 'windows-media-helper-v1.exe');
+  const output = path.join(directory, 'windows-media-helper-v2.exe');
   const compiler = path.join(framework, 'csc.exe');
   if (!fs.existsSync(source) || !fs.existsSync(compiler)
     || !fs.existsSync(path.join(metadata, 'Windows.Foundation.winmd'))
@@ -123,8 +113,8 @@ export class WindowsMediaProvider implements ActivityProvider {
   }
 
   private apply(snapshot: MediaSnapshot): void {
-    const name = playerName(snapshot.source);
-    if (!name || !snapshot.title) { this.clear(); return; }
+    const player = getMusicApp(snapshot.source);
+    if (!player || !snapshot.title) { this.clear(); return; }
     if (snapshot.status === 'stopped') { this.clear(); return; }
 
     const state = [snapshot.artist, snapshot.album].filter(Boolean).join(' · ');
@@ -136,9 +126,10 @@ export class WindowsMediaProvider implements ActivityProvider {
     }
 
     const next: DetectedActivity = {
-      source: 'music', type: 'listening', name,
+      source: 'music', type: 'listening', name: player.name,
       details: snapshot.title,
       state: snapshot.status === 'paused' ? [state, '已暂停'].filter(Boolean).join(' · ') : state || undefined,
+      assets: { largeImage: player.iconUrl, largeText: player.name },
     };
     if (JSON.stringify(next) === JSON.stringify(this.activity)) return;
     this.activity = next;

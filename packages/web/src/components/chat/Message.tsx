@@ -7,7 +7,6 @@ import type { TFunction } from 'i18next';
 import { formatters, useFormatters } from '../../i18n/formatters';
 import type { MessageWithUser, Embed, User } from '@backspace/shared';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { MentionBadge } from './MentionBadge';
 import { Avatar } from '../ui/Avatar';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
@@ -17,6 +16,7 @@ import { useChatStore } from '../../stores/chatStore';
 import { useSpaceStore } from '../../stores/spaceStore';
 import { useUIStore } from '../../stores/uiStore';
 import { AttachmentRenderer, attUrlOf } from './AttachmentRenderer';
+import { ReplyPreview } from './ReplyPreview';
 import { AttachmentProgress } from './AttachmentProgress';
 import { EmbedRenderer } from './EmbedRenderer';
 import { Username } from '../ui/Username';
@@ -38,6 +38,7 @@ interface MessageProps {
   isCompact: boolean;
   isFirstInGroup: boolean;
   previousMessageId: string | null;
+  onJumpToMessage?: (messageId: string) => void;
 }
 
 interface PendingAttachmentTileProps {
@@ -88,16 +89,6 @@ function formatHoverTime(timestamp: number): string {
   return formatters.formatTime(timestamp);
 }
 
-/** Lightweight inline renderer that resolves <@userId> mentions to MentionBadge components. */
-function renderInlineWithMentions(content: string): React.ReactNode {
-  const parts = content.split(/(<@[a-zA-Z0-9_-]+>)/g);
-  return parts.map((part, i) => {
-    const match = part.match(/^<@([a-zA-Z0-9_-]+)>$/);
-    if (match) return <MentionBadge key={i} userId={match[1]!} />;
-    return part;
-  });
-}
-
 const GIF_URL_REGEX = /^https:\/\/(?:media\.tenor\.com|static\.klipy\.com)\/.+$/;
 
 function isGifOnlyMessage(content: string | null): boolean {
@@ -123,7 +114,7 @@ function getImageEmbedSourceUrl(content: string | null, embeds: Embed[]): string
   return hasMatchingImageEmbed ? trimmed : null;
 }
 
-export function Message({ message, isCompact, isFirstInGroup, previousMessageId }: MessageProps) {
+export function Message({ message, isCompact, isFirstInGroup, previousMessageId, onJumpToMessage }: MessageProps) {
   const { t } = useTranslation(['chat', 'common']);
   const fmt = useFormatters();
   const [editContent, setEditContent] = useState(message.content ?? '');
@@ -418,7 +409,7 @@ export function Message({ message, isCompact, isFirstInGroup, previousMessageId 
   const content = (
     <div
       id={`msg-${message.id}`}
-      className={`group relative flex gap-4 px-5 py-[3px] transition-colors ${isFirstInGroup || message.replyTo ? 'mt-[1.0625rem]' : ''} ${
+      className={`group relative flex gap-4 px-5 py-[3px] transition-colors ${isFirstInGroup || message.replyToId ? 'mt-[1.0625rem]' : ''} ${
         isMentioned
           ? 'bg-accent-amber/10 border-l-2 border-l-accent-amber hover:bg-accent-amber/15'
           : 'hover:bg-[rgba(255,255,255,0.025)]'
@@ -433,13 +424,13 @@ export function Message({ message, isCompact, isFirstInGroup, previousMessageId 
       }}
     >
       {/* Reply Line */}
-      {message.replyTo && (
+      {message.replyToId && (
         <div className="absolute left-[40px] top-[-14px] w-[30px] h-[22px] border-l-2 border-t-2 border-interactive-muted rounded-tl-[6px] opacity-60" />
       )}
 
       {/* Avatar or timestamp column */}
       <div className="w-10 flex-shrink-0 flex items-start justify-start">
-        {isFirstInGroup || message.replyTo ? (
+        {isFirstInGroup || message.replyToId ? (
           <div className="mt-0.5">
             <ProfileAvatar
               src={displayIdentity.avatar}
@@ -458,28 +449,37 @@ export function Message({ message, isCompact, isFirstInGroup, previousMessageId 
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        {message.replyTo && (() => {
+        {message.replyTo ? (() => {
           const _rawReply = resolveDisplayIdentity(message.replyTo.user, currentUser);
           const replyIdentity = (!isSelf(_rawReply, currentUser) && _rawReplyUser)
             ? _canonicalReplyUser
             : _rawReply;
           const replyDisplayName = replyIdentity.displayName ?? replyIdentity.username;
           return (
-            <div className="flex items-center gap-1 mb-1 ml-[-4px] opacity-80 hover:opacity-100 cursor-pointer group/reply">
+            <button
+              type="button"
+              onClick={() => onJumpToMessage?.(message.replyTo!.id)}
+              className="flex max-w-full items-center gap-1 mb-1 ml-[-4px] opacity-80 hover:opacity-100 cursor-pointer group/reply text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary rounded-sm"
+              aria-label={t('chat:reply.jumpTo', { name: replyDisplayName })}
+            >
               <Avatar src={replyIdentity.avatar} name={replyDisplayName} size={16} user={replyIdentity} />
               <Username
                 username={replyDisplayName}
                 className="text-[14px] font-bold text-txt-primary hover:underline"
                 style={replyRoleColor(message.replyTo)}
               />
-              <span className="text-[14px] text-txt-message truncate max-w-[400px] hover:text-txt-primary">
-                {message.replyTo.content ? renderInlineWithMentions(message.replyTo.content) : ''}
+              <span className="min-w-0 max-w-[400px] text-[14px] text-txt-message hover:text-txt-primary">
+                <ReplyPreview message={message.replyTo} />
               </span>
-            </div>
+            </button>
           );
-        })()}
+        })() : message.replyToId ? (
+          <div className="mb-1 ml-[-4px] text-[13px] text-txt-tertiary opacity-80">
+            {t('chat:reply.unavailable')}
+          </div>
+        ) : null}
 
-        {(isFirstInGroup || message.replyTo) && (
+        {(isFirstInGroup || message.replyToId) && (
           <div className="flex items-baseline gap-2 mb-0.5">
             <span onClick={handleUsernameClick}>
               <Username

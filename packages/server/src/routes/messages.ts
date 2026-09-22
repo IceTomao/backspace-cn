@@ -71,8 +71,9 @@ export function fetchReactionsForMessages(messageIds: string[]): Map<string, Rea
  * Confining the target to the message's own channel puts the reply preview under
  * exactly the VIEW_CHANNEL gate that already guards the message carrying it.
  *
- * Returns a map from reply-target id to its hydration. Embeds and reactions are
- * left empty because reply previews do not render them.
+ * Returns a map from reply-target id to its shallow hydration. Attachments and
+ * embeds are included for rich reply previews; reactions and nested replies are
+ * intentionally omitted.
  */
 export function fetchReplyToMessages(
   channelId: string,
@@ -112,6 +113,7 @@ export function fetchReplyToMessages(
     if (!replyAttMap.has(mid)) replyAttMap.set(mid, []);
     replyAttMap.get(mid)!.push(att);
   }
+  const replyEmbedMap = fetchEmbedsForMessages(replyMsgIds);
 
   const map = new Map<string, MessageWithUser>();
   for (const rm of replyMessages) {
@@ -141,7 +143,7 @@ export function fetchReplyToMessages(
         playable: a.playable ?? null,
         createdAt: a.createdAt,
       })),
-      embeds: [],
+      embeds: (replyEmbedMap.get(rm.id) ?? []).map(embedRowToEmbed),
       reactions: [],
       replyTo: null,
     });

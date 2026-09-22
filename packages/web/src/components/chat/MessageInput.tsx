@@ -89,6 +89,7 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
   const previewUrlsRef = useRef<Map<string, string>>(new Map());
 
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const requestBottomScroll = useChatStore((s) => s.requestBottomScroll);
   const chatReplyTo = useChatStore((s) => s.replyTo);
   const chatSetReplyTo = useChatStore((s) => s.setReplyTo);
   const editingMessageId = useChatStore((s) => s.editingMessageId);
@@ -373,6 +374,7 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
       tusExpiresAt,
       retryCount: 0,
     });
+    requestBottomScroll(channelId, `pending:${clientId}`);
 
     // Detach the staged transfers from the composer (they're now owned by the bubble)
     // and clear the draft + reply for this channel.

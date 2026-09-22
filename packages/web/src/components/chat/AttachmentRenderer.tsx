@@ -168,6 +168,7 @@ export function AttachmentRenderer({ attachment }: AttachmentRendererProps) {
   const { t } = useTranslation(['chat']);
   const { formatBytes } = useFormatters();
   const openImagePreview = useUIStore((s) => s.openImagePreview);
+  const isMobile = useUIStore((s) => s.isMobile);
   const startDownload = useTransferStore((s) => s.startDownload);
 
   const attUrl = attUrlOf(attachment.filename);
@@ -245,8 +246,21 @@ export function AttachmentRenderer({ attachment }: AttachmentRendererProps) {
           <img
             src={thumbUrl ?? attUrl}
             alt={originalName}
-            className="w-full h-full max-w-[400px] max-h-[300px] object-contain cursor-pointer hover:brightness-95 transition-all"
-            onClick={() => openImagePreview(attUrl)}
+            role="button"
+            tabIndex={0}
+            draggable={false}
+            className={`w-full h-full max-w-[400px] max-h-[300px] object-contain hover:brightness-95 transition-all ${isMobile ? 'cursor-pointer' : 'cursor-zoom-in'}`}
+            onClick={() => {
+              if (isMobile) openImagePreview(attUrl);
+            }}
+            onDoubleClick={() => {
+              if (!isMobile) openImagePreview(attUrl);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              openImagePreview(attUrl);
+            }}
             loading="lazy"
           />
         </div>

@@ -67,7 +67,12 @@
     "memberSince": "Mitglied seit",
     "sendMessage": "Nachricht senden",
     "viewFull": "Ganzes Profil ansehen",
-    "addFriend": "Freund hinzufügen"
+    "addFriend": "Freund hinzufügen",
+    "activity": {
+      "title": "Aktivität",
+      "playing": "Spielt {{name}}",
+      "listening": "Hört über {{name}}"
+    }
   },
   "activity": {
     "title": "Jetzt aktiv",

@@ -67,7 +67,12 @@
     "memberSince": "加入时间",
     "sendMessage": "发送消息",
     "viewFull": "查看完整资料",
-    "addFriend": "加好友"
+    "addFriend": "加好友",
+    "activity": {
+      "title": "活动",
+      "playing": "正在玩 {{name}}",
+      "listening": "正在使用 {{name}} 收听音乐"
+    }
   },
   "activity": {
     "title": "近期活动",

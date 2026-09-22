@@ -67,7 +67,12 @@
     "memberSince": "Member Since",
     "sendMessage": "Send Message",
     "viewFull": "View Full Profile",
-    "addFriend": "Add Friend"
+    "addFriend": "Add Friend",
+    "activity": {
+      "title": "Activity",
+      "playing": "Playing {{name}}",
+      "listening": "Listening with {{name}}"
+    }
   },
   "activity": {
     "title": "Active Now",

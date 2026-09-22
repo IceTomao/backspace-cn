@@ -113,3 +113,43 @@ describe('MessageInput edit shortcut', () => {
     expect(useComposerStore.getState().get('dm-1').replyTo?.id).toBe('reply-target');
   });
 });
+
+describe('Message reply preview', () => {
+  it('jumps to the referenced message when the reply preview is clicked', () => {
+    const onJumpToMessage = vi.fn();
+    const replyMessage: MessageWithUser = {
+      ...ownMessage,
+      id: 'message-2',
+      replyToId: ownMessage.id,
+      content: 'reply',
+      replyTo: ownMessage,
+    };
+
+    render(
+      <Message
+        message={replyMessage}
+        isCompact={false}
+        isFirstInGroup
+        previousMessageId={ownMessage.id}
+        onJumpToMessage={onJumpToMessage}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: "Jump to Alice's message" }));
+    expect(onJumpToMessage).toHaveBeenCalledWith(ownMessage.id);
+  });
+
+  it('shows an unavailable marker without a clickable jump target', () => {
+    const missingReply: MessageWithUser = {
+      ...ownMessage,
+      id: 'message-3',
+      replyToId: 'deleted-message',
+      content: 'reply',
+      replyTo: null,
+    };
+
+    render(<Message message={missingReply} isCompact={false} isFirstInGroup previousMessageId={null} />);
+    expect(screen.getByText('Original message unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Jump to/ })).not.toBeInTheDocument();
+  });
+});

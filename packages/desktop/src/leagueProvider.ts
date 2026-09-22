@@ -4,6 +4,7 @@ import https from 'https';
 import path from 'path';
 import { app } from 'electron';
 import type { ActivityProvider, DetectedActivity } from './activityTypes';
+import { updateLeagueMatchContext, type LeagueChampionPresence, type LeagueMatchContext } from './leagueMatchContext';
 
 interface LeagueProcess {
   commandLine: string;
@@ -96,6 +97,7 @@ export class LeagueProvider implements ActivityProvider {
   private activity: DetectedActivity | null = null;
   private champions = new Map<number, ChampionRecord>();
   private championVersion: string | null = null;
+  private matchContext: LeagueMatchContext = {};
 
   start(onChange: () => void): void {
     if (this.timer || process.platform !== 'win32') return;
@@ -104,7 +106,7 @@ export class LeagueProvider implements ActivityProvider {
     this.timer = setInterval(poll, POLL_INTERVAL_MS);
   }
 
-  stop(): void { if (this.timer) clearInterval(this.timer); this.timer = null; this.activity = null; }
+  stop(): void { if (this.timer) clearInterval(this.timer); this.timer = null; this.activity = null; this.matchContext = {}; }
   getActivities(): DetectedActivity[] { return this.activity ? [this.activity] : []; }
 
   private async refresh(onChange: () => void): Promise<void> {
@@ -125,22 +127,35 @@ export class LeagueProvider implements ActivityProvider {
       lcuRequest<Record<string, unknown>>(connection, '/lol-gameflow/v1/session'),
       lcuRequest<Record<string, unknown>>(connection, '/lol-champ-select/v1/session'),
     ]);
-    const phaseText = phaseLabel(phase);
     const gameData = session?.gameData as Record<string, unknown> | undefined;
     const queue = gameData?.queue as Record<string, unknown> | undefined;
     const queueId = typeof queue?.id === 'number' ? queue.id : undefined;
     const mode = queueId === undefined ? undefined : (QUEUES[queueId] ?? '特殊模式');
-    activity.state = [mode, phaseText].filter(Boolean).join(' · ') || undefined;
 
     const localCell = typeof champSelect?.localPlayerCellId === 'number' ? champSelect.localPlayerCellId : null;
     const team = Array.isArray(champSelect?.myTeam) ? champSelect.myTeam as Array<Record<string, unknown>> : [];
     const me = localCell === null ? undefined : team.find((member) => member.cellId === localCell);
     const championId = typeof me?.championId === 'number' && me.championId > 0 ? me.championId : undefined;
+    let championPresence: LeagueChampionPresence | undefined;
     if (championId) {
       const champion = await this.getChampion(connection, championId);
-      activity.details = champion ? `使用：${champion.name}` : '已选择英雄';
       if (champion?.image?.full && this.championVersion) {
-        activity.assets = { largeImage: `https://ddragon.leagueoflegends.com/cdn/${this.championVersion}/img/champion/${champion.image.full}`, largeText: champion.name };
+        championPresence = {
+          name: champion.name,
+          imageUrl: `https://ddragon.leagueoflegends.com/cdn/${this.championVersion}/img/champion/${champion.image.full}`,
+        };
+      } else {
+        championPresence = champion ? { name: champion.name } : {};
+      }
+    }
+
+    this.matchContext = updateLeagueMatchContext(this.matchContext, phase, mode, championPresence);
+    const phaseText = phaseLabel(phase);
+    activity.state = [this.matchContext.mode, phaseText].filter(Boolean).join(' · ') || undefined;
+    if (this.matchContext.champion) {
+      activity.details = this.matchContext.champion.name ? `使用：${this.matchContext.champion.name}` : '已选择英雄';
+      if (this.matchContext.champion.imageUrl) {
+        activity.assets = { largeImage: this.matchContext.champion.imageUrl, largeText: this.matchContext.champion.name };
       }
     } else if (phase === 'ChampSelect') {
       activity.details = '正在选择英雄';

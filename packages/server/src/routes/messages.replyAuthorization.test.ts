@@ -242,6 +242,24 @@ describe('space-channel reply targets are confined to their own channel', () => 
       // Positive control: proves the harness observes both the insert and the
       // hydrated reply preview when the rule is satisfied.
       const targetId = seedMessage(GENERAL, 'victim', 'in-channel target');
+      testDb.insert(schema.attachments).values({
+        id: 'channel-reply-image',
+        messageId: targetId,
+        uploaderId: 'victim',
+        filename: 'stored-image.png',
+        originalName: '中文图片.png',
+        mimetype: 'image/png',
+        size: 42,
+        createdAt: NOW,
+      }).run();
+      testDb.insert(schema.embeds).values({
+        id: 'channel-reply-embed',
+        messageId: targetId,
+        url: 'https://example.test/article',
+        embedType: 'generic',
+        title: '引用链接',
+        createdAt: NOW,
+      }).run();
 
       const res = await app.inject({
         method: 'POST',
@@ -254,6 +272,8 @@ describe('space-channel reply targets are confined to their own channel', () => 
       expect(body.replyToId).toBe(targetId);
       expect(body.replyTo?.id).toBe(targetId);
       expect(body.replyTo?.content).toBe('in-channel target');
+      expect(body.replyTo?.attachments?.[0]?.originalName).toBe('中文图片.png');
+      expect(body.replyTo?.embeds?.[0]?.title).toBe('引用链接');
       expect(rowsIn(GENERAL)).toHaveLength(2);
     });
 

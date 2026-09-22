@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Text;
 using Windows.Foundation;
 using Windows.Media.Control;
 using Windows.Media.MediaProperties;
@@ -27,6 +28,9 @@ internal static class WindowsMediaHelper
 
     public static void Main()
     {
+        // Node reads the helper's pipe as UTF-8. The Windows console code page
+        // otherwise corrupts Chinese song and artist metadata before Node sees it.
+        Console.OutputEncoding = new UTF8Encoding(false);
         var manager = Wait(GlobalSystemMediaTransportControlsSessionManager.RequestAsync());
         var last = String.Empty;
         while (true)

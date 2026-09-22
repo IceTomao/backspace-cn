@@ -67,6 +67,7 @@ beforeEach(() => {
     unreadChannels: new Set(),
     channelAccessTimes: new Map(),
     scrollPositions: new Map(),
+    bottomScrollRequests: new Map(),
     currentChannelId: null,
   });
   void s;
@@ -81,6 +82,7 @@ describe('chatStore.rekeyChannelState', () => {
       readStates: new Map([['A1', 'msg-last']]),
       channelAccessTimes: new Map([['A1', 123]]),
       scrollPositions: new Map([['A1', 'msg-scroll']]),
+      bottomScrollRequests: new Map([['A1', 'message:temp']]),
     });
 
     useChatStore.getState().rekeyChannelState('A1', 'B1');
@@ -92,6 +94,7 @@ describe('chatStore.rekeyChannelState', () => {
     expect(s.readStates.has('A1')).toBe(false);
     expect(s.channelAccessTimes.has('A1')).toBe(false);
     expect(s.scrollPositions.has('A1')).toBe(false);
+    expect(s.bottomScrollRequests.has('A1')).toBe(false);
     // newId entries are NOT seeded for messages/hasMore/etc — they refetch naturally.
     expect(s.messages.has('B1')).toBe(false);
   });

@@ -216,6 +216,9 @@ importers:
       livekit-client:
         specifier: ^2.22.3
         version: 2.22.3(@types/dom-mediacapture-record@1.0.22)
+      lucide-react:
+        specifier: 0.468.0
+        version: 0.468.0(react@18.3.1)
       prism-react-renderer:
         specifier: ^2.4.1
         version: 2.4.1(react@18.3.1)
@@ -4367,6 +4370,11 @@ packages:
   lru-cache@6.0.0:
     resolution: {integrity: sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA==}
     engines: {node: '>=10'}
+
+  lucide-react@0.468.0:
+    resolution: {integrity: sha512-6koYRhnM2N0GGZIdXzSeiNwguv1gt/FAjZOiPl76roBi3xKEXa4WmfpxgQwTTL4KipXjefrnf3oV4IsYhi4JFA==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0-rc
 
   lucide@0.468.0:
     resolution: {integrity: sha512-UFbgwji/ZnAV7iTTE4jujyTV7J95AILKyATDUrqOJrMcUGfXvGjw3c1mcuHZUX2oJfkrAGU9KoxkrLQk2jjtiA==}
@@ -10241,6 +10249,10 @@ snapshots:
   lru-cache@6.0.0:
     dependencies:
       yallist: 4.0.0
+
+  lucide-react@0.468.0(react@18.3.1):
+    dependencies:
+      react: 18.3.1
 
   lucide@0.468.0: {}
 

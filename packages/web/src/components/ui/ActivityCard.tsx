@@ -70,6 +70,7 @@ export function ActivityCard({ activities, fallbackCustomStatus }: ActivityCardP
 
   const music = primary.type === 'listening' ? null : activities.find((activity) => activity.type === 'listening');
   const publicImage = primary.assets?.largeImage?.startsWith('https://') ? primary.assets.largeImage : null;
+  const musicImage = music?.assets?.largeImage?.startsWith('https://') ? music.assets.largeImage : null;
 
   // Rich activity — details, status, and elapsed (card wrapper is on the parent row)
   return (
@@ -92,9 +93,12 @@ export function ActivityCard({ activities, fallbackCustomStatus }: ActivityCardP
         </div>
       )}
       {music && (
-        <div className="mt-1 text-[10px] leading-[1.3] text-txt-tertiary truncate">
-          {music.details ? `${music.name} · ${music.details}` : music.name}
-          {music.state ? ` · ${music.state}` : ''}
+        <div className="mt-1 flex min-w-0 items-center gap-1 text-[10px] leading-[1.3] text-txt-tertiary">
+          {musicImage && <img src={musicImage} alt="" className="w-3.5 h-3.5 shrink-0 rounded object-contain" />}
+          <span className="truncate">
+            {music.details ? `${music.name} · ${music.details}` : music.name}
+            {music.state ? ` · ${music.state}` : ''}
+          </span>
         </div>
       )}
     </>

@@ -25,6 +25,8 @@ import { formatDmHeaderName } from '../../utils/dmFormatters';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import type { MessageWithUser } from '@backspace/shared';
 import { SystemMessage } from './SystemMessage';
+import { ensureMessageJumpTarget } from './messageJump';
+import { consumeBottomScrollRequest, type BottomScrollRequestTracker } from './bottomScrollRequest';
 
 const EMPTY_MESSAGES: MessageWithUser[] = [];
 const EMPTY_PENDING_BUBBLES: PendingBubble[] = [];
@@ -70,6 +72,7 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
   const hasMore = useChatStore((s) => s.hasMore.get(channelId) ?? true);
   const ackChannel = useChatStore((s) => s.ackChannel);
   const saveScrollPosition = useChatStore((s) => s.saveScrollPosition);
+  const bottomScrollRequest = useChatStore((s) => s.bottomScrollRequests.get(channelId) ?? null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -131,6 +134,10 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
   // shortly after a channel switch isn't permanently suppressed.
   const suppressNextLoadMoreRef = useRef(false);
   const suppressNextLoadMoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bottomScrollRequestTrackerRef = useRef<BottomScrollRequestTracker>({
+    channelId,
+    marker: bottomScrollRequest,
+  });
   // Unmount cleanup — clear the disarm timer so its callback doesn't run after
   // the component is gone. Refs survive unmount, so the callback would still
   // execute harmlessly, but explicit cleanup is the convention used by sibling
@@ -396,6 +403,31 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
   // eslint-disable-next-line react-hooks/exhaustive-deps -- isAtBottomRef read via ref intentionally
   }, [messages.length, channelId, beginSmoothScrollIntent]);
 
+  // A local composer send always returns the sender to the present, even if
+  // they were reading history. The explicit request marker is intentionally
+  // separate from message arrival: remote messages, pagination, server acks
+  // and persisted pending-message recovery never create one.
+  useEffect(() => {
+    const result = consumeBottomScrollRequest(
+      bottomScrollRequestTrackerRef.current,
+      channelId,
+      bottomScrollRequest,
+    );
+    bottomScrollRequestTrackerRef.current = result.tracker;
+    if (!result.shouldScroll) return;
+
+    requestAnimationFrame(() => {
+      if (currentChannelIdRef.current !== channelId) return;
+      isAtBottomRef.current = true;
+      setIsAtBottom(true);
+      isNearBottomRef.current = true;
+      setIsNearBottom(true);
+      visibleMsgIdRef.current = null;
+      beginSmoothScrollIntent('bottom');
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
+  }, [bottomScrollRequest, channelId, beginSmoothScrollIntent]);
+
   // Auto-scroll when content height grows (embeds/images loading) while near bottom
   const hasMessages = messages.length > 0;
   useEffect(() => {
@@ -477,36 +509,31 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
     };
   }, [channelId]);
 
-  // Jump-to-message: scroll to target and highlight
-  useEffect(() => {
-    if (!jumpToMessageId) return;
-
+  const jumpToMessage = useCallback((messageId: string, onComplete?: () => void) => {
     const scrollToMessage = () => {
-      const el = document.getElementById(`msg-${jumpToMessageId}`);
+      const el = document.getElementById(`msg-${messageId}`);
       if (el) {
         beginSmoothScrollIntent('message');
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('search-highlight');
         setTimeout(() => el.classList.remove('search-highlight'), 2000);
-        onJumpComplete?.();
+        onComplete?.();
         return true;
       }
       return false;
     };
 
-    // Check if the message is already in the cache
-    if (scrollToMessage()) return;
-
-    // Not in cache — load messages around the target
-    loadMessagesAround(channelId, jumpToMessageId).then(() => {
-      // Wait for React to render the new messages
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          scrollToMessage();
-        });
-      });
+    void ensureMessageJumpTarget({
+      tryScroll: scrollToMessage,
+      loadAround: () => loadMessagesAround(channelId, messageId),
     });
-  }, [jumpToMessageId, channelId, loadMessagesAround, onJumpComplete, beginSmoothScrollIntent]);
+  }, [channelId, loadMessagesAround, beginSmoothScrollIntent]);
+
+  // Search results and reply previews share the same target-loading path.
+  useEffect(() => {
+    if (!jumpToMessageId) return;
+    jumpToMessage(jumpToMessageId, onJumpComplete);
+  }, [jumpToMessageId, onJumpComplete, jumpToMessage]);
 
   const handleScroll = useCallback(async () => {
     const container = containerRef.current;
@@ -676,7 +703,7 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
     <div className="flex-1 relative min-h-0">
       <div
         ref={containerRef}
-        className="h-full overflow-y-auto overflow-x-hidden no-scrollbar"
+        className="message-scrollbar h-full overflow-y-auto overflow-x-hidden"
         onScroll={handleScroll}
       >
         {hasMore && (
@@ -744,6 +771,7 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
                     isCompact={!isFirstInGroup}
                     isFirstInGroup={isFirstInGroup}
                     previousMessageId={realPrevId}
+                    onJumpToMessage={jumpToMessage}
                   />
                 )}
               </React.Fragment>

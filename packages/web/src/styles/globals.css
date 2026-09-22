@@ -340,6 +340,38 @@
     background-color: rgba(255, 255, 255, 0.15);
     border-radius: 100px;
   }
+
+  .message-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+    scrollbar-gutter: stable;
+  }
+
+  .message-scrollbar::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .message-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .message-scrollbar::-webkit-scrollbar-thumb {
+    min-height: 36px;
+    background-color: rgba(255, 255, 255, 0.28);
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+  }
+
+  .message-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.48);
+  }
+}
+
+@media (pointer: coarse) {
+  .message-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
 }
 
 /* ── Emoji Mart Overrides ── */

@@ -13,6 +13,24 @@
       "confirmDelete": "Löschen bestätigen"
     }
   },
+  "typing": {
+    "one": "{{name}} schreibt…",
+    "two": "{{first}} und {{second}} schreiben…",
+    "many": "Mehrere Personen schreiben…"
+  },
+  "reply": {
+    "jumpTo": "Zur Nachricht von {{name}} springen",
+    "unavailable": "Ursprüngliche Nachricht nicht verfügbar",
+    "text": "Nachricht",
+    "gif": "GIF-Animation",
+    "image": "Bild",
+    "video": "Video",
+    "audio": "Audio",
+    "file": "Datei",
+    "link": "Link",
+    "moreAttachments_one": "+{{count}} Anhang",
+    "moreAttachments_other": "+{{count}} Anhänge"
+  },
   "list": {
     "noHistoryPermission": "Du hast keine Berechtigung, den Nachrichtenverlauf dieses Kanals zu sehen",
     "loading": "Nachrichten werden geladen",

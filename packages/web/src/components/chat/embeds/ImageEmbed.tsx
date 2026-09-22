@@ -8,6 +8,7 @@ interface ImageEmbedProps {
 
 export function ImageEmbed({ embed }: ImageEmbedProps) {
   const openImagePreview = useUIStore((s) => s.openImagePreview);
+  const isMobile = useUIStore((s) => s.isMobile);
   const imageUrl = embed.image ?? embed.url;
   const { width, height } = embed;
 
@@ -20,10 +21,23 @@ export function ImageEmbed({ embed }: ImageEmbedProps) {
         <img
           src={imageUrl}
           alt={embed.title ?? ''}
-          className="w-full h-full max-w-[400px] max-h-[300px] object-contain rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+          role="button"
+          tabIndex={0}
+          draggable={false}
+          className={`w-full h-full max-w-[400px] max-h-[300px] object-contain rounded-lg hover:opacity-90 transition-opacity ${isMobile ? 'cursor-pointer' : 'cursor-zoom-in'}`}
           loading="lazy"
           referrerPolicy="no-referrer"
-          onClick={() => openImagePreview(imageUrl)}
+          onClick={() => {
+            if (isMobile) openImagePreview(imageUrl);
+          }}
+          onDoubleClick={() => {
+            if (!isMobile) openImagePreview(imageUrl);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            openImagePreview(imageUrl);
+          }}
         />
       </div>
     </div>

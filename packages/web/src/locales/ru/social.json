@@ -71,7 +71,12 @@
     "memberSince": "Участник с",
     "sendMessage": "Написать сообщение",
     "viewFull": "Открыть полный профиль",
-    "addFriend": "Добавить в друзья"
+    "addFriend": "Добавить в друзья",
+    "activity": {
+      "title": "Активность",
+      "playing": "Играет в {{name}}",
+      "listening": "Слушает через {{name}}"
+    }
   },
   "activity": {
     "title": "Сейчас активны",

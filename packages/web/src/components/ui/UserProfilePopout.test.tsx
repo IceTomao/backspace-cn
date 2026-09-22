@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import type { User } from '@backspace/shared';
+import type { Activity, User } from '@backspace/shared';
+
+const activityState = vi.hoisted(() => ({ userActivities: new Map<string, unknown[]>() }));
 
 // The popout reaches into the space store (origin routing), the API client and
 // the federated-mutuals loader. None of that is under test here — stub it so the
@@ -21,6 +23,9 @@ vi.mock('../../utils/mutuals', () => ({
   loadFederatedMutuals: vi.fn().mockResolvedValue({ mutualFriends: [], mutualSpaces: [] }),
 }));
 vi.mock('../../utils/userViewLookup', () => ({ useCanonicalUserView: (u: User) => u }));
+vi.mock('../../stores/activityStore', () => ({
+  useActivityStore: (selector: (state: typeof activityState) => unknown) => selector(activityState),
+}));
 
 import { UserProfilePopout } from './UserProfilePopout';
 import { useUIStore } from '../../stores/uiStore';
@@ -63,6 +68,7 @@ describe('UserProfilePopout', () => {
       modalData: {},
       userProfilePopout: { user: null, anchor: null, placement: 'right' },
     });
+    activityState.userActivities = new Map();
     // jsdom has no layout: give every element the card's real measured size so
     // the popout can place itself off its own dimensions.
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
@@ -125,5 +131,25 @@ describe('UserProfilePopout', () => {
     const top = parseFloat(card.style.top);
     expect(top).toBeGreaterThanOrEqual(8);
     expect(top + CARD_H).toBeLessThanOrEqual(700 - 8);
+  });
+
+  it('shows complete game and music details in the profile card', () => {
+    const activities: Activity[] = [
+      {
+        type: 'playing', name: 'League of Legends', details: '使用：亚索',
+        state: '排位单人/双人 · 游戏中', timestamps: { start: Date.now() - 60_000 },
+      },
+      { type: 'listening', name: 'Spotify', details: '长歌名', state: '歌手 · 专辑' },
+    ];
+    activityState.userActivities = new Map([['u-1', activities]]);
+
+    renderCard(anchorAt(300, 200));
+
+    expect(screen.getByText('Playing League of Legends')).toBeInTheDocument();
+    expect(screen.getByText('使用：亚索')).toBeInTheDocument();
+    expect(screen.getByText('排位单人/双人 · 游戏中')).toBeInTheDocument();
+    expect(screen.getByText('Listening with Spotify')).toBeInTheDocument();
+    expect(screen.getByText('长歌名')).toBeInTheDocument();
+    expect(screen.getByText('歌手 · 专辑')).toBeInTheDocument();
   });
 });

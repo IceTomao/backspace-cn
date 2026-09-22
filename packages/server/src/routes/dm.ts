@@ -102,8 +102,9 @@ export function fetchDmReactionsForMessages(dmMessageIds: string[]): Map<string,
  * a message belonging to a different conversation — including for rows written
  * before the create-time guard existed.
  *
- * Returns a map from reply-target id to its shallow hydration (no attachments,
- * embeds or reactions — reply previews do not render them).
+ * Returns a map from reply-target id to its shallow hydration. Attachments and
+ * embeds are included for rich reply previews; reactions and nested replies are
+ * intentionally omitted.
  */
 export function fetchDmReplyToMessages(
   dmChannelId: string,
@@ -130,6 +131,18 @@ export function fetchDmReplyToMessages(
     : [];
   const replyUserMap = new Map(replyUsers.map(u => [u.id, u]));
 
+  const replyMsgIds = replyMessages.map(m => m.id);
+  const replyAttachments = replyMsgIds.length > 0
+    ? db.select().from(schema.attachments).where(inArray(schema.attachments.dmMessageId, replyMsgIds)).all()
+    : [];
+  const replyAttMap = new Map<string, (typeof schema.attachments.$inferSelect)[]>();
+  for (const att of replyAttachments) {
+    const mid = att.dmMessageId ?? '';
+    if (!replyAttMap.has(mid)) replyAttMap.set(mid, []);
+    replyAttMap.get(mid)!.push(att);
+  }
+  const replyEmbedMap = fetchDmEmbedsForMessages(replyMsgIds);
+
   const map = new Map<string, DmMessageWithUser>();
   for (const rm of replyMessages) {
     const rUser = replyUserMap.get(rm.userId);
@@ -144,8 +157,23 @@ export function fetchDmReplyToMessages(
       editedAt: rm.editedAt,
       createdAt: rm.createdAt,
       user: sanitizeUser(rUser),
-      attachments: [],
-      embeds: [],
+      attachments: (replyAttMap.get(rm.id) ?? []).map(a => ({
+        id: a.id,
+        messageId: a.dmMessageId ?? rm.id,
+        filename: a.filename,
+        originalName: a.originalName,
+        mimetype: a.mimetype,
+        size: a.size,
+        thumbnailFilename: a.thumbnailFilename ?? null,
+        width: a.width ?? null,
+        height: a.height ?? null,
+        duration: a.duration ?? null,
+        playable: a.playable ?? null,
+        federationStatus: a.federationStatus ?? null,
+        federationMeta: a.federationMeta ?? null,
+        createdAt: a.createdAt,
+      })),
+      embeds: (replyEmbedMap.get(rm.id) ?? []).map(embedRowToEmbed),
       reactions: [],
     });
   }

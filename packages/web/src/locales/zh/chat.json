@@ -13,6 +13,24 @@
       "confirmDelete": "确认删除"
     }
   },
+  "typing": {
+    "one": "{{name}}正在输入…",
+    "two": "{{first}}和{{second}}正在输入…",
+    "many": "多人正在输入…"
+  },
+  "reply": {
+    "jumpTo": "跳转到{{name}}的消息",
+    "unavailable": "原消息不可用",
+    "text": "消息",
+    "gif": "GIF 动图",
+    "image": "图片",
+    "video": "视频",
+    "audio": "音频",
+    "file": "文件",
+    "link": "链接",
+    "moreAttachments_one": "+{{count}} 个附件",
+    "moreAttachments_other": "+{{count}} 个附件"
+  },
   "list": {
     "noHistoryPermission": "您无权查看此频道中的消息历史记录",
     "loading": "正在加载消息",

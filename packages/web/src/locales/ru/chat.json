@@ -13,6 +13,26 @@
       "confirmDelete": "Подтвердить удаление"
     }
   },
+  "typing": {
+    "one": "{{name}} печатает…",
+    "two": "{{first}} и {{second}} печатают…",
+    "many": "Несколько человек печатают…"
+  },
+  "reply": {
+    "jumpTo": "Перейти к сообщению пользователя {{name}}",
+    "unavailable": "Исходное сообщение недоступно",
+    "text": "Сообщение",
+    "gif": "GIF-анимация",
+    "image": "Изображение",
+    "video": "Видео",
+    "audio": "Аудио",
+    "file": "Файл",
+    "link": "Ссылка",
+    "moreAttachments_one": "+{{count}} вложение",
+    "moreAttachments_few": "+{{count}} вложения",
+    "moreAttachments_many": "+{{count}} вложений",
+    "moreAttachments_other": "+{{count}} вложения"
+  },
   "list": {
     "noHistoryPermission": "У вас нет права просматривать историю сообщений в этом канале",
     "loading": "Загрузка сообщений",

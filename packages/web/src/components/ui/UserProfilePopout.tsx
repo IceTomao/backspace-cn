@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import type { User } from '@backspace/shared';
 import { Avatar } from '../ui/Avatar';
 import { Username } from '../ui/Username';
+import { ProfileActivityDetails } from './ProfileActivityDetails';
 import { useSpaceStore, getApiForOrigin, resolveUserOrigin } from '../../stores/spaceStore';
 import { api } from '../../api/client';
 import { useUIStore } from '../../stores/uiStore';
@@ -209,6 +210,8 @@ export function UserProfilePopout({ user: propUser, onClose, anchor, placement =
             </div>
           </>
         )}
+
+        <ProfileActivityDetails user={user} />
 
         <div className="border-t border-white/[0.06] my-3" />
 

@@ -13,6 +13,24 @@
       "confirmDelete": "Confirm delete"
     }
   },
+  "typing": {
+    "one": "{{name}} is typing…",
+    "two": "{{first}} and {{second}} are typing…",
+    "many": "Several people are typing…"
+  },
+  "reply": {
+    "jumpTo": "Jump to {{name}}'s message",
+    "unavailable": "Original message unavailable",
+    "text": "Message",
+    "gif": "GIF",
+    "image": "Image",
+    "video": "Video",
+    "audio": "Audio",
+    "file": "File",
+    "link": "Link",
+    "moreAttachments_one": "+{{count}} attachment",
+    "moreAttachments_other": "+{{count}} attachments"
+  },
   "list": {
     "noHistoryPermission": "You do not have permission to view message history in this channel",
     "loading": "Loading messages",

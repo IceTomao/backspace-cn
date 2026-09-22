@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import type { User } from '@backspace/shared';
 import { Avatar } from '../ui/Avatar';
 import { Username } from '../ui/Username';
+import { ProfileActivityDetails } from '../ui/ProfileActivityDetails';
 import { useUIStore } from '../../stores/uiStore';
 import { useSpaceStore, getApiForOrigin, resolveUserOrigin } from '../../stores/spaceStore';
 import { api } from '../../api/client';
@@ -353,6 +354,8 @@ export function UserProfileModal() {
                   </div>
                 </div>
               )}
+
+              <ProfileActivityDetails user={user} />
 
               {/* Member Since */}
               <div>

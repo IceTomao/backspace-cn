@@ -199,6 +199,24 @@ describe('DM reply targets are confined to their own channel', () => {
 
     it('accepts a reply target in the same channel and hydrates it', async () => {
       const targetId = seedMessage(DM_A, 'victim', 'in-channel target');
+      testDb.insert(schema.attachments).values({
+        id: 'dm-reply-image',
+        dmMessageId: targetId,
+        uploaderId: 'victim',
+        filename: 'stored-image.png',
+        originalName: '中文图片.png',
+        mimetype: 'image/png',
+        size: 42,
+        createdAt: Date.now(),
+      }).run();
+      testDb.insert(schema.embeds).values({
+        id: 'dm-reply-embed',
+        dmMessageId: targetId,
+        url: 'https://example.test/article',
+        embedType: 'generic',
+        title: '引用链接',
+        createdAt: Date.now(),
+      }).run();
 
       const res = await app.inject({
         method: 'POST',
@@ -211,6 +229,8 @@ describe('DM reply targets are confined to their own channel', () => {
       expect(body.replyToId).toBe(targetId);
       expect(body.replyTo?.id).toBe(targetId);
       expect(body.replyTo?.content).toBe('in-channel target');
+      expect(body.replyTo?.attachments?.[0]?.originalName).toBe('中文图片.png');
+      expect(body.replyTo?.embeds?.[0]?.title).toBe('引用链接');
     });
   });
 
