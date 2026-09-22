@@ -1,11 +1,11 @@
-import { execFile } from 'child_process';
 import fs from 'fs';
 import https from 'https';
 import path from 'path';
 import { app } from 'electron';
 import type { ActivityProvider, DetectedActivity } from './activityTypes';
 import { updateLeagueMatchContext, type LeagueChampionPresence, type LeagueMatchContext } from './leagueMatchContext';
-import { parseLeagueProcessRows, resolveLcuConnection, type LcuConnection, type LeagueProcessSnapshot } from './leagueConnection';
+import { resolveLcuConnection, type LcuConnection, type LeagueProcessSnapshot } from './leagueConnection';
+import { readLeagueProcessesNative } from './leagueProcessNative';
 
 interface ChampionRecord { key: string; name: string; image?: { full?: string } }
 
@@ -15,6 +15,7 @@ const POLL_INTERVAL_MS = 3_000;
 let processScanWarned = false;
 let connectionWarned = false;
 let noProcessWarned = false;
+let gameClientWarned = false;
 const lcuFailureWarned = new Set<string>();
 const QUEUES: Record<number, string> = {
   0: '自定义模式', 400: '匹配模式', 420: '排位单人/双人', 430: '普通征召',
@@ -24,24 +25,10 @@ const QUEUES: Record<number, string> = {
   1710: '斗魂竞技场', 1810: '斗魂竞技场', 1900: '极限闪击', 2000: '训练模式',
 };
 
-function execPowerShell(command: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true, timeout: 5_000 }, (error, stdout) => {
-      if (error) reject(error); else resolve(stdout);
-    });
-  });
-}
-
 async function readProcesses(): Promise<{ clients: LeagueProcessSnapshot[]; hasGame: boolean }> {
   if (process.platform !== 'win32') return { clients: [], hasGame: false };
-  // Get-CimInstance already exposes CreationDate as a DateTime. The old code
-  // passed it through ManagementDateTimeConverter (which expects a DMTF string)
-  // and consequently threw on every matching League process.
-  const command = "$n=@('LeagueClient.exe','LeagueClientUx.exe','League of Legends.exe','LeagueofLegends.exe'); Get-CimInstance Win32_Process | Where-Object {$n -contains $_.Name} | ForEach-Object {[PSCustomObject]@{name=$_.Name;commandLine=$_.CommandLine;executablePath=$_.ExecutablePath;startedAt=([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress";
   try {
-    const output = (await execPowerShell(command)).trim();
-    if (!output) return { clients: [], hasGame: false };
-    const rows = parseLeagueProcessRows(output);
+    const rows = await readLeagueProcessesNative();
     processScanWarned = false;
     const clients = rows.filter((row) => CLIENT_PROCESSES.has(row.name.toLowerCase()));
     return { clients, hasGame: rows.some((row) => GAME_PROCESSES.has(row.name.toLowerCase())) };
@@ -80,6 +67,50 @@ function warnLcuFailure(endpoint: string, reason: string): void {
   if (lcuFailureWarned.has(endpoint)) return;
   lcuFailureWarned.add(endpoint);
   console.warn(`[league] LCU request failed for ${endpoint}: ${reason}`);
+}
+
+interface LiveGameData {
+  activePlayer?: { summonerName?: string };
+  gameData?: { gameMode?: string; gameType?: string; mapName?: string };
+  playerList?: Array<{ summonerName?: string; championName?: string }>;
+}
+
+export interface LiveGamePresence {
+  championName?: string;
+  mode?: string;
+}
+
+/** Extract the local champion and a readable mode from Riot's in-game API. */
+export function parseLiveGamePresence(data: LiveGameData): LiveGamePresence {
+  const activeName = data.activePlayer?.summonerName;
+  const player = data.playerList?.find((candidate) => candidate.summonerName === activeName);
+  const game = data.gameData;
+  let mode: string | undefined;
+  if (game?.gameType === 'PRACTICE_GAME') mode = '训练模式';
+  else if (game?.gameMode === 'ARAM' || game?.mapName === 'Map12') mode = '极地大乱斗';
+  else if (game?.gameMode === 'CLASSIC' || game?.mapName === 'Map11') mode = '经典模式';
+  else if (game?.gameMode) mode = game.gameMode;
+  return { championName: player?.championName, mode };
+}
+
+function liveGameRequest<T>(endpoint: string): Promise<T | null> {
+  return new Promise((resolve) => {
+    const request = https.request({
+      hostname: '127.0.0.1', port: 2999, path: endpoint, method: 'GET',
+      rejectUnauthorized: false, timeout: 1_500,
+    }, (response) => {
+      if (response.statusCode !== 200) { response.resume(); resolve(null); return; }
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      response.on('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T); }
+        catch { resolve(null); }
+      });
+    });
+    request.on('timeout', () => { request.destroy(); resolve(null); });
+    request.on('error', () => resolve(null));
+    request.end();
+  });
 }
 
 export function createLeagueActivity(start: number): DetectedActivity {
@@ -140,8 +171,28 @@ export class LeagueProvider implements ActivityProvider {
       connectionWarned = true;
       console.warn('[league] LOL detected, but no LCU connection was found; game phase and champion details will be unavailable. Run the desktop client at the same privilege level as League or expose the LeagueClient lockfile.');
     }
-    if (connection) await this.enrich(next, connection);
+    if (connection) {
+      await this.enrich(next, connection);
+    } else if (hasGame) {
+      await this.enrichFromLiveGame(next);
+    }
     this.publish(next, onChange);
+  }
+
+  private async enrichFromLiveGame(activity: DetectedActivity): Promise<void> {
+    const data = await liveGameRequest<LiveGameData>('/liveclientdata/allgamedata');
+    if (!data) {
+      if (!gameClientWarned) {
+        gameClientWarned = true;
+        console.warn('[league] in-game API unavailable on 127.0.0.1:2999; publishing base League activity');
+      }
+      return;
+    }
+    gameClientWarned = false;
+    const presence = parseLiveGamePresence(data);
+    this.matchContext = updateLeagueMatchContext(this.matchContext, 'InProgress', presence.mode, presence.championName ? { name: presence.championName } : undefined);
+    activity.state = [this.matchContext.mode, '游戏中'].filter(Boolean).join(' · ') || undefined;
+    if (this.matchContext.champion?.name) activity.details = `使用：${this.matchContext.champion.name}`;
   }
 
   private async enrich(activity: DetectedActivity, connection: LcuConnection): Promise<void> {

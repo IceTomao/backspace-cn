@@ -15,9 +15,11 @@ export interface LeagueProcessSnapshot {
 
 /** Parse the credentials exposed on LeagueClient's command line. */
 export function parseLcuCommandLine(commandLine: string): LcuConnection | null {
-  const port = /(?:^|\s)--app-port=(?:"([0-9]+)"|([^\s"]+))/i.exec(commandLine);
-  const token = /(?:^|\s)--remoting-auth-token=(?:"([^"]+)"|([^\s"]+))/i.exec(commandLine);
-  const portValue = port?.[1] ?? port?.[2];
+  // LeagueClientUx on the Tencent client quotes each complete argument:
+  // "--app-port=3611". Also accept the standard value-only quoted form.
+  const port = /(?:^|\s)"?--app-port="?([0-9]+)"?"?/i.exec(commandLine);
+  const token = /(?:^|\s)"?--remoting-auth-token=(?:"([^"]+)"|([^\s"]+))"?/i.exec(commandLine);
+  const portValue = port?.[1];
   const tokenValue = token?.[1] ?? token?.[2];
   if (!portValue || !tokenValue) return null;
   const portNumber = Number(portValue);
