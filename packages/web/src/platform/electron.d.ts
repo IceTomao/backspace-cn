@@ -156,6 +156,10 @@ interface BackspaceElectronAPI {
   // Activity detection (game/app process scanning)
   onActivityDetected: (callback: (activity: unknown) => void) => (() => void);
   getCurrentActivity: () => Promise<unknown>;
+  onActivitiesDetected?: (callback: (activities: unknown[]) => void) => (() => void);
+  getCurrentActivities?: () => Promise<unknown>;
+  getActivityPreferences?: () => Promise<{ showGames: boolean; showMusic: boolean }>;
+  setActivityPreferences?: (preferences: { showGames?: boolean; showMusic?: boolean }) => Promise<{ showGames: boolean; showMusic: boolean }>;
 
   // Keybind support
   getKeybindPortalStatus?: () => Promise<KeybindPortalStatus | null>;

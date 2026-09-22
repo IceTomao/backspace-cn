@@ -270,7 +270,11 @@
     "activity": {
       "sectionTitle": "Aktivitätsstatus",
       "label": "Aktivitätsstatus teilen",
-      "description": "Andere dürfen sehen, was du gerade machst, etwa welche Spiele du spielst oder welche Musik du hörst."
+      "description": "Andere dürfen sehen, was du gerade machst, etwa welche Spiele du spielst oder welche Musik du hörst.",
+      "gamesLabel": "Spielaktivität teilen",
+      "gamesDescription": "Teile Spiele, Spielmodi und Spielzeit.",
+      "musicLabel": "Musikaktivität teilen",
+      "musicDescription": "Teile laufende Titel und Interpret:innen."
     }
   },
   "connections": {

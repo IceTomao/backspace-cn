@@ -28,4 +28,17 @@ describe('ActivityCard', () => {
     expect(screen.getByText('Escape from Tarkov')).toBeInTheDocument();
     expect(screen.getByText('Прошло 32 мин.')).toBeInTheDocument();
   });
+
+  it('renders game details with music as a secondary activity', () => {
+    const game: Activity = {
+      type: 'playing', name: 'League of Legends', details: '使用：亚索', state: '排位单人/双人 · 游戏中', timestamps: { start: Date.now() - 60_000 },
+    };
+    const music: Activity = { type: 'listening', name: 'Spotify', details: 'Blinding Lights', state: 'The Weeknd · After Hours' };
+
+    render(<ActivityCard activities={[game, music]} />);
+
+    expect(screen.getByText('使用：亚索')).toBeInTheDocument();
+    expect(screen.getByText('排位单人/双人 · 游戏中')).toBeInTheDocument();
+    expect(screen.getByText('Spotify · Blinding Lights · The Weeknd · After Hours')).toBeInTheDocument();
+  });
 });

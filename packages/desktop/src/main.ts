@@ -18,7 +18,9 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { pathToFileURL } from 'url';
-import { startActivityDetection, stopActivityDetection, getCurrentActivity } from './activityDetector';
+import { startActivityDetection, stopActivityDetection, getCurrentActivities } from './activityDetector';
+import { loadActivityPreferences, registerActivityPreferenceHandlers, type ActivityPreferences } from './activityPreferences';
+import type { DesktopActivity } from './activityTypes';
 import { KeybindManager } from './keybindManager';
 import { deriveStartMinimizedFromArgs, parseExecPathFromDesktopFile, shouldReapplyAppImage } from './autoLaunch';
 import {
@@ -98,6 +100,21 @@ app.setName('Backspace');
 }
 
 let mainWindow: BrowserWindow | null = null;
+let detectedActivities: DesktopActivity[] = [];
+let activityPreferences: ActivityPreferences = { showGames: true, showMusic: true };
+
+function publishedActivities(): DesktopActivity[] {
+  return detectedActivities.filter((activity) => activity.type === 'listening'
+    ? activityPreferences.showMusic
+    : activityPreferences.showGames);
+}
+
+function publishActivities(): void {
+  const activities = publishedActivities();
+  mainWindow?.webContents.send('activities-detected', activities);
+  // Keep the legacy bridge functional for installed web clients during a shell-only update.
+  mainWindow?.webContents.send('activity-detected', activities[0] ?? null);
+}
 const keybindManager = new KeybindManager();
 let tray: Tray | null = null;
 let isQuitting = false;
@@ -1547,11 +1564,18 @@ if (!gotTheLock) {
     initAutoUpdater();
 
     // ─── Activity Detection ────────────────────────────────────────────────
-    startActivityDetection((activity) => {
-      mainWindow?.webContents.send('activity-detected', activity);
+    activityPreferences = loadActivityPreferences();
+    registerActivityPreferenceHandlers(ipcMain, (preferences) => {
+      activityPreferences = preferences;
+      publishActivities();
+    });
+    startActivityDetection((activities) => {
+      detectedActivities = activities;
+      publishActivities();
     });
 
-    ipcMain.handle('get-current-activity', () => getCurrentActivity());
+    ipcMain.handle('get-current-activities', () => publishedActivities());
+    ipcMain.handle('get-current-activity', () => getCurrentActivities()[0] ?? null);
 
     // Linux/AppImage path-refresh ONLY. On Windows and macOS the OS is the source
     // of truth for openAtLogin (Task 4) and we must not override user changes made

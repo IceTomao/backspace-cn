@@ -379,6 +379,15 @@ contextBridge.exposeInMainWorld('backspace', {
     return () => { ipcRenderer.removeListener('activity-detected', handler); };
   },
   getCurrentActivity: () => ipcRenderer.invoke('get-current-activity'),
+  onActivitiesDetected: (callback: (activities: unknown[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, activities: unknown[]) => callback(activities);
+    ipcRenderer.on('activities-detected', handler);
+    return () => { ipcRenderer.removeListener('activities-detected', handler); };
+  },
+  getCurrentActivities: () => ipcRenderer.invoke('get-current-activities'),
+  getActivityPreferences: () => ipcRenderer.invoke('get-activity-preferences'),
+  setActivityPreferences: (preferences: { showGames?: boolean; showMusic?: boolean }) =>
+    ipcRenderer.invoke('set-activity-preferences', preferences),
 
   // Keybind support
   getKeybindPortalStatus: () => ipcRenderer.invoke('keybind-portal-status'),

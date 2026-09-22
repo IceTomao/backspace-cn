@@ -30,6 +30,7 @@ files:
   - "!**/node_modules/uiohook-napi/bin/**"
 asarUnpack:
   - "**/*.node"
+  - "resources/windows-media.cs"
   - "**/node_modules/@img/sharp-*/**/*"
 npmRebuild: false
 # afterPack also flips Electron security fuses (RunAsNode, EnableNodeCliInspectArguments,

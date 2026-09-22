@@ -3,6 +3,9 @@ import type { Activity } from '@backspace/shared';
 import { wsSendAll } from '../hooks/useWebSocket';
 
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
+let lastPushAt = 0;
+let pendingActivities: Activity[] | null = null;
+const ACTIVITY_PUSH_INTERVAL_MS = 3_100;
 
 interface ActivityState {
   userActivities: Map<string, Activity[]>;
@@ -60,6 +63,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ showActivity: show });
     if (!show) {
       if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+      pendingActivities = null;
       wsSendAll({ type: 'activity_update', activities: [] });
       set({ myActivities: null });
     }
@@ -68,15 +72,24 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   pushActivities: (activities) => {
     if (!get().showActivity) return;
     set({ myActivities: activities });
-    if (pushTimer) clearTimeout(pushTimer);
-    pushTimer = setTimeout(() => {
-      wsSendAll({ type: 'activity_update', activities });
+    pendingActivities = activities;
+    const push = () => {
+      if (!pendingActivities) return;
+      wsSendAll({ type: 'activity_update', activities: pendingActivities });
+      pendingActivities = null;
+      lastPushAt = Date.now();
       pushTimer = null;
-    }, 5000);
+    };
+    if (pushTimer) return;
+    const wait = Math.max(0, lastPushAt + ACTIVITY_PUSH_INTERVAL_MS - Date.now());
+    if (wait === 0) push();
+    else pushTimer = setTimeout(push, wait);
   },
 
   reset: () => {
     if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+    pendingActivities = null;
+    lastPushAt = 0;
     set({ userActivities: new Map(), showActivity: true, myActivities: null });
   },
 }));
