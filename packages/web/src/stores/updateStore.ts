@@ -35,6 +35,7 @@ export interface UpdateStoreState {
   /** Subscribes to the main process. Returns a teardown. Safe to call twice. */
   initialize: () => () => void;
   dismiss: () => void;
+  download: () => void;
   install: () => void;
   openDownloadPage: () => void;
   checkNow: () => void;
@@ -201,6 +202,20 @@ export const useUpdateStore = create<UpdateStoreState>((set, get) => ({
     window.backspace?.installUpdate();
   },
 
+  download: () => {
+    const snapshot = get().snapshot;
+    if (snapshot?.capability !== 'auto' || snapshot.status.phase !== 'available') return;
+    const api = window.backspace;
+    if (api?.downloadUpdate) {
+      api.downloadUpdate();
+      return;
+    }
+    // Compatibility with the first snapshot-capable desktop bridge. The new
+    // main process interprets this legacy action as an in-app download while
+    // an auto-capable update is waiting for confirmation.
+    api?.openReleasePage?.();
+  },
+
   openDownloadPage: () => {
     const api = window.backspace;
     if (api?.openReleasePage) {
@@ -209,7 +224,7 @@ export const useUpdateStore = create<UpdateStoreState>((set, get) => ({
     }
     // Older host with no dedicated channel. The renderer's window.open is
     // intercepted by setWindowOpenHandler and routed to the default browser.
-    window.open('https://github.com/TheZwiss/backspace/releases/latest', '_blank', 'noopener');
+    window.open('https://github.com/IceTomao/backspace-cn/releases/latest', '_blank', 'noopener');
   },
 
   checkNow: () => {

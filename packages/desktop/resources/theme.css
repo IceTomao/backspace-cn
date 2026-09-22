@@ -150,12 +150,13 @@
       pre.font-mono :is(.tag, .property, .attr-name, .deleted) { color: #a43a41 !important; }
       code.bg-\[\#111115\] { background: #eef0f5 !important; }
 
-      /* The renderer cannot distinguish its pale fallback from an identical
-         role color. Keep that foreground intact on a small dark backing. */
-      [id^="msg-"] span:is([style="color: rgb(216, 216, 222);"], [style="color: rgb(253, 164, 175);"]):is(.font-semibold, .font-bold) {
-        background-color: #34343e !important;
-        border-radius: 2px;
-        box-decoration-break: clone;
+      /* Message names use dark equivalents of the web client's pale dark-theme
+         fallback and pink role color, without adding a label-like backing. */
+      [id^="msg-"] span[style="color: rgb(216, 216, 222);"]:is(.font-semibold, .font-bold) {
+        color: rgb(var(--text-primary)) !important;
+      }
+      [id^="msg-"] span[style="color: rgb(253, 164, 175);"]:is(.font-semibold, .font-bold) {
+        color: rgb(var(--accent-rose)) !important;
       }
 
       /* Local picker and recovery pages have their own hard-coded palette. */

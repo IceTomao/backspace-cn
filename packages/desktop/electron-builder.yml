@@ -30,6 +30,7 @@ files:
   - "!**/node_modules/uiohook-napi/bin/**"
 asarUnpack:
   - "**/*.node"
+  - "**/node_modules/@img/sharp-*/**/*"
 npmRebuild: false
 # afterPack also flips Electron security fuses (RunAsNode, EnableNodeCliInspectArguments,
 # OnlyLoadAppFromAsar) via @electron/fuses, not via a top-level `electronFuses:` key here.
@@ -39,7 +40,10 @@ npmRebuild: false
 # is a release-pipeline change that has to be checked on all six shipped artifacts.
 # See scripts/afterPack.js and docs/systems/desktop-security.md.
 afterPack: ./scripts/afterPack.js
-publish: null
+publish:
+  provider: github
+  owner: IceTomao
+  repo: backspace-cn
 protocols:
   - name: Backspace
     schemes:

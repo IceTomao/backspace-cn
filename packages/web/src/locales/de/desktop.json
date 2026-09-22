@@ -3,8 +3,8 @@
     "laterHint": "Du kannst das Update später in den Einstellungen unter Desktop installieren",
     "dismiss": "Dieses Update ausblenden",
     "failed": {
-      "title": "Update konnte nicht installiert werden",
-      "body": "Backspace {{version}} wurde heruntergeladen, aber die Installation ist fehlgeschlagen. Du kannst es stattdessen von Hand installieren."
+      "title": "Update fehlgeschlagen",
+      "body": "Backspace {{version}} konnte nicht heruntergeladen oder installiert werden. Du kannst das Installationsprogramm stattdessen von GitHub Releases herunterladen."
     },
     "ready": {
       "title": "Update bereit",
@@ -12,6 +12,8 @@
     },
     "available": {
       "title": "Backspace {{version}} ist verfügbar",
+      "autoBody": "Das Update kann heruntergeladen werden und wird nach einem Neustart von Backspace installiert.",
+      "autoBodyWithCurrent": "Du verwendest {{currentVersion}}. Das Update kann heruntergeladen werden und wird nach einem Neustart von Backspace installiert.",
       "body": "Dieser Build kann sich nicht selbst aktualisieren. Lade die neue Version herunter, um darauf umzusteigen.",
       "bodyWithCurrent": "Du verwendest {{currentVersion}}. Dieser Build kann sich nicht selbst aktualisieren. Lade die neue Version herunter, um darauf umzusteigen."
     },

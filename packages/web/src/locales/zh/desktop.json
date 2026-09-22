@@ -3,8 +3,8 @@
     "laterHint": "您可以稍后在“设置 > 桌面”中更新。",
     "dismiss": "忽略此更新",
     "failed": {
-      "title": "无法安装更新",
-      "body": "Backspace {{version}}已下载，但安装失败。您可以改为手动安装。"
+      "title": "更新失败",
+      "body": "无法下载或安装 Backspace {{version}}。您可以改为从 GitHub Releases 手动下载安装包。"
     },
     "ready": {
       "title": "已准备好更新",
@@ -12,6 +12,8 @@
     },
     "available": {
       "title": "Backspace {{version}}可用",
+      "autoBody": "新版本已可下载，下载完成后重启 Backspace 即可安装。",
+      "autoBodyWithCurrent": "当前版本为 {{currentVersion}}。新版本已可下载，下载完成后重启 Backspace 即可安装。",
       "body": "此版本不支持自动更新，请下载新版本并手动安装。",
       "bodyWithCurrent": "当前版本为 {{currentVersion}}。此版本不支持自动更新，请下载新版本并手动安装。"
     },

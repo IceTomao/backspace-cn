@@ -8,6 +8,7 @@ import { useUIStore } from '../../stores/uiStore';
 interface HostStubs {
   dismissUpdate: ReturnType<typeof vi.fn>;
   installUpdate: ReturnType<typeof vi.fn>;
+  downloadUpdate: ReturnType<typeof vi.fn>;
   openReleasePage: ReturnType<typeof vi.fn>;
 }
 
@@ -22,6 +23,7 @@ function installHost(initial: unknown, omit: string[] = []): void {
   stubs = {
     dismissUpdate: vi.fn(),
     installUpdate: vi.fn(),
+    downloadUpdate: vi.fn(),
     openReleasePage: vi.fn(),
   };
   const api: Record<string, unknown> = {
@@ -34,6 +36,7 @@ function installHost(initial: unknown, omit: string[] = []): void {
     },
     dismissUpdate: stubs.dismissUpdate,
     installUpdate: stubs.installUpdate,
+    downloadUpdate: stubs.downloadUpdate,
     openReleasePage: stubs.openReleasePage,
     checkForUpdates: vi.fn(),
     onUpdateDownloaded: vi.fn(),
@@ -116,6 +119,21 @@ describe('UpdateToast, installable build', () => {
   });
 });
 
+describe('UpdateToast, installable update waiting for confirmation', () => {
+  it('downloads in-app instead of opening the release page', async () => {
+    installHost({
+      capability: 'auto',
+      dismissedVersion: null,
+      status: { phase: 'available', version: '1.0.4' },
+    });
+    render(<UpdateToast />);
+    expect(await screen.findByText(/ready to download/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Download' }));
+    expect(stubs.downloadUpdate).toHaveBeenCalledOnce();
+    expect(stubs.openReleasePage).not.toHaveBeenCalled();
+  });
+});
+
 describe('UpdateToast, latest event wins', () => {
   it('replaces a ready state with a later failure instead of hiding it behind one', async () => {
     // The reported defect: "Update ready" masked "Update failed" until the user
@@ -134,7 +152,7 @@ describe('UpdateToast, latest event wins', () => {
       status: { phase: 'failed', version: '1.0.4', message: 'Squirrel refused the update' },
     });
 
-    expect(await screen.findByText('Update could not be installed')).toBeInTheDocument();
+    expect(await screen.findByText('Update failed')).toBeInTheDocument();
     expect(screen.queryByText('Update ready')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument();
   });

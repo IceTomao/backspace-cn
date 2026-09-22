@@ -416,3 +416,27 @@ describe('manual-download update state in the menus', () => {
     expect(ids).not.toContain('download-update');
   });
 });
+
+describe('confirmation-first automatic update state in the menus', () => {
+  it('offers a versioned Download item wired to the in-app action', () => {
+    const download = vi.fn();
+    const openReleases = vi.fn();
+    const items = buildTrayMenuTemplate(
+      defaultState({ updateState: 'available-auto', updateVersion: '1.3.3' }),
+      { onDownloadUpdate: download, onOpenReleases: openReleases },
+    );
+    const item = items.find((entry) => entry.id === 'download-update');
+    expect(item?.label).toBe('Download Backspace 1.3.3…');
+    (item?.click as () => void)();
+    expect(download).toHaveBeenCalledOnce();
+    expect(openReleases).not.toHaveBeenCalled();
+  });
+
+  it('disables another update check while confirmation is pending', () => {
+    const items = buildTrayMenuTemplate(defaultState({ updateState: 'available-auto' }));
+    expect(items.find((entry) => entry.id === 'check-for-updates')).toMatchObject({
+      label: 'Update Available',
+      enabled: false,
+    });
+  });
+});

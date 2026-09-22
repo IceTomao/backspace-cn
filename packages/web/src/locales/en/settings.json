@@ -372,7 +372,7 @@
       "upToDate": "You are on the latest version",
       "available": "Version {{version}} is available",
       "readyToInstall": "Version {{version}} is ready to install",
-      "installFailed": "Version {{version}} could not be installed",
+      "installFailed": "Update to version {{version}} failed",
       "checkFailed": "The last update check failed",
       "idle": "Check for new versions of the desktop app",
       "external": "Updates are installed through your Flatpak software manager",

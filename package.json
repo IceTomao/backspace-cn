@@ -5,10 +5,10 @@
   "description": "Open, self-hosted communication platform \u2014 text, voice, video, and federation",
   "license": "AGPL-3.0-only",
   "author": "Jannis Braun",
-  "homepage": "https://github.com/TheZwiss/backspace",
+  "homepage": "https://github.com/IceTomao/backspace-cn",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TheZwiss/backspace.git"
+    "url": "https://github.com/IceTomao/backspace-cn.git"
   },
   "scripts": {
     "dev:server": "pnpm --filter @backspace/server dev",

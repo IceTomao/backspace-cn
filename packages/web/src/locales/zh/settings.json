@@ -372,7 +372,7 @@
       "upToDate": "你是最新版本。",
       "available": "版本{{version}}可用",
       "readyToInstall": "版本{{version}}已准备好安装",
-      "installFailed": "版本{{version}}无法安装",
+      "installFailed": "更新到版本{{version}}失败",
       "checkFailed": "上次更新检查失败",
       "idle": "检查桌面应用程序的新版本",
       "external": "更新通过您的Flatpak软件管理器安装",

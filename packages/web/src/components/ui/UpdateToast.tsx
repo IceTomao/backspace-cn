@@ -28,6 +28,7 @@ export function UpdateToast() {
   const snapshot = useUpdateStore((s) => s.snapshot);
   const currentVersion = useUpdateStore((s) => s.currentVersion);
   const dismiss = useUpdateStore((s) => s.dismiss);
+  const download = useUpdateStore((s) => s.download);
   const install = useUpdateStore((s) => s.install);
   const openDownloadPage = useUpdateStore((s) => s.openDownloadPage);
   const addToast = useUIStore((s) => s.addToast);
@@ -59,9 +60,15 @@ export function UpdateToast() {
     body = t('desktop:update.ready.body', { version });
   } else {
     title = t('desktop:update.available.title', { version });
-    body = currentVersion
-      ? t('desktop:update.available.bodyWithCurrent', { currentVersion })
-      : t('desktop:update.available.body');
+    if (snapshot.capability === 'auto') {
+      body = currentVersion
+        ? t('desktop:update.available.autoBodyWithCurrent', { currentVersion })
+        : t('desktop:update.available.autoBody');
+    } else {
+      body = currentVersion
+        ? t('desktop:update.available.bodyWithCurrent', { currentVersion })
+        : t('desktop:update.available.body');
+    }
   }
 
   return (
@@ -113,7 +120,7 @@ export function UpdateToast() {
             </button>
           ) : (
             <button
-              onClick={openDownloadPage}
+              onClick={failed || snapshot.capability !== 'auto' ? openDownloadPage : download}
               className="px-3 py-1.5 text-xs font-medium rounded-lg bg-accent-primary hover:bg-accent-primary/80 text-white transition-colors"
             >
               {t('desktop:update.download')}

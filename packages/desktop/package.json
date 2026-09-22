@@ -8,15 +8,16 @@
     "name": "Jannis Braun",
     "email": "backspace@backspace.chat"
   },
-  "homepage": "https://github.com/TheZwiss/backspace",
+  "homepage": "https://github.com/IceTomao/backspace-cn",
   "main": "dist/main.js",
   "desktopName": "io.github.TheZwiss.backspace.desktop",
   "scripts": {
-    "build:ts": "tsc",
-    "build:win": "tsc && electron-builder --win nsis --x64 --publish never",
-    "dev": "cp build/icon.icns $(find ../../node_modules -path '*/electron/dist/Electron.app/Contents/Resources/electron.icns' 2>/dev/null | head -1) 2>/dev/null; tsc && electron .",
-    "build": "tsc && electron-builder",
-    "build:all": "tsc && electron-builder --mac --win --linux --arm64 --x64",
+    "build:ts": "tsc && node scripts/bundle-preload.cjs",
+    "build:win": "pnpm build:ts && electron-builder --win nsis --x64 --publish never",
+    "dev": "cp build/icon.icns $(find ../../node_modules -path '*/electron/dist/Electron.app/Contents/Resources/electron.icns' 2>/dev/null | head -1) 2>/dev/null; pnpm build:ts && electron .",
+    "dev:win": "pnpm build:ts && electron .",
+    "build": "pnpm build:ts && electron-builder",
+    "build:all": "pnpm build:ts && electron-builder --mac --win --linux --arm64 --x64",
     "clean": "rm -rf dist dist-electron",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -25,6 +26,7 @@
   "dependencies": {
     "dbus-next": "0.10.2",
     "electron-updater": "^6.8.9",
+    "sharp": "0.35.4",
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
@@ -32,6 +34,8 @@
     "@electron/rebuild": "^4.2.0",
     "electron": "^43.7.0",
     "electron-builder": "^26.15.3",
+    "esbuild": "0.28.2",
+    "lucide": "0.468.0",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11"
   }

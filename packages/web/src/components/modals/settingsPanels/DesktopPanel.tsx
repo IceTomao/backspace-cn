@@ -105,6 +105,7 @@ function UpdateSettings() {
   const snapshot = useUpdateStore((s) => s.snapshot);
   const currentVersion = useUpdateStore((s) => s.currentVersion);
   const checkNow = useUpdateStore((s) => s.checkNow);
+  const download = useUpdateStore((s) => s.download);
   const install = useUpdateStore((s) => s.install);
   const openDownloadPage = useUpdateStore((s) => s.openDownloadPage);
 
@@ -139,7 +140,10 @@ function UpdateSettings() {
       break;
     case 'available':
       detail = t('desktop.updates.available', { version: status.version });
-      action = { label: t('desktop.updates.download'), onClick: openDownloadPage };
+      action = {
+        label: t('desktop.updates.download'),
+        onClick: capability === 'auto' ? download : openDownloadPage,
+      };
       break;
     case 'ready':
       if (capability === 'auto') {

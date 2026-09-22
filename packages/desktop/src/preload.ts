@@ -1,5 +1,53 @@
 /// <reference lib="dom" />
 import { contextBridge, ipcRenderer, webFrame } from 'electron';
+import { startDesktopFavorites } from './favoritesPreload';
+
+const startFavorites = () => {
+  try { startDesktopFavorites(); } catch (error) {
+    console.warn('[favorites] Desktop adapter unavailable:', error);
+  }
+};
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startFavorites, { once: true });
+} else {
+  startFavorites();
+}
+
+// Keep the packaged client compatible with instances that still serve the old
+// Chinese timestamp resources. Updated instances no longer match this pattern.
+const startChineseMessageTimestampAdapter = () => {
+  if (process.platform !== 'win32' || !process.isMainFrame ||
+      !['https:', 'http:'].includes(window.location.protocol)) return;
+  let frame = 0;
+  let stopped = false;
+  const rewrite = () => {
+    frame = 0;
+    if (stopped || document.documentElement.dataset.theme !== 'aether-drift') return;
+    document.querySelectorAll<HTMLElement>('[id^="msg-"] span').forEach((element) => {
+      if (!element.classList.contains('text-[11px]') ||
+          !element.classList.contains('text-txt-tertiary') ||
+          !element.classList.contains('leading-tight')) return;
+      const match = element.textContent?.match(/^(\u4eca\u5929|\u6628\u5929)\u5728(\d{1,2}:\d{2})$/);
+      if (match) element.textContent = `${match[1]}${match[2]}`;
+    });
+  };
+  const schedule = () => {
+    if (!frame && !stopped) frame = window.requestAnimationFrame(rewrite);
+  };
+  const observer = new MutationObserver(schedule);
+  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  rewrite();
+  window.addEventListener('pagehide', () => {
+    stopped = true;
+    observer.disconnect();
+    window.cancelAnimationFrame(frame);
+  }, { once: true });
+};
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startChineseMessageTimestampAdapter, { once: true });
+} else {
+  startChineseMessageTimestampAdapter();
+}
 
 // Synchronous bootstrap of a fixed bundled stylesheet avoids an IPC round trip
 // after the first paint. This private channel is not exposed through the bridge.
@@ -249,6 +297,9 @@ contextBridge.exposeInMainWorld('backspace', {
   },
   checkForUpdates: () => {
     ipcRenderer.send('check-for-updates');
+  },
+  downloadUpdate: () => {
+    ipcRenderer.send('download-update');
   },
   getVersion: () => ipcRenderer.invoke('get-app-version'),
 

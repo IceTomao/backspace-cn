@@ -84,8 +84,8 @@
     "nameAZ": "名称（A-Z）"
   },
   "time": {
-    "today": "今天在{{time}}",
-    "yesterday": "昨天在{{time}}",
+    "today": "今天{{time}}",
+    "yesterday": "昨天{{time}}",
     "never": "从未",
     "justNow": "刚刚",
     "minutesShort": "{{minutes}} m",

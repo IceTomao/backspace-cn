@@ -18,6 +18,9 @@ export type UpdateState =
   | 'idle'
   | 'checking'
   | 'downloading'
+  // The updater found a release and is waiting for the user to approve the
+  // download. Windows uses this state because autoDownload is disabled.
+  | 'available-auto'
   // An update exists but this build cannot install it in place (an ad-hoc
   // signed macOS build, where Squirrel.Mac can never satisfy the running app's
   // cdhash-literal designated requirement). The only useful action is a manual
@@ -109,6 +112,7 @@ interface MenuActions {
   onHide: () => void;
   onChangeInstance: () => void;
   onCheckForUpdates: () => void;
+  onDownloadUpdate: () => void;
   onRestartToInstall: () => void;
   // Manual-download path: opens the releases page for builds that cannot
   // install their own updates.
@@ -135,6 +139,7 @@ function checkForUpdatesItem(
       return { id: 'check-for-updates', label: t('update.downloading'), enabled: false };
     case 'downloaded':
       return { id: 'check-for-updates', label: t('update.ready'), enabled: false };
+    case 'available-auto':
     case 'available-manual':
       return { id: 'check-for-updates', label: t('update.available'), enabled: false };
     case 'error':
@@ -166,14 +171,16 @@ function updateActionItem(
       click: actions?.onRestartToInstall,
     };
   }
-  if (state.updateState === 'available-manual') {
+  if (state.updateState === 'available-auto' || state.updateState === 'available-manual') {
     return {
       id: 'download-update',
       label: state.updateVersion
         ? translateDesktop(language, 'update.downloadVersion', { version: state.updateVersion })
         : translateDesktop(language, 'update.download'),
       enabled: true,
-      click: actions?.onOpenReleases,
+      click: state.updateState === 'available-auto'
+        ? actions?.onDownloadUpdate
+        : actions?.onOpenReleases,
     };
   }
   return null;
@@ -383,6 +390,7 @@ export function handleRendererReady(): void {
 let mainWindowRef: BrowserWindow | null = null;
 let autoUpdaterRef: AppUpdater | null = null;
 let onQuitRequestedCallback: (() => void) | null = null;
+let onDownloadUpdateCallback: (() => void) | null = null;
 
 export function setMainWindow(win: BrowserWindow | null): void {
   mainWindowRef = win;
@@ -398,6 +406,10 @@ export function setAutoUpdater(au: AppUpdater | null): void {
  */
 export function setOnQuitRequested(cb: (() => void) | null): void {
   onQuitRequestedCallback = cb;
+}
+
+export function setOnDownloadUpdate(cb: (() => void) | null): void {
+  onDownloadUpdateCallback = cb;
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +458,7 @@ setOnBootStall(() => {
 export type RecoveryAction =
   | 'reload'
   | 'check-update'
+  | 'download-update'
   | 'install-update'
   | 'change-instance'
   | 'open-releases'
@@ -454,6 +467,7 @@ export type RecoveryAction =
 const VALID_ACTIONS: ReadonlySet<string> = new Set([
   'reload',
   'check-update',
+  'download-update',
   'install-update',
   'change-instance',
   'open-releases',
@@ -466,7 +480,7 @@ export function isValidRecoveryAction(action: unknown): action is RecoveryAction
 
 export function handleRecoveryAction(action: RecoveryAction): void {
   if (!DESKTOP_BUILD.updatesEnabled &&
-      (action === 'check-update' || action === 'install-update' || action === 'open-releases')) return;
+      (action === 'check-update' || action === 'download-update' || action === 'install-update' || action === 'open-releases')) return;
   switch (action) {
     case 'reload': {
       const url = getResolvedInstanceUrl();
@@ -486,6 +500,11 @@ export function handleRecoveryAction(action: RecoveryAction): void {
       if (recoveryStore.get().updateState === 'external') return;
       recoveryStore.update({ updateState: 'checking', lastCheckResult: null });
       autoUpdaterRef?.checkForUpdates().catch(() => { /* check-phase errors stay silent */ });
+      return;
+    }
+    case 'download-update': {
+      if (recoveryStore.get().updateState !== 'available-auto') return;
+      onDownloadUpdateCallback?.();
       return;
     }
     case 'install-update': {

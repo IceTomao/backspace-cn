@@ -11,6 +11,7 @@ const store = vi.hoisted(() => ({
   },
   currentVersion: '1.0.5',
   checkNow: vi.fn(),
+  download: vi.fn(),
   install: vi.fn(),
   openDownloadPage: vi.fn(),
 }));

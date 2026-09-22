@@ -9,6 +9,7 @@ type UpdateState =
   | 'idle'
   | 'checking'
   | 'downloading'
+  | 'available-auto'
   | 'available-manual'
   | 'external'
   | 'downloaded'
@@ -24,6 +25,7 @@ interface RecoveryState {
 type RecoveryAction =
   | 'reload'
   | 'check-update'
+  | 'download-update'
   | 'install-update'
   | 'change-instance'
   | 'open-releases'
@@ -105,6 +107,7 @@ interface BackspaceElectronAPI {
   isSandboxed?: () => Promise<boolean>;
   onUpdateStatusChanged?: (callback: (snapshot: unknown) => void) => (() => void);
   dismissUpdate?: (version: string) => void;
+  downloadUpdate?: () => void;
   openReleasePage?: () => void;
 
   // Window focus (Task 2.2)

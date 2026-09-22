@@ -3,8 +3,8 @@
     "laterHint": "You can install this later from Settings, Desktop",
     "dismiss": "Dismiss this update",
     "failed": {
-      "title": "Update could not be installed",
-      "body": "Backspace {{version}} downloaded, but installing it failed. You can install it by hand instead."
+      "title": "Update failed",
+      "body": "Backspace {{version}} could not be downloaded or installed. You can download the installer from GitHub Releases instead."
     },
     "ready": {
       "title": "Update ready",
@@ -12,6 +12,8 @@
     },
     "available": {
       "title": "Backspace {{version}} is available",
+      "autoBody": "The update is ready to download. It will install after you restart Backspace.",
+      "autoBodyWithCurrent": "You are on {{currentVersion}}. The update is ready to download and will install after you restart Backspace.",
       "body": "This build cannot update itself, so download the new version to move up.",
       "bodyWithCurrent": "You are on {{currentVersion}}. This build cannot update itself, so download the new version to move up."
     },

@@ -6,7 +6,7 @@ export const DESKTOP_BUILD: {
 } = Object.freeze({
   defaultInstanceUrl: 'https://chat.kevz.me:2096',
   defaultLanguage: 'zh',
-  updatesEnabled: false,
+  updatesEnabled: true,
 });
 
 export function resolveInstanceUrl(override: string | undefined, saved: string | null): string {

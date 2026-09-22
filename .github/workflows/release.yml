@@ -1,4 +1,4 @@
-name: Release Desktop
+name: Release Windows Desktop
 
 on:
   push:
@@ -6,342 +6,14 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  # Create the draft release once, before the build matrix fans out.
-  #
-  # electron-builder's GitHub publisher lists the repository's releases, looks
-  # for one carrying this tag, and creates a draft when it finds none
-  # (electron-publish, gitHubPublisher.js, getOrCreateRelease). The four matrix
-  # jobs run that lookup concurrently, so all four can see "no release for this
-  # tag" before any of them has finished creating one. On v1.0.3 two of them
-  # went on to create a draft: the tag ended up with two releases and the 22
-  # assets split 12/10 between them, which is easy to miss because a release
-  # listing shows one entry per tag. Consolidating them was manual.
-  #
-  # With the draft already in place, every matrix job takes the "found an
-  # existing draft" branch of that lookup and only uploads. That branch returns
-  # the release untouched — the publisher never rewrites the name or the body of
-  # a release it did not create — so the title set below is the one the release
-  # keeps.
-  create-release:
-    runs-on: ubuntu-latest
-    # Scoped to this job: it is the only one that needs to create a release.
-    permissions:
-      contents: write
+  release-windows-x64:
+    runs-on: windows-2022
     steps:
-      - name: Harden the runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - name: Create the draft release for this tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        # Listing releases rather than asking for one by tag: the "get a release
-        # by tag name" endpoint does not return drafts, and the release this job
-        # creates is a draft, so a re-run would not find its own work and would
-        # try to create a second one. The list endpoint includes drafts.
-        #
-        # Deliberately not `gh release create ... || true`. That form also
-        # swallows auth and network failures, and the matrix would then race
-        # exactly as before while this job reported success. Look first, create
-        # only on a confirmed absence, and let anything else fail the job.
-        #
-        # The title matches every release shipped so far ("Backspace 1.0.3").
-        # electron-builder would name the draft after the bare version instead,
-        # because `releaseInfo.releaseName` is not set in electron-builder.yml.
-        #
-        # The body starts as a Downloads table. GitHub sorts the asset list by
-        # name and offers no other order, which puts Linux first and Windows
-        # last; the table is what a visitor reads instead, in Windows, Linux,
-        # macOS order with plain labels. It is written before any asset exists
-        # (the draft is not visible until published) from the names
-        # electron-builder will produce, so it has to move with `artifactName`
-        # in packages/desktop/electron-builder.yml. The "What's new" notes are
-        # written by hand above it before the draft is published, as they have
-        # been for every release.
-        run: |
-          set -euo pipefail
-
-          existing="$(gh api --paginate "repos/$GH_REPO/releases" \
-            --jq '.[] | select(.tag_name == env.TAG) | .id')"
-          count="$(printf '%s' "$existing" | grep -c . || true)"
-
-          if [ "$count" -gt 1 ]; then
-            ids="$(printf '%s' "$existing" | tr '\n' ' ')"
-            echo "::error::$count releases already carry the tag $TAG (ids: $ids) — this is the duplicate-release state this job exists to prevent. Consolidate them by hand before re-running."
-            exit 1
-          fi
-
-          if [ "$count" -eq 1 ]; then
-            echo "A release already carries $TAG (id $existing) — leaving it untouched."
-            exit 0
-          fi
-
-          version="${TAG#v}"
-          base="https://github.com/$GH_REPO/releases/download/$TAG"
-          asset() { printf '[%s](%s/%s)' "$1" "$base" "$1"; }
-          notes="$(mktemp)"
-          {
-            echo "## Downloads"
-            echo
-            echo "| Platform | Download |"
-            echo "|---|---|"
-            echo "| Windows x64 | $(asset "Backspace-$version-win-x64.exe") |"
-            echo "| Windows arm64 | $(asset "Backspace-$version-win-arm64.exe") |"
-            echo "| Linux AppImage x86_64 | $(asset "Backspace-$version-linux-x86_64.AppImage") |"
-            echo "| Linux AppImage arm64 | $(asset "Backspace-$version-linux-arm64.AppImage") |"
-            echo "| Linux deb amd64 | $(asset "Backspace-$version-linux-amd64.deb") |"
-            echo "| Linux deb arm64 | $(asset "Backspace-$version-linux-arm64.deb") |"
-            echo "| macOS Apple Silicon | $(asset "Backspace-$version-mac-arm64.dmg") |"
-            echo "| macOS Intel | $(asset "Backspace-$version-mac-x64.dmg") |"
-            echo
-            echo "The \`.blockmap\` and \`latest*.yml\` files are read by the auto-updater and are not meant to be downloaded by hand."
-          } > "$notes"
-
-          echo "No release carries $TAG yet — creating the draft."
-          gh release create "$TAG" \
-            --draft \
-            --title "Backspace $version" \
-            --notes-file "$notes"
-
-  prepare-flatpak-metadata:
-    name: Prepare Flatpak release metadata
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions@sha256:68c521931eccf47dfa05c1c80f43be0993cce516417a633aa34913707da57cf2
-      options: --privileged
-    permissions:
-      contents: read
-    steps:
-      - name: Harden the runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout the release tag
+      - name: Checkout release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # The job runs inside the Flatpak builder container as a different user
-      # than the one the runner used for the checkout. Git treats a repository
-      # owned by another user as untrusted and refuses every command with
-      # "detected dubious ownership", which is how the v1.0.6 run failed on the
-      # `git show` below before it produced anything.
-      - name: Trust the checked-out repository
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Install the pinned Node SDK extension
-        run: |
-          flatpak remote-add --user --if-not-exists flathub \
-            https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive -y flathub \
-            org.freedesktop.Sdk.Extension.node24//25.08
-
-      - name: Regenerate Flatpak release inputs
-        env:
-          TAG: ${{ github.ref_name }}
-          RELEASE_COMMIT: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          release_date="$(git show -s --format=%cs "$RELEASE_COMMIT")"
-          node flatpak/update-release.mjs "$TAG" "$RELEASE_COMMIT" "$release_date"
-          flatpak-node-generator --electron-node-headers \
-            --node-sdk-extension org.freedesktop.Sdk.Extension.node24//25.08 \
-            -o flatpak/node-sources.json pnpm pnpm-lock.yaml
-          flatpak-builder-lint manifest io.github.TheZwiss.backspace.yml
-          flatpak-builder-lint appstream flatpak/io.github.TheZwiss.backspace.metainfo.xml
-
-      - name: Preserve generated metadata for validation
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: flatpak-release-metadata
-          retention-days: 1
-          if-no-files-found: error
-          path: |
-            io.github.TheZwiss.backspace.yml
-            flatpak/node-sources.json
-            flatpak/io.github.TheZwiss.backspace.metainfo.xml
-
-  validate-flatpak-metadata:
-    name: Build Flatpak release metadata (${{ matrix.arch }})
-    needs: prepare-flatpak-metadata
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-latest
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions@sha256:68c521931eccf47dfa05c1c80f43be0993cce516417a633aa34913707da57cf2
-      options: --privileged
-    permissions:
-      contents: read
-    steps:
-      - name: Harden the runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout the release tag
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Restore generated metadata
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: flatpak-release-metadata
-          path: .
-
-      # GITHUB_TOKEN-created pushes and pull requests do not trigger the normal
-      # pull_request workflows. Build both supported architectures here so the
-      # metadata PR can never bypass the Flatpak validation it exists to obtain.
-      - name: Build generated release manifest
-        uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6
-        with:
-          manifest-path: io.github.TheZwiss.backspace.yml
-          arch: ${{ matrix.arch }}
-          build-bundle: false
-          upload-artifact: false
-          mirror-screenshots-url: https://dl.flathub.org/media/
-          cache-key: flatpak-release-${{ matrix.arch }}-${{ github.sha }}
-
-  update-flatpak-metadata:
-    name: Open Flatpak metadata update PR
-    needs: validate-flatpak-metadata
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Harden the runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout the release tag
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Restore validated metadata
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: flatpak-release-metadata
-          path: .
-
-      - name: Open the Flatpak metadata update PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          branch="automation/flatpak-${TAG}"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$branch"
-          git add io.github.TheZwiss.backspace.yml \
-            flatpak/node-sources.json \
-            flatpak/io.github.TheZwiss.backspace.metainfo.xml
-
-          if git diff --cached --quiet; then
-            echo "Flatpak metadata already matches $TAG."
-            exit 0
-          fi
-
-          git commit -m "chore(flatpak): update metadata for $TAG"
-          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
-          fi
-          git push --force-with-lease origin "HEAD:refs/heads/$branch"
-
-          existing="$(gh pr list --repo "$GH_REPO" --state open --head "$branch" \
-            --json number --jq '.[0].number // empty')"
-          if [ -z "$existing" ]; then
-            gh pr create --repo "$GH_REPO" \
-              --base main \
-              --head "$branch" \
-              --title "chore(flatpak): update metadata for $TAG" \
-              --body "Automated by release.yml from $TAG. Updates the pinned source commit, offline dependency sources, AppStream release entry, and screenshot tag."
-          else
-            echo "PR #$existing already tracks $branch."
-          fi
-
-  build:
-    # Every matrix job publishes into the draft that `create-release` has
-    # already made. Without this dependency they race to create it themselves.
-    needs: create-release
-    # `contents: write` is scoped to this job: electron-builder runs with
-    # `--publish always`, which uploads the installers and the updater feed
-    # files to the release for the tag.
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # macOS — universal build (arm64 + x64) on Apple Silicon runner
-          - os: macos-latest
-            args: --mac --arm64 --x64
-          # Windows — x64 + arm64 on x64 runner.
-          # Pinned to windows-2022 (VS 2022 / v17): the windows-latest image
-          # ships VS "18", which the node-gyp bundled with electron-rebuild
-          # cannot detect ("unknown version undefined") when compiling
-          # uiohook-napi in postinstall.
-          - os: windows-2022
-            args: --win --x64 --arm64
-          # Linux — x64 on x64 runner
-          - os: ubuntu-latest
-            args: --linux --x64
-          # Linux — arm64 on arm64 runner
-          - os: ubuntu-24.04-arm
-            args: --linux --arm64
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Harden the runner
-        if: runner.os == 'Linux'
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        # Full X11 dev header set required to compile libuiohook (uiohook-napi)
-        # from source in postinstall. Derived from the headers its sources
-        # include: Xlib/XKB (libx11-dev), XTest+record (libxtst-dev), Intrinsic
-        # (libxt-dev), Xrandr (libxrandr-dev), Xinerama (libxinerama-dev),
-        # Xlib-xcb (libx11-xcb-dev), XKBrules (libxkbfile-dev), xkbcommon
-        # (libxkbcommon-dev, libxkbcommon-x11-dev). Missing libxrandr-dev was
-        # the original build failure (Xrandr.h: No such file or directory).
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libx11-dev libxtst-dev libxt-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev libxkbfile-dev \
-            libxrandr-dev libxinerama-dev libx11-xcb-dev
-
-      - name: Install fpm for .deb packaging
-        if: runner.os == 'Linux'
-        # electron-builder bundles an x86_64-only fpm; on the arm64 runner it
-        # aborts the .deb target with "cannot execute binary file: Exec format
-        # error". Install fpm natively and set USE_SYSTEM_FPM (below) so both
-        # arches package their .deb with a host-native fpm. ruby-dev + make are
-        # needed for fpm's native gem dependencies.
-        run: |
-          sudo apt-get install -y ruby ruby-dev build-essential
-          sudo gem install --no-document fpm
 
       - name: Setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -349,16 +21,64 @@ jobs:
           version: 10.34.3
 
       - name: Setup Node.js
-        # Matches .nvmrc, the CI matrix's upper leg and the node24 SDK the
-        # Flatpak build already packages this same app with. The desktop build
-        # toolchain has a Node 22 floor of its own -- @electron/fuses 2 declares
-        # `engines: >=22.12.0` -- so this job cannot drop back to 20 without
-        # violating it. This is the BUILD Node only; the shipped app runs on
-        # Electron's own bundled Node, which this does not touch.
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: pnpm
+
+      - name: Validate tag matches desktop version
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$GH_REPO" != "IceTomao/backspace-cn" ]; then
+            echo "::error::This workflow publishes only IceTomao/backspace-cn, not $GH_REPO"
+            exit 1
+          fi
+          version="$(node -p "require('./packages/desktop/package.json').version")"
+          expected="v${version}"
+          if [ "$TAG" != "$expected" ]; then
+            echo "::error::Release tag $TAG must equal $expected from packages/desktop/package.json"
+            exit 1
+          fi
+
+      - name: Create or reuse draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          matches="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name == env.TAG) | [.id, .draft] | @tsv')"
+          count="$(printf '%s\n' "$matches" | grep -c $'\t' || true)"
+          if [ "$count" -gt 1 ]; then
+            echo "::error::$count releases already use tag $TAG. Consolidate them before retrying."
+            exit 1
+          fi
+          if [ "$count" -eq 1 ]; then
+            draft="$(printf '%s' "$matches" | cut -f2)"
+            if [ "$draft" != "true" ]; then
+              echo "::error::Release $TAG is already public; refusing to replace published assets."
+              exit 1
+            fi
+            echo "Reusing existing draft release for $TAG."
+            exit 0
+          fi
+
+          version="${TAG#v}"
+          asset="Backspace-CN-${version}-win-x64.exe"
+          notes="$(mktemp)"
+          {
+            echo "## Windows x64"
+            echo
+            echo "[Download $asset](https://github.com/$GH_REPO/releases/download/$TAG/$asset)"
+            echo
+            echo "The blockmap and latest.yml assets are used by the in-app updater."
+          } > "$notes"
+          gh release create "$TAG" --draft --title "Backspace CN $version" --notes-file "$notes"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -366,150 +86,88 @@ jobs:
       - name: Build shared package
         run: pnpm --filter @backspace/shared build
 
-      - name: Compile desktop TypeScript
-        working-directory: packages/desktop
-        run: pnpm exec tsc
+      - name: Build preload and desktop TypeScript
+        run: pnpm --filter @backspace/desktop build:ts
 
-      - name: Build and publish desktop app
+      - name: Build and upload Windows x64 updater assets
         working-directory: packages/desktop
-        run: pnpm exec electron-builder ${{ matrix.args }} --publish always
+        run: pnpm exec electron-builder --win nsis --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          # Use the host-native fpm installed above instead of electron-builder's
-          # bundled x86_64 fpm (which can't run on the arm64 runner). No-op on
-          # macOS/Windows, which don't build .deb.
-          USE_SYSTEM_FPM: "true"
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Verify Electron security fuses
-        working-directory: packages/desktop
+      - name: Validate updater source and local assets
         shell: bash
-        # Backstop for the fuse flip done in scripts/afterPack.js. That hook
-        # resolves the Electron binary path *per platform* (Linux reads
-        # `packager.executableName`, mac/win read `appInfo.productFilename`),
-        # so "it worked on macOS arm64" proves nothing about the other five
-        # artifacts this matrix ships — a wrong path there means either a build
-        # error or, worse, a binary that quietly ships with the fuses still off.
-        # Read the wire back out of every packaged binary and fail the release
-        # if any of the three is not in the state afterPack claims to have set.
-        # Runs before the signature check below, mirroring afterPack's own
-        # order (fuses are flipped, then the bundle is sealed).
-        #
-        # `npx --no` is deliberate: it runs the @electron/fuses already pinned
-        # in this package's devDependencies and hard-fails instead of reaching
-        # the registry. A bare `npx` would verify the shipped binaries with
-        # whatever version the registry happens to serve, which is exactly the
-        # coupling this check must not have: the CLI's "<Fuse> is <State>"
-        # lines are parsed below, and afterPack.js flips the fuses using the
-        # pinned copy of the same package.
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-
-          # Expected artifacts per runner, matching the build matrix above.
-          # Listed explicitly rather than globbed: a glob that matches nothing
-          # would skip silently, and a check that verifies nothing is worse
-          # than no check at all because it still reads as coverage.
-          case "$RUNNER_OS" in
-            macOS)
-              artifacts=(
-                "dist-electron/mac/Backspace.app"
-                "dist-electron/mac-arm64/Backspace.app"
-              )
-              ;;
-            Windows)
-              artifacts=(
-                "dist-electron/win-unpacked/Backspace.exe"
-                "dist-electron/win-arm64-unpacked/Backspace.exe"
-              )
-              ;;
-            Linux)
-              # Was "@backspacedesktop" up to 1.0.2: electron-builder derived the
-              # Linux executable from package.json `name` ("@backspace/desktop"),
-              # dropping the slash but keeping the leading "@". electron-builder 26
-              # validates that name and rejects it outright, so the build now sets
-              # linux.executableName explicitly. Keep this path in step with
-              # packages/desktop/electron-builder.yml; nothing else couples them.
-              if [ "$RUNNER_ARCH" = "ARM64" ]; then
-                artifacts=("dist-electron/linux-arm64-unpacked/Backspace")
-              else
-                artifacts=("dist-electron/linux-unpacked/Backspace")
-              fi
-              ;;
-            *)
-              echo "::error::Unknown runner OS '$RUNNER_OS' — no expected artifact list, refusing to pass by default"
-              exit 1
-              ;;
-          esac
-
-          # Fuse name -> required state, exactly as scripts/afterPack.js sets them.
-          expected=(
-            "RunAsNode=Disabled"
-            "EnableNodeCliInspectArguments=Disabled"
-            "OnlyLoadAppFromAsar=Enabled"
-          )
-
-          esc="$(printf '\033')"
-          failed=0
-
-          for artifact in "${artifacts[@]}"; do
-            if [ ! -e "$artifact" ]; then
-              echo "::error::Expected packaged artifact not found: packages/desktop/$artifact — the fuses for this target were never checked"
-              failed=1
-              continue
-            fi
-
-            echo "==> $artifact"
-            # chalk colourises its output on GitHub Actions (it treats
-            # GITHUB_ACTIONS as a colour-capable terminal), and the escape
-            # codes wrap the very words matched below. FORCE_COLOR=0 turns
-            # that off; the sed strips any that survive anyway.
-            if ! fuses="$(FORCE_COLOR=0 npx --no @electron/fuses read --app "$artifact" 2>&1 \
-                | sed -e "s/${esc}\[[0-9;]*m//g")"; then
-              echo "$fuses"
-              echo "::error::${artifact}: could not read the Electron fuse wire (output above)"
-              failed=1
-              continue
-            fi
-            echo "$fuses"
-
-            for pair in "${expected[@]}"; do
-              name="${pair%%=*}"
-              want="${pair#*=}"
-              got="$(printf '%s\n' "$fuses" \
-                | sed -n -E "s/^[[:space:]]*${name} is ([A-Za-z]+)[[:space:]]*\$/\\1/p")"
-              if [ -z "$got" ]; then
-                echo "::error::${artifact}: fuse ${name} was not reported by @electron/fuses at all (expected ${want})"
-                failed=1
-              elif [ "$got" != "$want" ]; then
-                echo "::error::${artifact}: fuse ${name} is ${got}, expected ${want} — scripts/afterPack.js did not flip this binary"
-                failed=1
-              fi
-            done
+          version="${TAG#v}"
+          base="packages/desktop/dist-electron/Backspace-CN-${version}-win-x64.exe"
+          for file in "$base" "$base.blockmap" packages/desktop/dist-electron/latest.yml; do
+            test -s "$file" || { echo "::error::Missing updater asset: $file"; exit 1; }
           done
 
-          if [ "$failed" -ne 0 ]; then
-            echo "::error::Electron security fuse verification failed on $RUNNER_OS/$RUNNER_ARCH — do not ship this release."
-            exit 1
-          fi
-          echo "All three Electron security fuses verified on $RUNNER_OS/$RUNNER_ARCH."
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'packages/desktop/dist-electron/win-unpacked/resources/app-update.yml';
+          if (!fs.existsSync(path)) throw new Error(`Missing ${path}`);
+          const text = fs.readFileSync(path, 'utf8');
+          for (const [key, value] of Object.entries({ provider: 'github', owner: 'IceTomao', repo: 'backspace-cn' })) {
+            if (!new RegExp(`^${key}:\\s*["']?${value}["']?\\s*$`, 'm').test(text)) {
+              throw new Error(`${path} does not contain ${key}: ${value}`);
+            }
+          }
+          const latest = fs.readFileSync('packages/desktop/dist-electron/latest.yml', 'utf8');
+          const version = require('./packages/desktop/package.json').version;
+          const installer = `Backspace-CN-${version}-win-x64.exe`;
+          if (!latest.includes(`version: ${version}`) || !latest.includes(installer)) {
+            throw new Error('latest.yml does not describe the expected Windows x64 installer');
+          }
+          const config = fs.readFileSync('packages/desktop/dist/buildConfig.js', 'utf8');
+          if (!config.includes('updatesEnabled: true')) throw new Error('Packaged distribution still disables updates');
+          NODE
 
-      - name: Verify macOS code signature
-        if: runner.os == 'macOS'
+      - name: Verify Electron security fuses
+        shell: pwsh
         working-directory: packages/desktop
-        # Backstop for the ad-hoc signing done in scripts/macSign.js. A bundle
-        # whose signature does not validate is reported by macOS as "Backspace
-        # is damaged and can't be opened", which no user can work around from
-        # the UI — so a broken seal must fail the release loudly rather than
-        # ship. macSign.js already verifies before packaging; this re-checks the
-        # final bundle, and also covers the case where that hook no-ops.
         run: |
-          shopt -s nullglob
-          apps=(dist-electron/mac*/*.app)
-          if [ ${#apps[@]} -eq 0 ]; then
-            echo "::error::No packaged .app found under dist-electron/"
+          $output = pnpm exec electron-fuses read --app dist-electron/win-unpacked/Backspace.exe 2>&1 | Out-String
+          $output
+          foreach ($expected in @(
+            'RunAsNode is Disabled',
+            'EnableNodeCliInspectArguments is Disabled',
+            'OnlyLoadAppFromAsar is Enabled'
+          )) {
+            if (-not $output.Contains($expected)) {
+              throw "Electron fuse verification failed: missing '$expected'"
+            }
+          }
+
+      - name: Validate uploaded assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          expected="$(printf '%s\n' "Backspace-CN-${version}-win-x64.exe" "Backspace-CN-${version}-win-x64.exe.blockmap" "latest.yml" | sort)"
+          actual="$(gh release view "$TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' | sort)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Release assets do not match the updater contract."
+            echo "Expected:"; printf '%s\n' "$expected"
+            echo "Actual:"; printf '%s\n' "$actual"
             exit 1
           fi
-          for app in "${apps[@]}"; do
-            echo "==> $app"
-            codesign --verify --deep --strict --verbose=2 "$app"
-          done
+          draft="$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft --jq .isDraft)"
+          test "$draft" = "true" || { echo "::error::Release became public before validation"; exit 1; }
+
+      - name: Publish validated release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "$TAG" --repo "$GH_REPO" --draft=false --latest

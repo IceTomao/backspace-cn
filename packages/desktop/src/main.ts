@@ -44,6 +44,7 @@ import {
   setAutoUpdater,
   setMainWindow,
   setOnQuitRequested,
+  setOnDownloadUpdate,
   handleRendererReady,
   handleRecoveryAction,
   isValidRecoveryAction,
@@ -63,6 +64,7 @@ import {
 import { getDesktopLanguage, isDesktopLanguage, saveStoredLanguage, translateDesktop } from './l10n';
 import { DESKTOP_BUILD } from './buildConfig';
 import { ThemeManager, registerThemeStyles, registerThemeControls, windowThemeColors, type ThemeMode } from './theme';
+import { registerFavoriteImages } from './favoriteImages';
 
 function showManagedUpdateNotice(): void {
   const language = getDesktopLanguage();
@@ -103,6 +105,7 @@ let pendingDeepLink: string | null = null;
 let themeManager: ThemeManager | null = null;
 let disposeThemeStyles: (() => void) | null = null;
 let disposeThemeControls: (() => void) | null = null;
+let disposeFavoriteImages: (() => void) | null = null;
 
 function getWindowThemeColors(): { color: string; symbolColor: string } {
   if (process.platform === 'win32' && nativeTheme.shouldUseHighContrastColors) {
@@ -126,7 +129,7 @@ const knownInstanceOrigins = new Set<string>();
 // ─── AGPL-3.0 § 13 source offer ─────────────────────────────────────────────
 // Upstream fallback for the "Source code" menu items and the About panel.
 // Used when the connected instance can't be reached or advertises no source URL.
-const UPSTREAM_SOURCE_URL = 'https://github.com/TheZwiss/backspace';
+const UPSTREAM_SOURCE_URL = 'https://github.com/IceTomao/backspace-cn';
 
 /**
  * Resolve the Corresponding Source URL for the instance the desktop app is
@@ -757,6 +760,15 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.on('download-update', (event) => {
+    if (event.sender !== mainWindow?.webContents) return;
+    if (!DESKTOP_BUILD.updatesEnabled) {
+      showManagedUpdateNotice();
+      return;
+    }
+    requestAvailableUpdate();
+  });
+
   ipcMain.handle('get-update-status', () => getUpdateStore().get());
 
   // Sandbox restrictions are independent of update capability. A package may
@@ -773,9 +785,18 @@ function registerIpcHandlers(): void {
     getUpdateStore().setDismissedVersion(loadDismissedVersion());
   });
 
-  ipcMain.on('open-release-page', () => {
+  ipcMain.on('open-release-page', (event) => {
+    if (event.sender !== mainWindow?.webContents) return;
     if (!DESKTOP_BUILD.updatesEnabled) {
       showManagedUpdateNotice();
+      return;
+    }
+    const snapshot = getUpdateStore().get();
+    // Compatibility for server-hosted clients that predate downloadUpdate():
+    // their Download button calls openReleasePage(). On an auto-capable build,
+    // preserve the new confirmation flow instead of opening a browser.
+    if (snapshot.capability === 'auto' && snapshot.status.phase === 'available') {
+      requestAvailableUpdate();
       return;
     }
     void shell.openExternal(RELEASES_URL);
@@ -959,6 +980,11 @@ function registerIpcHandlers(): void {
 const INSTALL_WATCHDOG_MS = 4_000;
 
 let updateStore: UpdateStatusStore | null = null;
+let downloadAvailableUpdate: (() => void) | null = null;
+
+function requestAvailableUpdate(): void {
+  downloadAvailableUpdate?.();
+}
 
 /**
  * The update status store, built on first use.
@@ -1008,6 +1034,24 @@ function notifyAboutUpdate(
     return;
   }
 
+  if (snapshot.status.phase === 'available' && snapshot.capability === 'auto') {
+    showNotification(
+      `Backspace ${version} is available`,
+      'Click to download the update.',
+      () => requestAvailableUpdate(),
+    );
+    return;
+  }
+
+  if (snapshot.status.phase === 'failed') {
+    showNotification(
+      `Backspace ${version} update failed`,
+      'Click to download the installer from GitHub Releases.',
+      () => { void shell.openExternal(RELEASES_URL); },
+    );
+    return;
+  }
+
   showNotification(
     `Backspace ${version} is available`,
     'Click to open the download page.',
@@ -1016,6 +1060,7 @@ function notifyAboutUpdate(
 }
 
 function initAutoUpdater(): void {
+  downloadAvailableUpdate = null;
   if (!DESKTOP_BUILD.updatesEnabled) {
     console.log('[update] disabled for this distribution; installers are supplied by the maintainer');
     return;
@@ -1032,16 +1077,9 @@ function initAutoUpdater(): void {
   try {
     const { autoUpdater } = require('electron-updater');
 
-    // A build that cannot install its own updates must not download them.
-    //
-    // With autoDownload on, an ad-hoc signed macOS build pulls the full release
-    // archive, hands it to Squirrel.Mac, and Squirrel rejects it because the
-    // running app's designated requirement is a literal cdhash that no other
-    // build can satisfy. The archive then sits on disk forever (228 MB measured
-    // on a real machine, since it is stored twice) and the whole cycle repeats
-    // on the next check. Turning the download off removes the wasted transfer,
-    // the wasted disk, and the spurious install error all at once.
-    autoUpdater.autoDownload = capability === 'auto';
+    // Discovery never starts a transfer. An installable Windows build waits
+    // for explicit confirmation; manual-capability builds always use Releases.
+    autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = capability === 'auto';
 
     if (capability === 'manual') {
@@ -1059,6 +1097,53 @@ function initAutoUpdater(): void {
     // only whole-percent changes are worth an IPC message.
     let lastPercent = -1;
 
+    const handleUpdaterError = (err: unknown): void => {
+      const message = err instanceof Error ? err.message : String(err);
+      const code = extractErrorCode(err);
+      const failedAfterConfirmation = updateConfirmed;
+      recoveryStore.update({
+        updateState: 'error',
+        lastUpdateError: { message, code, at: Date.now() },
+        lastCheckResult: 'failed',
+      });
+      setTimeout(() => {
+        if (recoveryStore.get().lastCheckResult === 'failed') {
+          recoveryStore.update({ lastCheckResult: null });
+        }
+      }, 5_000);
+
+      if (failedAfterConfirmation) {
+        store.setStatus({ phase: 'failed', version: pendingVersion, message });
+        mainWindow?.webContents.send('update-error', { message, releaseUrl: RELEASES_URL });
+        notifyAboutUpdate(store.get(), autoUpdater);
+        return;
+      }
+
+      store.setStatus({ phase: 'failed', version: null, message });
+    };
+
+    downloadAvailableUpdate = () => {
+      const snapshot = store.get();
+      if (capability !== 'auto' || snapshot.status.phase !== 'available') return;
+
+      const version = snapshot.status.version;
+      updateConfirmed = true;
+      pendingVersion = version;
+      lastPercent = -1;
+      recoveryStore.update({
+        updateState: 'downloading',
+        updateVersion: version,
+        lastUpdateError: null,
+        lastCheckResult: null,
+      });
+      store.setStatus({ phase: 'downloading', version, percent: 0, bytesPerSecond: 0 });
+      autoUpdater.downloadUpdate().catch((err: unknown) => {
+        // electron-updater normally emits `error` before rejecting. This
+        // fallback handles implementations that only reject the promise.
+        if (store.get().status.phase === 'downloading') handleUpdaterError(err);
+      });
+    };
+
     autoUpdater.on('checking-for-update', () => {
       recoveryStore.update({ updateState: 'checking', lastCheckResult: null });
       store.setStatus({ phase: 'checking' });
@@ -1069,31 +1154,39 @@ function initAutoUpdater(): void {
     autoUpdater.on('update-available', (info: { version: string }) => {
       const version = info.version.slice(0, 32);
       pendingVersion = version;
-      // Only an auto-capable build is about to attempt anything, so only there
-      // can a later error be an install failure worth reporting.
-      updateConfirmed = capability === 'auto';
+      updateConfirmed = false;
 
       if (capability === 'auto') {
-        recoveryStore.update({ updateState: 'downloading', updateVersion: version });
-        store.setStatus({ phase: 'downloading', version, percent: 0, bytesPerSecond: 0 });
+        recoveryStore.update({
+          updateState: 'available-auto',
+          updateVersion: version,
+          lastUpdateError: null,
+          lastCheckResult: null,
+        });
       } else {
-        recoveryStore.update({ updateState: 'available-manual', updateVersion: version });
-        store.setStatus({ phase: 'available', version });
+        recoveryStore.update({
+          updateState: 'available-manual',
+          updateVersion: version,
+          lastUpdateError: null,
+          lastCheckResult: null,
+        });
       }
+      store.setStatus({ phase: 'available', version });
 
       mainWindow?.webContents.send('update-available', { version });
 
-      // In manual mode this is the end of the line, so this is the moment to
-      // tell the user. In auto mode the notification waits for the download.
-      if (capability === 'manual') {
-        notifyAboutUpdate(store.get(), autoUpdater);
-      }
+      notifyAboutUpdate(store.get(), autoUpdater);
     });
 
     autoUpdater.on('update-not-available', () => {
       updateConfirmed = false;
       pendingVersion = null;
-      recoveryStore.update({ updateState: 'idle', lastCheckResult: 'up-to-date' });
+      recoveryStore.update({
+        updateState: 'idle',
+        updateVersion: null,
+        lastUpdateError: null,
+        lastCheckResult: 'up-to-date',
+      });
       store.setStatus({ phase: 'up-to-date', checkedAt: Date.now() });
       setTimeout(() => {
         if (recoveryStore.get().lastCheckResult === 'up-to-date') {
@@ -1121,41 +1214,18 @@ function initAutoUpdater(): void {
     autoUpdater.on('update-downloaded', (info: { version: string }) => {
       const version = info.version.slice(0, 32);
       pendingVersion = version;
-      recoveryStore.update({ updateState: 'downloaded', updateVersion: version });
+      recoveryStore.update({
+        updateState: 'downloaded',
+        updateVersion: version,
+        lastUpdateError: null,
+        lastCheckResult: null,
+      });
       store.setStatus({ phase: 'ready', version });
       mainWindow?.webContents.send('update-downloaded', { version });
       notifyAboutUpdate(store.get(), autoUpdater);
     });
 
-    autoUpdater.on('error', (err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      const code = extractErrorCode(err);
-      recoveryStore.update({
-        updateState: 'error',
-        lastUpdateError: { message, code, at: Date.now() },
-        lastCheckResult: 'failed',
-      });
-      setTimeout(() => {
-        if (recoveryStore.get().lastCheckResult === 'failed') {
-          recoveryStore.update({ lastCheckResult: null });
-        }
-      }, 5_000);
-
-      if (updateConfirmed) {
-        // An update was actually being applied. This is news.
-        store.setStatus({ phase: 'failed', version: pendingVersion, message });
-        mainWindow?.webContents.send('update-error', { message, releaseUrl: RELEASES_URL });
-        notifyAboutUpdate(store.get(), autoUpdater);
-        return;
-      }
-
-      // A check-phase failure: nothing was attempted, so there is nothing for
-      // the user to act on. Recorded with no version, which keeps it out of the
-      // toast (see shouldPromptForUpdate) while the settings panel still shows
-      // it. Interrupting someone because a background poll hit a flaky network
-      // is exactly the kind of noise this rewrite is removing.
-      store.setStatus({ phase: 'failed', version: null, message });
-    });
+    autoUpdater.on('error', handleUpdaterError);
 
     // Initial check with 10s delay (existing behavior)
     setTimeout(() => {
@@ -1169,6 +1239,7 @@ function initAutoUpdater(): void {
       autoUpdater.checkForUpdates().catch(() => {});
     }, 4 * 60 * 60 * 1000);
   } catch {
+    downloadAvailableUpdate = null;
     // Auto-updater unavailable — recovery surface still functions, just
     // without update affordances. autoUpdaterRef stays null; recovery action
     // handlers no-op on update-related actions.
@@ -1253,6 +1324,13 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     if (process.platform === 'win32') {
+      disposeFavoriteImages = registerFavoriteImages(
+        ipcMain, () => mainWindow, getResolvedInstanceUrl, path.join(app.getPath('userData'), 'favorite-images'),
+        {
+          script: fs.readFileSync(path.join(__dirname, '..', 'resources', 'emoji-policy.js'), 'utf8'),
+          styles: fs.readFileSync(path.join(__dirname, '..', 'resources', 'favorites.css'), 'utf8'),
+        },
+      );
       themeManager = new ThemeManager(nativeTheme, path.join(app.getPath('userData'), 'theme.json'));
       disposeThemeControls = registerThemeControls(ipcMain, () => mainWindow, themeManager);
       const themeStyles = fs.readFileSync(path.join(__dirname, '..', 'resources', 'theme.css'), 'utf8');
@@ -1413,6 +1491,7 @@ if (!gotTheLock) {
       // recovery state is always cleared on a Change Instance action).
       onChangeInstance: () => handleRecoveryAction('change-instance'),
       onCheckForUpdates: () => handleRecoveryAction('check-update'),
+      onDownloadUpdate: () => handleRecoveryAction('download-update'),
       onRestartToInstall: () => handleRecoveryAction('install-update'),
       onOpenReleases: () => handleRecoveryAction('open-releases'),
       onOpenSource: () => openSourceCode(),
@@ -1464,6 +1543,7 @@ if (!gotTheLock) {
       applyMenusForState(recoveryStore.get());
     });
 
+    setOnDownloadUpdate(() => requestAvailableUpdate());
     initAutoUpdater();
 
     // ─── Activity Detection ────────────────────────────────────────────────
@@ -1532,6 +1612,7 @@ if (!gotTheLock) {
     themeManager?.dispose();
     disposeThemeStyles?.();
     disposeThemeControls?.();
+    disposeFavoriteImages?.();
     stopActivityDetection();
     keybindManager.stop();
   });

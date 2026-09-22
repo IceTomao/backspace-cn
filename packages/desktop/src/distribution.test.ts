@@ -6,7 +6,7 @@ import ts from 'typescript';
 import { DESKTOP_BUILD, resolveInstanceUrl } from './buildConfig';
 import {
   RecoveryStateStore, buildTrayMenuTemplate, buildAppMenuTemplate,
-  handleRecoveryAction, setAutoUpdater, setMainWindow,
+  handleRecoveryAction, recoveryStore, setAutoUpdater, setMainWindow, setOnDownloadUpdate,
 } from './recovery';
 import { shell } from 'electron';
 
@@ -27,14 +27,15 @@ describe('Chinese distribution', () => {
     expect(resolveInstanceUrl('https://managed.example', 'https://saved.example')).toBe('https://managed.example');
     expect(resolveInstanceUrl(undefined, 'https://saved.example')).toBe('https://saved.example');
     expect(resolveInstanceUrl(undefined, null)).toBe('https://chat.kevz.me:2096');
-    expect(DESKTOP_BUILD.updatesEnabled).toBe(false);
+    expect(DESKTOP_BUILD.updatesEnabled).toBe(true);
   });
 
-  it('hides all update actions, even if an obsolete state says downloaded', () => {
+  it('exposes update actions for the Windows distribution', () => {
     const state = { ...new RecoveryStateStore().get(), updateState: 'downloaded' as const };
     const tray = buildTrayMenuTemplate(state);
     const menu = buildAppMenuTemplate('Backspace', state);
-    expect(JSON.stringify([tray, menu])).not.toMatch(/check-for-updates|restart-to-install|download-update/);
+    expect(JSON.stringify([tray, menu])).toMatch(/check-for-updates/);
+    expect(JSON.stringify([tray, menu])).toMatch(/restart-to-install/);
   });
 
   it('adds a mutually exclusive theme submenu with the selected mode checked', () => {
@@ -54,16 +55,35 @@ describe('Chinese distribution', () => {
     expect(buildTrayMenuTemplate(state).find((item) => item.id === 'theme')).toBeUndefined();
   });
 
-  it('blocks every recovery update action before invoking updater or shell', () => {
-    const updater = { checkForUpdates: vi.fn(), quitAndInstall: vi.fn() };
+  it('routes recovery update actions through their restricted handlers', () => {
+    const updater = { checkForUpdates: vi.fn().mockResolvedValue(null), quitAndInstall: vi.fn() };
+    const download = vi.fn();
     setAutoUpdater(updater as never);
-    for (const action of ['check-update', 'install-update', 'open-releases'] as const) {
-      handleRecoveryAction(action);
-    }
-    expect(updater.checkForUpdates).not.toHaveBeenCalled();
-    expect(updater.quitAndInstall).not.toHaveBeenCalled();
-    expect(shell.openExternal).not.toHaveBeenCalled();
+    setOnDownloadUpdate(download);
+    recoveryStore.update({ updateState: 'idle' });
+    handleRecoveryAction('check-update');
+    recoveryStore.update({ updateState: 'available-auto' });
+    handleRecoveryAction('download-update');
+    recoveryStore.update({ updateState: 'downloaded' });
+    handleRecoveryAction('install-update');
+    handleRecoveryAction('open-releases');
+    expect(updater.checkForUpdates).toHaveBeenCalledOnce();
+    expect(download).toHaveBeenCalledOnce();
+    expect(updater.quitAndInstall).toHaveBeenCalledOnce();
+    expect(shell.openExternal).toHaveBeenCalledWith('https://github.com/IceTomao/backspace-cn/releases/latest');
     setAutoUpdater(null);
+    setOnDownloadUpdate(null);
+  });
+
+  it('ships the confirmation-first updater configuration', () => {
+    const main = readFileSync(path.join(__dirname, 'main.ts'), 'utf8');
+    const builder = readFileSync(path.join(__dirname, '../electron-builder.yml'), 'utf8');
+    expect(main).toContain('autoUpdater.autoDownload = false');
+    expect(main).toContain("updateState: 'available-auto'");
+    expect(main).toContain("ipcMain.on('download-update'");
+    expect(builder).toMatch(/provider:\s*github/);
+    expect(builder).toMatch(/owner:\s*IceTomao/);
+    expect(builder).toMatch(/repo:\s*backspace-cn/);
   });
 
   it('retries the default instance but leaves an explicit switch on the picker', () => {
@@ -94,8 +114,11 @@ function runPreload(protocol: string, stored: string | null, blocked = false, ma
   vm.runInNewContext(preload, {
     exports: {},
     require: (name: string) => {
-      if (name !== 'electron') throw new Error(`Sandbox forbids ${name}`);
-      return { contextBridge: { exposeInMainWorld }, ipcRenderer: { sendSync }, webFrame: { insertCSS } };
+      if (name === './favoritesPreload') return { startDesktopFavorites: vi.fn() };
+      if (name === 'electron') {
+        return { contextBridge: { exposeInMainWorld }, ipcRenderer: { sendSync }, webFrame: { insertCSS } };
+      }
+      throw new Error(`Sandbox forbids ${name}`);
     },
     process: { platform, isMainFrame: mainFrame, argv: ['electron', '--backspace-default-language=zh'] },
     window: { location: { protocol }, localStorage: storage },

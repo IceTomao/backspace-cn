@@ -1,0 +1,57 @@
+[data-desktop-favorites] {
+  color: rgb(var(--text-message, 216 216 222));
+  font: 13px/1.4 var(--font-family, sans-serif);
+  letter-spacing: 0;
+  box-sizing: border-box;
+}
+.desktop-favorites-panel, .desktop-favorites-panel * { box-sizing: border-box; }
+[data-desktop-favorites] button { font: inherit; cursor: pointer; }
+[data-desktop-favorites] button:disabled { cursor: wait; opacity: .5; }
+[data-desktop-favorites] button:focus-visible { outline: 2px solid #7877df; outline-offset: -2px; }
+.desktop-favorites-panel {
+  flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column;
+  background: rgb(var(--em-rgb-background));
+  color: rgb(var(--em-rgb-color));
+  font: 13px/1.4 var(--font-family, sans-serif);
+}
+.desktop-favorites-panel[hidden] { display: none !important; }
+.desktop-favorites-heading {
+  font-size: 14px; font-weight: 600; margin: 0;
+  padding: var(--padding) var(--padding) var(--padding-small); flex: none;
+}
+.desktop-favorites-grid {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--padding) var(--padding);
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-rows: 58px; gap: 7px; align-content: start;
+  scrollbar-width: thin;
+}
+.desktop-favorites-tile {
+  width: 100%; height: 58px; padding: 3px; border-radius: 6px; overflow: hidden;
+  color: inherit; background: transparent; border: 1px solid transparent;
+  display: flex; align-items: center; justify-content: center; position: relative;
+}
+.desktop-favorites-tile:hover { background: var(--em-color-border); }
+.desktop-favorites-tile img { width: 100%; height: 100%; object-fit: contain; }
+.desktop-favorites-add { border: 1px dashed var(--em-color-border-over); }
+.desktop-favorites-heart svg { fill: none; stroke: currentColor; stroke-width: 2; }
+.desktop-favorites-notice {
+  position: fixed; z-index: 1100; bottom: 24px; left: 50%; transform: translateX(-50%);
+  max-width: min(460px, calc((100vw - 32px) / var(--interface-scale, 1))); max-height: 35vh; overflow: auto;
+  white-space: pre-line; overflow-wrap: anywhere; padding: 10px 14px; border-radius: 6px;
+  background: rgb(var(--bg-elevated, 37 37 48)); box-shadow: 0 2px 14px #0003;
+  border: 1px solid rgb(var(--text-message, 216 216 222) / .25);
+}
+.desktop-favorites-remove {
+  position: fixed; z-index: 1050; min-width: 120px; padding: 4px;
+  border: 1px solid rgb(var(--text-message, 216 216 222) / .2); border-radius: 6px;
+  background: rgb(var(--bg-elevated, 37 37 48)); box-shadow: 0 2px 12px #0003;
+}
+.desktop-favorites-remove button {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  background: transparent; border: 0; color: inherit; width: 100%;
+}
+.desktop-favorites-remove button:hover { background: rgb(var(--text-message, 216 216 222) / .1); }
+@media (forced-colors: active) {
+  .desktop-favorites-panel, .desktop-favorites-remove, .desktop-favorites-notice { background: Canvas; color: CanvasText; border-color: CanvasText; }
+  .desktop-favorites-add { border-color: ButtonText; }
+}

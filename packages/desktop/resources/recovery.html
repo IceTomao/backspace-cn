@@ -186,10 +186,12 @@
         hintExternal: 'Try reloading the app or changing the connected instance. Updates are managed by Flatpak.',
         hintLoadFailed: "Couldn't reach your instance. Check your connection or try a different instance.",
         hintCrashReady: 'Something inside the app failed. An update is ready, so click Restart to Install.',
+        hintCrashAvailable: 'Something inside the app failed. A newer version is available. Download it when you are ready.',
         hintCrashManual: 'Something inside the app failed. A newer version is available, but this build cannot install it itself. Download it and replace the app.',
         hintCrashDownloading: 'Something inside the app failed. An update is downloading, so wait for it to finish and then restart.',
         hintCrash: 'Something inside the app failed. Try reloading or check for an update.',
         hintStalledReady: "The app didn't finish loading. An update is ready, so click Restart to Install.",
+        hintStalledAvailable: "The app didn't finish loading. A newer version is available. Download it when you are ready.",
         hintStalledManual: "The app didn't finish loading. A newer version is available, but this build cannot install it itself. Download it and replace the app.",
         hintStalledDownloading: "The app didn't finish loading. An update is downloading, so wait for it to finish and then restart.",
         hintStalled: "The app didn't finish loading in time. Try reloading, or check for an update if reloading doesn't help.",
@@ -219,10 +221,12 @@
         hintExternal: 'Попробуйте перезагрузить приложение или сменить сервер. Обновлениями управляет Flatpak.',
         hintLoadFailed: 'Не удалось связаться с сервером. Проверьте подключение или попробуйте другой сервер.',
         hintCrashReady: 'В приложении произошёл сбой. Обновление готово, нажмите «Перезапустить для установки».',
+        hintCrashAvailable: 'В приложении произошёл сбой. Доступна новая версия. Скачайте её, когда будете готовы.',
         hintCrashManual: 'В приложении произошёл сбой. Доступна новая версия, но эта сборка не может установить её сама. Скачайте её и замените приложение.',
         hintCrashDownloading: 'В приложении произошёл сбой. Обновление загружается, дождитесь окончания и перезапустите приложение.',
         hintCrash: 'В приложении произошёл сбой. Попробуйте перезагрузить его или проверить обновления.',
         hintStalledReady: 'Приложение не завершило загрузку. Обновление готово, нажмите «Перезапустить для установки».',
+        hintStalledAvailable: 'Приложение не завершило загрузку. Доступна новая версия. Скачайте её, когда будете готовы.',
         hintStalledManual: 'Приложение не завершило загрузку. Доступна новая версия, но эта сборка не может установить её сама. Скачайте её и замените приложение.',
         hintStalledDownloading: 'Приложение не завершило загрузку. Обновление загружается, дождитесь окончания и перезапустите приложение.',
         hintStalled: 'Приложение не загрузилось вовремя. Попробуйте перезагрузить его, а если не поможет, проверьте обновления.',
@@ -252,10 +256,12 @@
         hintExternal: '请尝试重新加载或切换服务器。更新由 Flatpak 管理。',
         hintLoadFailed: '无法连接服务器，请检查网络连接或尝试切换服务器。',
         hintCrashReady: '应用发生错误，更新已就绪，请重启以安装。',
+        hintCrashAvailable: '应用发生错误，有新版本可用，可在准备好后下载。',
         hintCrashManual: '应用发生错误，有新版本可用，请下载并重新安装。',
         hintCrashDownloading: '应用发生错误，正在下载更新，请等待下载完成后重启。',
         hintCrash: '应用发生错误，请尝试重新加载或检查更新。',
         hintStalledReady: '应用未能完成加载，更新已就绪，请重启以安装。',
+        hintStalledAvailable: '应用未能完成加载，有新版本可用，可在准备好后下载。',
         hintStalledManual: '应用未能完成加载，有新版本可用，请下载并重新安装。',
         hintStalledDownloading: '应用未能完成加载，正在下载更新，请等待下载完成后重启。',
         hintStalled: '应用加载超时，请尝试重新加载；若无效，请检查更新。',
@@ -285,10 +291,12 @@
         hintExternal: 'Lade die App neu oder wechsle die Instanz. Updates werden von Flatpak verwaltet.',
         hintLoadFailed: 'Deine Instanz war nicht erreichbar. Prüfe deine Verbindung oder versuche eine andere Instanz.',
         hintCrashReady: 'In der App ist etwas fehlgeschlagen. Ein Update ist bereit, klicke auf „Neu starten und Update installieren“.',
+        hintCrashAvailable: 'In der App ist etwas fehlgeschlagen. Eine neuere Version ist verfügbar. Lade sie herunter, wenn du bereit bist.',
         hintCrashManual: 'In der App ist etwas fehlgeschlagen. Eine neuere Version ist verfügbar, aber dieser Build kann sie nicht selbst installieren. Lade sie herunter und ersetze die App.',
         hintCrashDownloading: 'In der App ist etwas fehlgeschlagen. Ein Update wird heruntergeladen, warte, bis es fertig ist, und starte dann neu.',
         hintCrash: 'In der App ist etwas fehlgeschlagen. Lade neu oder suche nach einem Update.',
         hintStalledReady: 'Die App wurde nicht fertig geladen. Ein Update ist bereit, klicke auf „Neu starten und Update installieren“.',
+        hintStalledAvailable: 'Die App wurde nicht fertig geladen. Eine neuere Version ist verfügbar. Lade sie herunter, wenn du bereit bist.',
         hintStalledManual: 'Die App wurde nicht fertig geladen. Eine neuere Version ist verfügbar, aber dieser Build kann sie nicht selbst installieren. Lade sie herunter und ersetze die App.',
         hintStalledDownloading: 'Die App wurde nicht fertig geladen. Ein Update wird heruntergeladen, warte, bis es fertig ist, und starte dann neu.',
         hintStalled: 'Die App wurde nicht rechtzeitig geladen. Lade neu, oder suche nach einem Update, wenn das nicht hilft.',
@@ -323,12 +331,14 @@
       if (reasonCode === 'load-failed') return t('hintLoadFailed');
       if (reasonCode === 'render-gone' || reasonCode === 'unresponsive') {
         if (updateState === 'downloaded') return t('hintCrashReady');
+        if (updateState === 'available-auto') return t('hintCrashAvailable');
         if (updateState === 'available-manual') return t('hintCrashManual');
         if (updateState === 'downloading') return t('hintCrashDownloading');
         return t('hintCrash');
       }
       if (reasonCode === 'renderer-stalled') {
         if (updateState === 'downloaded') return t('hintStalledReady');
+        if (updateState === 'available-auto') return t('hintStalledAvailable');
         if (updateState === 'available-manual') return t('hintStalledManual');
         if (updateState === 'downloading') return t('hintStalledDownloading');
         return t('hintStalled');
@@ -342,6 +352,7 @@
         case 'checking': return t('checking');
         case 'downloading': return t('downloading');
         case 'downloaded': return t('updateReady');
+        case 'available-auto':
         case 'available-manual': return t('updateAvailable');
         case 'error': return t('checkForUpdates');
         case 'idle':
@@ -354,6 +365,7 @@
       return updateState !== 'checking'
         && updateState !== 'downloading'
         && updateState !== 'downloaded'
+        && updateState !== 'available-auto'
         && updateState !== 'available-manual';
     }
 
@@ -389,11 +401,13 @@
       // and installable, so this surface can never present a dead button.
       $('btn-restart').style.display = updatesEnabled && state.updateState === 'downloaded' ? '' : 'none';
 
-      // Open Releases visibility. Shown after a failed update, and on builds
-      // that cannot install in place, where downloading is the only real action.
+      // The same button downloads in-app for installable builds and opens the
+      // Releases page for manual builds or failed downloads.
+      const automatic = state.updateState === 'available-auto';
       const manual = state.updateState === 'available-manual';
-      $('btn-releases').style.display = updatesEnabled && (state.updateState === 'error' || manual) ? '' : 'none';
-      $('btn-releases').textContent = manual
+      $('btn-releases').style.display = updatesEnabled && (state.updateState === 'error' || automatic || manual) ? '' : 'none';
+      $('btn-releases').dataset.action = automatic ? 'download-update' : 'open-releases';
+      $('btn-releases').textContent = automatic || manual
         ? (state.updateVersion ? t('downloadVersion', { version: state.updateVersion }) : t('downloadUpdate'))
         : t('openReleases');
 
@@ -424,7 +438,7 @@
     $('btn-restart').onclick = () => dispatch('install-update');
     $('btn-check').onclick = () => dispatch('check-update');
     $('btn-change').onclick = () => dispatch('change-instance');
-    $('btn-releases').onclick = () => dispatch('open-releases');
+    $('btn-releases').onclick = () => dispatch($('btn-releases').dataset.action || 'open-releases');
     $('btn-quit').onclick = () => dispatch('quit');
 
     // Cmd/Ctrl+R as keyboard shortcut for Reload

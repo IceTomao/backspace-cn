@@ -61,6 +61,9 @@ importers:
       electron-updater:
         specifier: ^6.8.9
         version: 6.8.9
+      sharp:
+        specifier: 0.35.4
+        version: 0.35.4(@types/node@26.5.1)
       uiohook-napi:
         specifier: ^1.5.5
         version: 1.5.5(patch_hash=58cc6a1bd7f69277c47fa5fb1d8342d52acc5a48c420c0e5854857ee6e783d51)
@@ -77,6 +80,12 @@ importers:
       electron-builder:
         specifier: ^26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      lucide:
+        specifier: 0.468.0
+        version: 0.468.0
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -4358,6 +4367,9 @@ packages:
   lru-cache@6.0.0:
     resolution: {integrity: sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA==}
     engines: {node: '>=10'}
+
+  lucide@0.468.0:
+    resolution: {integrity: sha512-UFbgwji/ZnAV7iTTE4jujyTV7J95AILKyATDUrqOJrMcUGfXvGjw3c1mcuHZUX2oJfkrAGU9KoxkrLQk2jjtiA==}
 
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
@@ -10229,6 +10241,8 @@ snapshots:
   lru-cache@6.0.0:
     dependencies:
       yallist: 4.0.0
+
+  lucide@0.468.0: {}
 
   lz-string@1.5.0: {}
 
