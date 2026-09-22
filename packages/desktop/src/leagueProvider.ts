@@ -1,11 +1,11 @@
-import { execFile } from 'child_process';
 import fs from 'fs';
 import https from 'https';
 import path from 'path';
 import { app } from 'electron';
 import type { ActivityProvider, DetectedActivity } from './activityTypes';
 import { updateLeagueMatchContext, type LeagueChampionPresence, type LeagueMatchContext } from './leagueMatchContext';
-import { parseLeagueProcessRows, resolveLcuConnection, type LcuConnection, type LeagueProcessSnapshot } from './leagueConnection';
+import { resolveLcuConnection, type LcuConnection, type LeagueProcessSnapshot } from './leagueConnection';
+import { readLeagueProcessesNative } from './leagueProcessNative';
 
 interface ChampionRecord { key: string; name: string; image?: { full?: string } }
 
@@ -25,24 +25,10 @@ const QUEUES: Record<number, string> = {
   1710: '斗魂竞技场', 1810: '斗魂竞技场', 1900: '极限闪击', 2000: '训练模式',
 };
 
-function execPowerShell(command: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true, timeout: 5_000 }, (error, stdout) => {
-      if (error) reject(error); else resolve(stdout);
-    });
-  });
-}
-
 async function readProcesses(): Promise<{ clients: LeagueProcessSnapshot[]; hasGame: boolean }> {
   if (process.platform !== 'win32') return { clients: [], hasGame: false };
-  // Get-CimInstance already exposes CreationDate as a DateTime. The old code
-  // passed it through ManagementDateTimeConverter (which expects a DMTF string)
-  // and consequently threw on every matching League process.
-  const command = "$n=@('LeagueClient.exe','LeagueClientUx.exe','League of Legends.exe','LeagueofLegends.exe'); Get-CimInstance Win32_Process | Where-Object {$n -contains $_.Name} | ForEach-Object {[PSCustomObject]@{name=$_.Name;commandLine=$_.CommandLine;executablePath=$_.ExecutablePath;startedAt=([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress";
   try {
-    const output = (await execPowerShell(command)).trim();
-    if (!output) return { clients: [], hasGame: false };
-    const rows = parseLeagueProcessRows(output);
+    const rows = await readLeagueProcessesNative();
     processScanWarned = false;
     const clients = rows.filter((row) => CLIENT_PROCESSES.has(row.name.toLowerCase()));
     return { clients, hasGame: rows.some((row) => GAME_PROCESSES.has(row.name.toLowerCase())) };

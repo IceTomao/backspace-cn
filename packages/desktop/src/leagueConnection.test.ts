@@ -21,6 +21,13 @@ describe('League LCU connection discovery', () => {
     });
   });
 
+  it('accepts Tencent LeagueClientUx arguments quoted as a whole', () => {
+    expect(parseLcuCommandLine('"--remoting-auth-token=native-token" "--app-port=3611"')).toEqual({
+      port: 3611,
+      token: 'native-token',
+    });
+  });
+
   it('rejects incomplete or out-of-range command-line credentials', () => {
     expect(parseLcuCommandLine('--app-port=8773')).toBeNull();
     expect(parseLcuCommandLine('--app-port=70000 --remoting-auth-token=secret')).toBeNull();
