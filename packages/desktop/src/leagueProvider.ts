@@ -39,7 +39,12 @@ const QUEUES: Record<number, string> = {
 };
 
 export function leagueChampionIconUrl(championId: number): string {
-  return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${championId}.png`;
+  return `https://cdn.communitydragon.org/latest/champion/${championId}/square`;
+}
+
+export function leagueChampionIconUrlFromRawName(rawName: string | undefined): string | undefined {
+  const key = rawName?.match(/(?:^|_)([A-Za-z][A-Za-z0-9]*)$/)?.[1];
+  return key ? `https://cdn.communitydragon.org/latest/champion/${key}/square` : undefined;
 }
 
 const MODE_ALIASES: Array<[RegExp, string]> = [
@@ -269,6 +274,7 @@ export function parseLcuPresence(input: LeaguePresenceInput): LeagueLcuPresence 
 
 export interface LiveGamePresence {
   championName?: string;
+  imageUrl?: string;
   mode?: string;
 }
 
@@ -281,7 +287,12 @@ export function parseLiveGamePresence(data: LiveGameData): LiveGamePresence {
   ));
   const game = data.gameData;
   const mode = normalizeLeagueMode(game?.gameType, game?.gameMode, game?.mapName);
-  return { championName: player?.championName ?? player?.rawChampionName ?? data.activePlayer?.championName, mode };
+  const imageUrl = leagueChampionIconUrlFromRawName(player?.rawChampionName);
+  return {
+    championName: player?.championName ?? player?.rawChampionName ?? data.activePlayer?.championName,
+    ...(imageUrl ? { imageUrl } : {}),
+    mode,
+  };
 }
 
 function liveGameRequest<T>(endpoint: string): Promise<T | null> {
@@ -397,7 +408,11 @@ export class LeagueProvider implements ActivityProvider {
       this.matchContext,
       'InProgress',
       this.matchContext.mode ?? presence.mode,
-      presence.championName ? { ...this.matchContext.champion, name: presence.championName } : undefined,
+      presence.championName || presence.imageUrl ? {
+        ...this.matchContext.champion,
+        name: presence.championName ?? this.matchContext.champion?.name,
+        imageUrl: presence.imageUrl ?? this.matchContext.champion?.imageUrl,
+      } : undefined,
     );
     activity.state = [this.matchContext.mode, phaseLabel(phase) ?? '游戏中'].filter(Boolean).join(' · ') || undefined;
     if (this.matchContext.champion?.name) activity.details = this.matchContext.champion.name;

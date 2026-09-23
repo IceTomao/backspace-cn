@@ -5,6 +5,7 @@ vi.mock('electron', () => ({ app: { getPath: () => '' } }));
 import {
   createLeagueActivity,
   leagueChampionIconUrl,
+  leagueChampionIconUrlFromRawName,
   normalizeLeagueMode,
   parseLcuPresence,
   parseLiveGamePresence,
@@ -24,8 +25,12 @@ describe('League activity fallback', () => {
 
   it('uses a stable public champion icon URL', () => {
     expect(leagueChampionIconUrl(39)).toBe(
-      'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/39.png',
+      'https://cdn.communitydragon.org/latest/champion/39/square',
     );
+    expect(leagueChampionIconUrlFromRawName('game_character_displayname_Irelia')).toBe(
+      'https://cdn.communitydragon.org/latest/champion/Irelia/square',
+    );
+    expect(leagueChampionIconUrlFromRawName('not/a/champion')).toBeUndefined();
   });
 });
 
@@ -57,8 +62,16 @@ describe('League in-game API fallback', () => {
     expect(parseLiveGamePresence({
       activePlayer: { summonerName: '训练玩家' },
       gameData: { gameMode: 'CLASSIC', gameType: 'PRACTICE_GAME', mapName: 'Map11' },
-      allPlayers: [{ riotIdGameName: '训练玩家', championName: '亚索' }],
-    })).toEqual({ championName: '亚索', mode: '训练模式' });
+      allPlayers: [{
+        riotIdGameName: '训练玩家',
+        championName: '刀锋舞者',
+        rawChampionName: 'game_character_displayname_Irelia',
+      }],
+    })).toEqual({
+      championName: '刀锋舞者',
+      imageUrl: 'https://cdn.communitydragon.org/latest/champion/Irelia/square',
+      mode: '训练模式',
+    });
   });
 });
 
