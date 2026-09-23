@@ -38,6 +38,10 @@ const QUEUES: Record<number, string> = {
   1710: '斗魂竞技场', 1810: '斗魂竞技场', 1900: '极限闪击', 2000: '训练模式',
 };
 
+export function leagueChampionIconUrl(championId: number): string {
+  return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${championId}.png`;
+}
+
 const MODE_ALIASES: Array<[RegExp, string]> = [
   [/practice|training|训练/i, '训练模式'],
   [/teamfight tactics|tft|云顶/i, '云顶之弈'],
@@ -396,7 +400,7 @@ export class LeagueProvider implements ActivityProvider {
       presence.championName ? { ...this.matchContext.champion, name: presence.championName } : undefined,
     );
     activity.state = [this.matchContext.mode, phaseLabel(phase) ?? '游戏中'].filter(Boolean).join(' · ') || undefined;
-    if (this.matchContext.champion?.name) activity.details = `使用：${this.matchContext.champion.name}`;
+    if (this.matchContext.champion?.name) activity.details = this.matchContext.champion.name;
     return true;
   }
 
@@ -424,13 +428,13 @@ export class LeagueProvider implements ActivityProvider {
     let championPresence: LeagueChampionPresence | undefined;
     if (presence.championId) {
       const champion = await this.getChampion(connection, presence.championId);
-      if (champion?.image?.full && this.championVersion) {
+      if (champion) {
         championPresence = {
           name: champion.name,
-          imageUrl: `https://ddragon.leagueoflegends.com/cdn/${this.championVersion}/img/champion/${champion.image.full}`,
+          imageUrl: leagueChampionIconUrl(presence.championId),
         };
       } else {
-        championPresence = champion ? { name: champion.name } : {};
+        championPresence = {};
       }
     }
 
@@ -447,7 +451,7 @@ export class LeagueProvider implements ActivityProvider {
     const phaseText = phaseLabel(phase);
     activity.state = [this.matchContext.mode, phaseText].filter(Boolean).join(' · ') || undefined;
     if (this.matchContext.champion) {
-      activity.details = this.matchContext.champion.name ? `使用：${this.matchContext.champion.name}` : '已选择英雄';
+      activity.details = this.matchContext.champion.name ?? '已选择英雄';
       if (this.matchContext.champion.imageUrl) {
         activity.assets = { largeImage: this.matchContext.champion.imageUrl, largeText: this.matchContext.champion.name };
       }

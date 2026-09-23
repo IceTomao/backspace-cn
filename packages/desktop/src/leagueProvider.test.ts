@@ -4,6 +4,7 @@ vi.mock('electron', () => ({ app: { getPath: () => '' } }));
 
 import {
   createLeagueActivity,
+  leagueChampionIconUrl,
   normalizeLeagueMode,
   parseLcuPresence,
   parseLiveGamePresence,
@@ -19,6 +20,12 @@ describe('League activity fallback', () => {
       name: 'League of Legends',
       timestamps: { start: 1760000000123 },
     });
+  });
+
+  it('uses a stable public champion icon URL', () => {
+    expect(leagueChampionIconUrl(39)).toBe(
+      'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/39.png',
+    );
   });
 });
 
