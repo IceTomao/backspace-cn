@@ -165,14 +165,28 @@ function warnLcuFailure(endpoint: string, reason: string): void {
 }
 
 interface LiveGameData {
-  activePlayer?: { summonerName?: string };
+  activePlayer?: { summonerName?: string; championName?: string };
   gameData?: { gameMode?: string; gameType?: string; mapName?: string };
-  playerList?: Array<{ summonerName?: string; championName?: string }>;
+  allPlayers?: Array<{
+    summonerName?: string;
+    riotIdGameName?: string;
+    championName?: string;
+    rawChampionName?: string;
+  }>;
+  playerList?: Array<{
+    summonerName?: string;
+    riotIdGameName?: string;
+    championName?: string;
+    rawChampionName?: string;
+  }>;
 }
 
 interface LeagueSummonerIdentity {
   puuid?: string;
   summonerId?: string | number;
+  summonerName?: string;
+  gameName?: string;
+  displayName?: string;
 }
 
 interface LeaguePresenceInput {
@@ -193,9 +207,16 @@ function hasIdentity(member: Record<string, unknown>, current: LeagueSummonerIde
   if (!current) return false;
   const memberPuuid = textValue(member.puuid);
   const memberSummonerId = textValue(member.summonerId) ?? numberValue(member.summonerId)?.toString();
+  const memberNames = [member.summonerName, member.gameName, member.displayName]
+    .map(textValue)
+    .filter(Boolean);
+  const currentNames = [current.summonerName, current.gameName, current.displayName]
+    .map(textValue)
+    .filter(Boolean);
   return Boolean(
     (current.puuid && memberPuuid && current.puuid === memberPuuid)
-    || (current.summonerId !== undefined && memberSummonerId && String(current.summonerId) === memberSummonerId),
+    || (current.summonerId !== undefined && memberSummonerId && String(current.summonerId) === memberSummonerId)
+    || memberNames.some((name) => currentNames.includes(name)),
   );
 }
 
@@ -216,7 +237,8 @@ function findLocalChampionId(
     ...(Array.isArray(gameData?.teamOne) ? gameData.teamOne as Array<Record<string, unknown>> : []),
     ...(Array.isArray(gameData?.teamTwo) ? gameData.teamTwo as Array<Record<string, unknown>> : []),
   ];
-  const gameMember = [...selections, ...teams].find((member) => hasIdentity(member, currentSummoner));
+  const gameMember = [...selections, ...teams].find((member) => hasIdentity(member, currentSummoner))
+    ?? [...selections, ...teams].find((member) => member.isCurrentPlayer === true || member.isLocalPlayer === true);
   const gameChampion = championIdFromMember(gameMember);
   if (gameChampion) return gameChampion;
 
@@ -249,10 +271,13 @@ export interface LiveGamePresence {
 /** Extract the local champion and a readable mode from Riot's in-game API. */
 export function parseLiveGamePresence(data: LiveGameData): LiveGamePresence {
   const activeName = data.activePlayer?.summonerName;
-  const player = data.playerList?.find((candidate) => candidate.summonerName === activeName);
+  const players = data.allPlayers ?? data.playerList ?? [];
+  const player = players.find((candidate) => (
+    candidate.summonerName === activeName || ('riotIdGameName' in candidate && candidate.riotIdGameName === activeName)
+  ));
   const game = data.gameData;
   const mode = normalizeLeagueMode(game?.gameType, game?.gameMode, game?.mapName);
-  return { championName: player?.championName, mode };
+  return { championName: player?.championName ?? player?.rawChampionName ?? data.activePlayer?.championName, mode };
 }
 
 function liveGameRequest<T>(endpoint: string): Promise<T | null> {
@@ -346,30 +371,36 @@ export class LeagueProvider implements ActivityProvider {
       console.warn('[league] LOL detected, but no LCU connection was found; game phase and champion details will be unavailable. Run the desktop client at the same privilege level as League or expose the LeagueClient lockfile.');
     }
     if (connection) {
-      await this.enrich(next, connection);
+      await this.enrich(next, connection, hasGame);
     } else if (hasGame) {
       await this.enrichFromLiveGame(next);
     }
     this.publish(next, onChange);
   }
 
-  private async enrichFromLiveGame(activity: DetectedActivity): Promise<void> {
+  private async enrichFromLiveGame(activity: DetectedActivity, phase?: unknown): Promise<boolean> {
     const data = await liveGameRequest<LiveGameData>('/liveclientdata/allgamedata');
     if (!data) {
       if (!gameClientWarned) {
         gameClientWarned = true;
         console.warn('[league] in-game API unavailable on 127.0.0.1:2999; publishing base League activity');
       }
-      return;
+      return false;
     }
     gameClientWarned = false;
     const presence = parseLiveGamePresence(data);
-    this.matchContext = updateLeagueMatchContext(this.matchContext, 'InProgress', presence.mode, presence.championName ? { name: presence.championName } : undefined);
-    activity.state = [this.matchContext.mode, '游戏中'].filter(Boolean).join(' · ') || undefined;
+    this.matchContext = updateLeagueMatchContext(
+      this.matchContext,
+      'InProgress',
+      this.matchContext.mode ?? presence.mode,
+      presence.championName ? { ...this.matchContext.champion, name: presence.championName } : undefined,
+    );
+    activity.state = [this.matchContext.mode, phaseLabel(phase) ?? '游戏中'].filter(Boolean).join(' · ') || undefined;
     if (this.matchContext.champion?.name) activity.details = `使用：${this.matchContext.champion.name}`;
+    return true;
   }
 
-  private async enrich(activity: DetectedActivity, connection: LcuConnection): Promise<void> {
+  private async enrich(activity: DetectedActivity, connection: LcuConnection, hasGame: boolean): Promise<void> {
     const [phase, session, champSelect, currentSummoner] = await Promise.all([
       lcuRequest<string>(connection, '/lol-gameflow/v1/gameflow-phase'),
       lcuRequest<Record<string, unknown>>(connection, '/lol-gameflow/v1/session'),
@@ -412,6 +443,7 @@ export class LeagueProvider implements ActivityProvider {
         presence.gameId,
       );
     }
+    if (hasGame) await this.enrichFromLiveGame(activity, phase);
     const phaseText = phaseLabel(phase);
     activity.state = [this.matchContext.mode, phaseText].filter(Boolean).join(' · ') || undefined;
     if (this.matchContext.champion) {

@@ -27,15 +27,31 @@ describe('League in-game API fallback', () => {
     expect(parseLiveGamePresence({
       activePlayer: { summonerName: 'player' },
       gameData: { gameMode: 'CLASSIC', gameType: 'PRACTICE_GAME', mapName: 'Map11' },
-      playerList: [{ summonerName: 'player', championName: '亚索' }],
+      allPlayers: [{ summonerName: 'player', championName: '亚索' }],
     })).toEqual({ championName: '亚索', mode: '训练模式' });
   });
 
   it('maps ARAM without requiring LCU queue data', () => {
     expect(parseLiveGamePresence({
       gameData: { gameMode: 'ARAM', mapName: 'Map12' },
-      playerList: [],
+      allPlayers: [],
     })).toEqual({ mode: '极地大乱斗' });
+  });
+
+  it('accepts a champion supplied directly by the live API active player', () => {
+    expect(parseLiveGamePresence({
+      activePlayer: { championName: '亚索' },
+      gameData: { gameMode: 'CLASSIC', mapName: 'Map11' },
+      allPlayers: [],
+    })).toEqual({ championName: '亚索', mode: '经典模式' });
+  });
+
+  it('matches the local player using Riot ID when summonerName is absent', () => {
+    expect(parseLiveGamePresence({
+      activePlayer: { summonerName: '训练玩家' },
+      gameData: { gameMode: 'CLASSIC', gameType: 'PRACTICE_GAME', mapName: 'Map11' },
+      allPlayers: [{ riotIdGameName: '训练玩家', championName: '亚索' }],
+    })).toEqual({ championName: '亚索', mode: '训练模式' });
   });
 });
 
@@ -84,6 +100,19 @@ describe('League LCU presence parsing', () => {
       phase: 'ChampSelect',
       session: { gameData: { queue: { id: 2000 } } },
       champSelect: { localPlayerCellId: 7, myTeam: [{ cellId: 7, championId: 157 }] },
+    })).toMatchObject({ mode: '训练模式', championId: 157 });
+  });
+
+  it('matches training-game data by summoner name when PUUID is absent', () => {
+    expect(parseLcuPresence({
+      phase: 'InProgress',
+      currentSummoner: { summonerName: '训练玩家' },
+      session: {
+        gameData: {
+          queue: { id: 2000 },
+          playerChampionSelections: [{ summonerName: '训练玩家', championId: 157 }],
+        },
+      },
     })).toMatchObject({ mode: '训练模式', championId: 157 });
   });
 });
