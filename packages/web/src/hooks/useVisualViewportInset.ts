@@ -112,10 +112,18 @@ export function useVisualViewportInset(): VisualViewportInset {
       // to the bottom of the visual viewport (offsetTop + height). On iOS
       // when the keyboard is up, this equals the keyboard's height.
       const occlusion = window.innerHeight - (vv.offsetTop + vv.height);
+      // In an installed iOS PWA, the visual viewport can end above the home
+      // indicator even while the keyboard is closed. That safe-area gap is
+      // also greater than 1px, so `occlusion > 1` alone misclassifies every
+      // normal screen as keyboard-open and shortens the shell. A keyboard
+      // transition is tied to a focused text control; focusin/focusout are
+      // also the fallback signals used below for iOS versions that delay
+      // visualViewport resize events.
+      const keyboardOpen = textInputFocusedRef.current && occlusion > 1;
       // Sub-pixel noise on iOS — anything under 1 px we treat as "no
       // keyboard" so we don't flap between safe-area and a 0.4 px offset.
       const next: VisualViewportInset =
-        occlusion > 1
+        keyboardOpen
           ? {
               value: `${Math.round(layoutPixels(occlusion))}px`,
               keyboardOpen: true,
@@ -134,13 +142,13 @@ export function useVisualViewportInset(): VisualViewportInset {
       const root = document.documentElement;
       root.style.setProperty('--visual-viewport-height', `${layoutPixels(vv.height)}px`);
       root.style.setProperty('--visual-viewport-top', `${layoutPixels(vv.offsetTop)}px`);
-      root.style.setProperty('--keyboard-occlusion', `${Math.max(0, layoutPixels(occlusion))}px`);
+      root.style.setProperty('--keyboard-occlusion', `${keyboardOpen ? Math.max(0, layoutPixels(occlusion)) : 0}px`);
       // A closed iOS standalone PWA can report a dynamic viewport that ends
       // above the home-indicator area. Using that value by itself leaves a
       // black strip below the bottom navigation. Restore the bottom safe area
       // while the keyboard is closed; when the keyboard is open, the visual
       // viewport already ends at the keyboard and must remain the shell edge.
-      root.style.setProperty('--app-height', occlusion > 1
+      root.style.setProperty('--app-height', keyboardOpen
         ? `${layoutPixels(vv.height)}px`
         : 'calc(100 * var(--app-dvh) + var(--safe-bottom))');
 
