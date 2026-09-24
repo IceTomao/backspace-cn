@@ -169,7 +169,13 @@ export function MobileShell() {
   useVisualViewportInset();
 
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden" style={{ height: 'var(--app-height)' }}>
+    <div
+      className="flex min-h-0 flex-col overflow-hidden"
+      style={{
+        height: 'var(--app-height)',
+        paddingTop: 'var(--safe-top)',
+      }}
+    >
       <MobileScreenStack
         rootScreen={rootScreens[mobileScreen]}
         screenMap={screenMap}
