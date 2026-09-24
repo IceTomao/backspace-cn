@@ -236,6 +236,13 @@ export const ERROR_CODES = [
   'voice_disabled',
   'voice_connect_forbidden',
   'file_not_found',
+  'favorite_media_too_large',
+  'favorite_media_invalid',
+  'favorite_media_limit_reached',
+  'favorite_media_not_found',
+  'web_push_unavailable',
+  'web_push_subscription_invalid',
+  'notification_setting_invalid',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

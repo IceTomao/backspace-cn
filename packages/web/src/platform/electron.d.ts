@@ -86,6 +86,7 @@ interface BackspaceElectronAPI {
   showNotification: (title: string, body: string, options?: import('./notifications').NotificationOptions) => void;
   onNotificationClick?: (callback: (options: import('./notifications').NotificationOptions) => void) => () => void;
   setBadgeCount: (count: number) => void;
+  favoriteImages?: (request: unknown) => Promise<unknown>;
 
   // Auto-update, legacy per-event channels.
   //

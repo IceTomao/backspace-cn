@@ -84,6 +84,14 @@ import { getApiForOrigin, getOwnerInstanceForDm } from '../utils/crossStoreResol
 
 export type { FederationPeer, FederationOrphanedAccount, FederationResetEvent, FederationResetEventsResponse, ApprovalRequest, PeeringSubscription, PeeringNotification };
 
+export interface FavoriteMediaItem {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  addedAt: number;
+}
+
 export class RateLimitError extends Error {
   readonly retryAfter: number;
   constructor(retryAfter: number) {
@@ -200,6 +208,21 @@ export class BackspaceApiClient {
     putOverride: (channelId: string, data: { targetType: string; targetId: string; allow: string; deny: string }) => Promise<{ success: boolean }>;
     deleteOverride: (channelId: string, targetType: string, targetId: string) => Promise<{ success: boolean }>;
     updateLayout: (spaceId: string, data: { channels: Array<{ id: string; position: number; categoryId: string | null }>; categories: Array<{ id: string; position: number }> }) => Promise<{ success: boolean }>;
+    setNotificationSetting: (channelId: string, muted: boolean) => Promise<{ channelId: string; muted: boolean }>;
+  };
+
+  readonly notifications: {
+    webPush: () => Promise<{ enabled: boolean; publicKey: string | null }>;
+    subscribeWebPush: (subscription: PushSubscriptionJSON) => Promise<{ ok: boolean }>;
+    unsubscribeWebPush: (endpoint: string) => Promise<{ ok: boolean }>;
+    mutedChannels: () => Promise<{ mutedChannelIds: string[] }>;
+  };
+
+  readonly favoriteMedia: {
+    list: () => Promise<{ items: FavoriteMediaItem[] }>;
+    read: (id: string) => Promise<Blob>;
+    add: (name: string, bytes: Uint8Array) => Promise<{ item: FavoriteMediaItem; duplicate?: boolean }>;
+    remove: (id: string) => Promise<{ ok: boolean }>;
   };
 
   readonly categories: {
@@ -434,6 +457,15 @@ export class BackspaceApiClient {
       return response.json() as Promise<T>;
     }
 
+    async function requestBytes(path: string): Promise<Blob> {
+      const token = getToken();
+      const response = await fetch(`${baseUrl}${path}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) throw HttpError.fromBody(response.status, await response.json().catch(() => null));
+      return response.blob();
+    }
+
     this.auth = {
       register: (data: RegisterRequest) =>
         request<AuthResponse>('POST', '/auth/register', data, false),
@@ -544,6 +576,31 @@ export class BackspaceApiClient {
         request<{ success: boolean }>('DELETE', `/channels/${channelId}/overrides/${targetType}/${targetId}`),
       updateLayout: (spaceId: string, data: { channels: Array<{ id: string; position: number; categoryId: string | null }>; categories: Array<{ id: string; position: number }> }) =>
         request<{ success: boolean }>('PATCH', `/spaces/${spaceId}/channel-layout`, data),
+      setNotificationSetting: (channelId: string, muted: boolean) =>
+        request<{ channelId: string; muted: boolean }>('PUT', `/channels/${encodeURIComponent(channelId)}/notifications`, { muted }),
+    };
+
+    this.notifications = {
+      webPush: () => request<{ enabled: boolean; publicKey: string | null }>('GET', '/notifications/web-push'),
+      subscribeWebPush: (subscription) => request<{ ok: boolean }>('POST', '/notifications/web-push/subscribe', subscription),
+      unsubscribeWebPush: (endpoint) => request<{ ok: boolean }>('DELETE', '/notifications/web-push/subscribe', { endpoint }),
+      mutedChannels: () => request<{ mutedChannelIds: string[] }>('GET', '/users/@me/channel-notifications'),
+    };
+
+    this.favoriteMedia = {
+      list: () => request<{ items: FavoriteMediaItem[] }>('GET', '/users/@me/favorite-media'),
+      read: (id) => requestBytes(`/users/@me/favorite-media/${encodeURIComponent(id)}`),
+      add: (name, bytes) => {
+        let binary = '';
+        const chunk = 0x8000;
+        for (let index = 0; index < bytes.length; index += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+        }
+        return request<{ item: FavoriteMediaItem; duplicate?: boolean }>('POST', '/users/@me/favorite-media', {
+          name, data: btoa(binary),
+        });
+      },
+      remove: (id) => request<{ ok: boolean }>('DELETE', `/users/@me/favorite-media/${encodeURIComponent(id)}`),
     };
 
     this.categories = {

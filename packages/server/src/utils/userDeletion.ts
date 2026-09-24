@@ -1,6 +1,9 @@
 import crypto from 'crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { eq, or, and, inArray, isNotNull } from 'drizzle-orm';
 import { getDb, schema } from '../db/index.js';
+import { config } from '../config.js';
 
 export interface DeletionBroadcastTargets {
   /** Space IDs the user is a member of (for member_left broadcasts) */
@@ -108,6 +111,17 @@ export function tombstoneUser(uid: string, options?: TombstoneOptions): string[]
   if (user.avatar) filesToDelete.push(user.avatar);
   if (user.banner) filesToDelete.push(user.banner);
 
+  // Favorite media is content-addressed and may be shared by several users.
+  // Capture the names before the tombstone transaction, then remove the files
+  // only when the last database row referencing each one is gone.
+  const favoriteStorageNames = new Set(
+    db.select({ storageName: schema.favoriteMedia.storageName })
+      .from(schema.favoriteMedia)
+      .where(eq(schema.favoriteMedia.userId, uid))
+      .all()
+      .map((row) => row.storageName),
+  );
+
   const purge = options?.purgeContent !== false; // default true
 
   // Find group DMs this user owns so we can transfer ownership
@@ -148,6 +162,7 @@ export function tombstoneUser(uid: string, options?: TombstoneOptions): string[]
       tx.delete(schema.dmReactions).where(eq(schema.dmReactions.userId, uid)).run();
     }
     tx.delete(schema.spaceFolders).where(eq(schema.spaceFolders.userId, uid)).run();
+    tx.delete(schema.favoriteMedia).where(eq(schema.favoriteMedia.userId, uid)).run();
 
     // The per-remote federation credentials are live secrets for accounts on
     // OTHER instances. A tombstone keeps the users row, so the ON DELETE CASCADE
@@ -279,6 +294,16 @@ export function tombstoneUser(uid: string, options?: TombstoneOptions): string[]
       federationHomeOrphaned: 0,
     }).where(eq(schema.users.id, uid)).run();
   });
+
+  for (const storageName of favoriteStorageNames) {
+    const stillReferenced = db.select({ id: schema.favoriteMedia.id })
+      .from(schema.favoriteMedia)
+      .where(eq(schema.favoriteMedia.storageName, storageName))
+      .get();
+    if (!stillReferenced) {
+      try { fs.unlinkSync(path.join(config.favoriteMediaDir, storageName)); } catch { /* already removed */ }
+    }
+  }
 
   return filesToDelete;
 }

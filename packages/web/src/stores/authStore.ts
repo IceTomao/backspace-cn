@@ -12,6 +12,8 @@ import { useActivityStore } from './activityStore';
 import { useSettingsStore } from './settingsStore';
 import { deleteAccountOnRemotes } from '../utils/federationOps';
 import { clearSelfIds } from '../utils/identity';
+import { useFavoriteMediaStore } from './favoriteMediaStore';
+import { useChannelNotificationStore } from './channelNotificationStore';
 
 interface AuthState {
   token: string | null;
@@ -39,6 +41,8 @@ function resetUserStores() {
   useVoiceStore.getState().resetSession();
   useInstanceStore.getState().reset();
   useActivityStore.getState().reset();
+  useFavoriteMediaStore.getState().reset();
+  useChannelNotificationStore.getState().reset();
   useSettingsStore.getState().resetUpdateState();
 }
 

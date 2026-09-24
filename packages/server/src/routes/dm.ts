@@ -25,6 +25,7 @@ import {
 import { fetchSpaceInviteSnapshot, getLocalInviteSnapshot } from '../utils/spaceInviteSnapshot.js';
 import { sanitizeUser } from '../utils/sanitize.js';
 import { sendError } from '../utils/httpErrors.js';
+import { sendWebPushToUsers } from '../utils/webPush.js';
 
 /** Members a group DM can hold, the owner included. */
 const GROUP_DM_MAX_MEMBERS = 10;
@@ -289,6 +290,12 @@ export function broadcastDmMessage(dmChannelId: string, message: DmMessageWithUs
     .from(schema.dmMembers)
     .where(eq(schema.dmMembers.dmChannelId, dmChannelId))
     .all();
+  sendWebPushToUsers(dmMembers.map((member) => member.userId).filter((memberId) => memberId !== message.userId), {
+    id: message.id,
+    title: message.user.displayName || message.user.username,
+    body: message.content || (message.attachments?.length ? `发送了 ${message.attachments.length} 个附件` : '发送了一条消息'),
+    channelId: dmChannelId,
+  });
 
   // Clear typing indicator for the message author — the message itself proves they stopped
   for (const member of dmMembers) {

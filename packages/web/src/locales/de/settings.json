@@ -277,7 +277,8 @@
       "musicDescription": "Teile laufende Titel und Interpret:innen.",
       "imagesLabel": "Aktivitätsbilder teilen",
       "imagesDescription": "Lade komprimierte Spielsymbole und Albumcover auf deinen Backspace-Server hoch."
-    }
+    },
+    "webPush": { "sectionTitle": "Benachrichtigungen", "label": "Webbenachrichtigungen aktivieren", "description": "Neue Nachrichten im Browser oder in der installierten App anzeigen." }
   },
   "connections": {
     "title": "Verbindungen"

@@ -602,6 +602,11 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
     [channelId, sendMessage],
   );
 
+  const handleFavoriteSelect = useCallback((file: File) => {
+    setActivePopover(null);
+    void enqueueFile({ file });
+  }, [enqueueFile]);
+
   const togglePopover = useCallback((tab: InputPopoverTab) => {
     setActivePopover((prev) => (prev === tab ? null : tab));
   }, []);
@@ -805,6 +810,7 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
           onClose={() => setActivePopover(null)}
           onEmojiSelect={handleEmojiSelect}
           onGifSelect={handleGifSelect}
+          onFavoriteSelect={handleFavoriteSelect}
           anchorRef={popoverAnchorRef}
           gifEnabled={gifEnabled}
           onTabChange={setActivePopover}
@@ -960,7 +966,7 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
                 ? t('chat:composer.placeholder.dm', { name: channelName.slice(1) })
                 : t('chat:composer.placeholder.channel', { name: channelName }))
             }
-            className="input-embedded flex-1 py-[10px] px-1 resize-none text-[15px] leading-[1.375rem] max-h-[calc(50*var(--app-vh))] scrollbar-thin"
+            className="input-embedded flex-1 py-[10px] px-1 resize-none text-[15px] leading-[1.375rem] max-h-[var(--app-height-50)] scrollbar-thin"
             rows={1}
           />
 
@@ -1011,9 +1017,9 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
 
           {/* Emoji button */}
           <button
-            onClick={() => togglePopover('emoji')}
+            onClick={() => togglePopover('favorites')}
             className={`w-10 h-10 desktop:w-[34px] desktop:h-[34px] flex items-center justify-center rounded-[6px] transition-colors flex-shrink-0 ${
-              activePopover === 'emoji' ? 'text-accent-primary' : 'text-txt-tertiary hover:text-txt-secondary'
+              activePopover === 'favorites' || activePopover === 'emoji' ? 'text-accent-primary' : 'text-txt-tertiary hover:text-txt-secondary'
             }`}
             title={t('chat:composer.emoji')}
             aria-label={t('chat:composer.emojiPicker')}

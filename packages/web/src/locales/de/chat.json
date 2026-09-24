@@ -137,5 +137,6 @@
     "join": "Beitreten",
     "joining": "Beitritt läuft…",
     "joinFailed": "Beitritt fehlgeschlagen"
-  }
+  },
+  "favorites": { "empty": "Noch keine Favoriten. Über ein Bildmenü hinzufügen.", "remove": "Favorit entfernen" }
 }

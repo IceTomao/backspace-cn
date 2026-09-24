@@ -17,6 +17,7 @@ import {
 import { sanitizeUser } from '../utils/sanitize.js';
 import { deleteAttachmentFiles } from '../utils/fileCleanup.js';
 import { sendError } from '../utils/httpErrors.js';
+import { sendWebPushToUsers } from '../utils/webPush.js';
 import { fetchEmbedsForMessages, resolveEmbeds, reResolveEmbeds, embedRowToEmbed } from '../utils/embedResolver.js';
 
 /**
@@ -425,6 +426,17 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     connectionManager.sendToChannel(spaceId, id, {
       type: 'message_created',
       message: messageWithUser,
+    });
+    const memberIds = db.select({ userId: schema.spaceMembers.userId })
+      .from(schema.spaceMembers).where(eq(schema.spaceMembers.spaceId, spaceId)).all()
+      .map((member) => member.userId)
+      .filter((memberId) => memberId !== request.userId && hasPermission(memberId, spaceId, PermissionBits.VIEW_CHANNEL, id));
+    sendWebPushToUsers(memberIds, {
+      id: messageId,
+      title: user.displayName || user.username,
+      body: content?.trim() || (attachmentRows.length ? `发送了 ${attachmentRows.length} 个附件` : '发送了一条消息'),
+      channelId: id,
+      spaceId,
     });
 
     // Resolve embeds asynchronously after responding

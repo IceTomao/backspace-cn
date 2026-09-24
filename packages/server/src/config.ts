@@ -143,6 +143,13 @@ export const config = {
     ?? resolve(dirname(env('UPLOAD_DIR', resolve(__dirname, '../../../data/uploads'))), 'activity-assets'),
   activityAssetTtlMs: envInt('ACTIVITY_ASSET_TTL_HOURS', 72) * 60 * 60 * 1000,
   activityAssetMaxBytes: envInt('ACTIVITY_ASSET_MAX_BYTES', 512 * 1024 * 1024),
+  favoriteMediaDir: envOptional('FAVORITE_MEDIA_DIR')
+    ?? resolve(dirname(env('UPLOAD_DIR', resolve(__dirname, '../../../data/uploads'))), 'favorite-media'),
+  webPush: {
+    publicKey: envOptional('WEB_PUSH_VAPID_PUBLIC_KEY'),
+    privateKey: envOptional('WEB_PUSH_VAPID_PRIVATE_KEY'),
+    subject: envOptional('WEB_PUSH_SUBJECT'),
+  },
   tusUploadDir: resolve(env('UPLOAD_DIR', resolve(__dirname, '../../../data/uploads')), '.tus'),
   tusExpirationMs: envInt('TUS_EXPIRATION_HOURS', 24) * 60 * 60 * 1000,
   tusStragglerSweepMs: envInt('TUS_STRAGGLER_SWEEP_HOURS', 48) * 60 * 60 * 1000,

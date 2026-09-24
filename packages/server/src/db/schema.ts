@@ -287,6 +287,44 @@ export const readStates = sqliteTable('read_states', {
   userIdx: index('idx_read_states_user_id').on(table.userId),
 }));
 
+export const channelNotificationSettings = sqliteTable('channel_notification_settings', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  channelId: text('channel_id').notNull(),
+  muted: integer('muted', { mode: 'boolean' }).notNull().default(false),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.channelId] }),
+  userIdx: index('idx_channel_notification_settings_user_id').on(table.userId),
+}));
+
+export const pushSubscriptions = sqliteTable('push_subscriptions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  userAgent: text('user_agent'),
+  createdAt: integer('created_at').notNull(),
+  lastUsedAt: integer('last_used_at').notNull(),
+}, (table) => ({
+  userIdx: index('idx_push_subscriptions_user_id').on(table.userId),
+}));
+
+export const favoriteMedia = sqliteTable('favorite_media', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  contentHash: text('content_hash').notNull(),
+  filename: text('filename').notNull(),
+  mimetype: text('mimetype').notNull(),
+  size: integer('size').notNull(),
+  storageName: text('storage_name').notNull(),
+  position: integer('position').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  userHashUnique: uniqueIndex('idx_favorite_media_user_hash').on(table.userId, table.contentHash),
+  userIdx: index('idx_favorite_media_user_id').on(table.userId),
+}));
+
 export const spaceFolders = sqliteTable('space_folders', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

@@ -3,16 +3,18 @@ import React, { useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { EmojiPicker } from './EmojiPicker';
 import { GifPicker } from './GifPicker';
+import { FavoriteMediaPicker } from './FavoriteMediaPicker';
 import { useUIStore } from '../../stores/uiStore';
 import { useDragToClose } from '../../hooks/useDragToClose';
 
-export type InputPopoverTab = 'emoji' | 'gif';
+export type InputPopoverTab = 'favorites' | 'emoji' | 'gif';
 
 interface InputPopoverProps {
   activeTab: InputPopoverTab;
   onClose: () => void;
   onEmojiSelect: (emoji: { native: string }) => void;
   onGifSelect: (url: string) => void;
+  onFavoriteSelect: (file: File) => void;
   anchorRef: React.RefObject<HTMLElement | null>;
   gifEnabled: boolean;
   onTabChange: (tab: InputPopoverTab) => void;
@@ -54,6 +56,7 @@ function DesktopPopover({
   onClose,
   onEmojiSelect,
   onGifSelect,
+  onFavoriteSelect,
   anchorRef,
   gifEnabled,
   onTabChange,
@@ -139,6 +142,7 @@ function DesktopPopover({
         {/* Content */}
         <div className="flex-1 min-h-0 overflow-hidden">
           {activeTab === 'emoji' && <EmojiPicker onEmojiSelect={onEmojiSelect} />}
+          {activeTab === 'favorites' && <FavoriteMediaPicker onSelect={onFavoriteSelect} />}
           {activeTab === 'gif' && gifEnabled && <GifPicker onGifSelect={onGifSelect} />}
         </div>
       </div>
@@ -156,6 +160,7 @@ function MobileSheet({
   onClose,
   onEmojiSelect,
   onGifSelect,
+  onFavoriteSelect,
   gifEnabled,
   onTabChange,
   availableTabs,
@@ -201,7 +206,7 @@ function MobileSheet({
           // just above the keyboard naturally.
           bottom: 'var(--keyboard-inset)',
           paddingBottom: 'var(--safe-bottom)',
-          maxHeight: 'min(calc(60*var(--app-dvh)), calc(60*var(--app-vh)))',
+          maxHeight: 'var(--app-height-60)',
           ...sheetStyle,
         }}
         onMouseDown={(e) => e.stopPropagation()}
@@ -221,6 +226,7 @@ function MobileSheet({
         {/* Content */}
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
           {activeTab === 'emoji' && <EmojiPicker onEmojiSelect={onEmojiSelect} mobile />}
+          {activeTab === 'favorites' && <FavoriteMediaPicker onSelect={onFavoriteSelect} mobile />}
           {activeTab === 'gif' && gifEnabled && <GifPicker onGifSelect={onGifSelect} mobile />}
         </div>
       </div>
@@ -233,10 +239,11 @@ export function InputPopover(props: InputPopoverProps) {
   const isMobile = useUIStore((s) => s.isMobile);
 
   const availableTabs: { key: InputPopoverTab; label: string }[] = [
+    { key: 'favorites', label: '收藏' },
     { key: 'emoji', label: 'Emoji' },
   ];
   if (props.gifEnabled) {
-    availableTabs.splice(0, 0, { key: 'gif', label: 'GIF' });
+    availableTabs.push({ key: 'gif', label: 'GIF' });
   }
 
   if (isMobile) {

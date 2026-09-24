@@ -6,6 +6,7 @@ import { connectionManager, getVoiceRoomElapsedSeconds } from './handler.js';
 import type { VoiceRoom, DmRoomMeta, SpaceRoomMeta } from './handler.js';
 import { isMember, getChannelSpaceId, isDmMember, isDeadOneOnOne, hasPermission, computePermissions, PermissionBits } from '../utils/permissions.js';
 import { broadcastDmMessage, getDmMessageWithUser, isDmReplyTargetInChannel } from '../routes/dm.js';
+import { sendWebPushToUsers } from '../utils/webPush.js';
 import { fetchReplyToMessages, isReplyTargetInChannel } from '../routes/messages.js';
 import { MAX_MESSAGE_LENGTH, type MessageWithUser, type Attachment, type DmMessageWithUser, type Embed, type Activity, type ActivityType, type ActivityTimestamps, type ActivityAssets, type ServerEvent, type DmCallUndeliverableFailure, type DmCallUndeliverableReason } from '@backspace/shared';
 import type { CallRelayResult, CallFanoutFailure } from '../utils/federationOutbox.js';
@@ -280,6 +281,18 @@ function handleMessageCreate(event: Record<string, unknown>, userId: string): vo
     connectionManager.sendToChannel(spaceId, channelId, {
       type: 'message_created',
       message: messageWithUser,
+    });
+    const sender = db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+    const memberIds = db.select({ userId: schema.spaceMembers.userId })
+      .from(schema.spaceMembers).where(eq(schema.spaceMembers.spaceId, spaceId)).all()
+      .map((member) => member.userId)
+      .filter((memberId) => memberId !== userId && hasPermission(memberId, spaceId, PermissionBits.VIEW_CHANNEL, channelId));
+    sendWebPushToUsers(memberIds, {
+      id: messageId,
+      title: sender?.displayName || sender?.username || '新消息',
+      body: content.trim(),
+      channelId,
+      spaceId,
     });
 
     // Resolve embeds asynchronously

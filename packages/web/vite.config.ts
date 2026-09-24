@@ -20,7 +20,10 @@ export default defineConfig(({ mode }) => ({
     }] : []),
     devCspPreamble(),
     react(),
-    ...(mode === 'android' ? [] : [VitePWA({
+      ...(mode === 'android' ? [] : [VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       includeAssets: ['icons/favicon-32.png', 'icons/favicon-16.png', 'icons/apple-touch-icon.png'],
       manifest: {
@@ -37,12 +40,7 @@ export default defineConfig(({ mode }) => ({
           { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: {
-        navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api/, /^\/ws/, /^\/uploads/],
-        skipWaiting: true,
-        clientsClaim: true,
-        cleanupOutdatedCaches: true,
+      injectManifest: {
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       },
     })]),

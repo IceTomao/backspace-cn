@@ -277,7 +277,8 @@
       "musicDescription": "分享正在播放的歌曲和艺术家信息。",
       "imagesLabel": "分享活动封面和图标",
       "imagesDescription": "将压缩后的游戏图标和专辑封面上传到您的 Backspace 服务器。"
-    }
+    },
+    "webPush": { "sectionTitle": "通知", "label": "启用网页通知", "description": "收到新消息时在网页或已安装的轻应用中提醒你。" }
   },
   "connections": {
     "title": "连接件"

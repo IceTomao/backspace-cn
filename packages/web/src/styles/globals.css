@@ -28,6 +28,13 @@
     --app-vh: calc(1vh / var(--interface-scale));
     --app-dvh: calc(1dvh / var(--interface-scale));
     --app-vw: calc(1vw / var(--interface-scale));
+    --visual-viewport-height: calc(100 * var(--app-dvh));
+    --visual-viewport-top: 0px;
+    --keyboard-occlusion: 0px;
+    --app-height: calc(100 * var(--app-dvh));
+    --app-height-50: calc(var(--app-height) * 0.5);
+    --app-height-60: calc(var(--app-height) * 0.6);
+    --app-height-90: calc(var(--app-height) * 0.9);
     /* ── Matte Surfaces (RGB channels for Tailwind opacity support) ── */
     --bg-base: 11 11 16;
     --bg-channel: 26 26 35;

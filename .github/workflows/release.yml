@@ -81,6 +81,11 @@ jobs:
             echo "[Download $asset](https://github.com/$GH_REPO/releases/download/$TAG/$asset)"
             echo
             echo "The blockmap and latest.yml assets are used by the in-app updater."
+            notes_file="docs/releases/${version}.md"
+            if [ -f "$notes_file" ]; then
+              echo
+              cat "$notes_file"
+            fi
           } > "$notes"
           gh release create "$TAG" --draft --title "Backspace CN $version" --notes-file "$notes"
 

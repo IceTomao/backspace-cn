@@ -201,5 +201,12 @@
   "internal_error": "Something went wrong on the server. Try again.",
   "voice_disabled": "Voice and video are not set up on this instance.",
   "voice_connect_forbidden": "You are not allowed to join this voice channel.",
-  "file_not_found": "That file could not be found."
+  "file_not_found": "That file could not be found.",
+  "favorite_media_too_large": "Favorite media is too large.",
+  "favorite_media_invalid": "Favorite media is invalid.",
+  "favorite_media_limit_reached": "The favorite media limit has been reached.",
+  "favorite_media_not_found": "Favorite media could not be found.",
+  "web_push_unavailable": "Web Push is not configured.",
+  "web_push_subscription_invalid": "The Web Push subscription is invalid.",
+  "notification_setting_invalid": "The notification setting is invalid."
 }

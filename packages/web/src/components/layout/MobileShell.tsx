@@ -166,11 +166,10 @@ export function MobileShell() {
   // home-indicator safe area as designed. See `useVisualViewportInset` for
   // the iOS-PWA-specific fallback (focusin polling) that updates `height`
   // even when no `resize` event ever lands.
-  const { keyboardOpen, height: vvHeight } = useVisualViewportInset();
-  const shellHeight = keyboardOpen && vvHeight !== null ? `${vvHeight}px` : 'calc(100*var(--app-dvh))';
+  useVisualViewportInset();
 
   return (
-    <div className="flex flex-col" style={{ height: shellHeight }}>
+    <div className="flex min-h-0 flex-col overflow-hidden" style={{ height: 'var(--app-height)' }}>
       <MobileScreenStack
         rootScreen={rootScreens[mobileScreen]}
         screenMap={screenMap}

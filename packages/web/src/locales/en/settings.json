@@ -277,7 +277,8 @@
       "musicDescription": "Share the songs and artists you are playing.",
       "imagesLabel": "Share Activity Artwork",
       "imagesDescription": "Upload compressed game icons and album artwork to your Backspace server."
-    }
+    },
+    "webPush": { "sectionTitle": "Notifications", "label": "Enable web notifications", "description": "Show alerts for new messages in the browser or installed app." }
   },
   "connections": {
     "title": "Connections"

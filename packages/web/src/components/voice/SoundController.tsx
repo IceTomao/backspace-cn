@@ -7,6 +7,7 @@ import { AudioManager } from '../../audio/AudioManager';
 import { shouldPlayMessageSound } from '../../utils/notificationFilters';
 import { selectVoiceStateSound } from '../../utils/voiceSoundTransitions';
 import { getSfxVolume } from '../../utils/sfx';
+import { useChannelNotificationStore } from '../../stores/channelNotificationStore';
 
 /**
  * Replicates the `useLiveKit` effective-mute formula on demand. Returns whether
@@ -246,6 +247,7 @@ export function SoundController() {
         // shape (where DM messages may carry dmChannelId at runtime).
         for (const { channelId, message } of newEvents) {
           if (!channelId) continue;
+          if (useChannelNotificationStore.getState().isMuted(channelId)) continue;
           const isDm = isDmChannel(channelId);
           if (
             shouldPlayMessageSound({

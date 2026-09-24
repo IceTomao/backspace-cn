@@ -1,17 +1,9 @@
 /// <reference lib="dom" />
 import { contextBridge, ipcRenderer, webFrame } from 'electron';
-import { startDesktopFavorites } from './favoritesPreload';
-
-const startFavorites = () => {
-  try { startDesktopFavorites(); } catch (error) {
-    console.warn('[favorites] Desktop adapter unavailable:', error);
-  }
-};
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', startFavorites, { once: true });
-} else {
-  startFavorites();
-}
+// Favorites are rendered by the shared web picker so the Windows client uses
+// the same account-synchronised data as web and mobile. The legacy shadow-DOM
+// injector is intentionally not started here; keeping both would create two
+// competing first tabs in the emoji panel.
 
 // Keep the packaged client compatible with instances that still serve the old
 // Chinese timestamp resources. Updated instances no longer match this pattern.
@@ -275,6 +267,7 @@ contextBridge.exposeInMainWorld('backspace', {
   setBadgeCount: (count: number) => {
     ipcRenderer.send('set-badge-count', count);
   },
+  favoriteImages: (request: unknown): Promise<unknown> => ipcRenderer.invoke('desktop-favorite-images', request),
 
   // Auto-update, legacy per-event channels.
   //

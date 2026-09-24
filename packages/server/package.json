@@ -1,6 +1,6 @@
 {
   "name": "@backspace/server",
-  "version": "1.3.11",
+  "version": "1.3.12",
   "private": true,
   "license": "AGPL-3.0-only",
   "author": "Jannis Braun",
@@ -36,7 +36,8 @@
     "jsonwebtoken": "^9.0.2",
     "livekit-server-sdk": "^2.19.0",
     "sharp": "^0.35.4",
-    "tsx": "^4.23.13"
+    "tsx": "^4.23.13",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",

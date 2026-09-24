@@ -8,6 +8,7 @@ import { isAndroid, androidCall } from '../platform/android';
 import { onNotificationClick, sendNotification, updateBadgeCount } from '../platform/notifications';
 import { useSpaceStore, getMyUserIdForOrigin } from '../stores/spaceStore';
 import { useUIStore } from '../stores/uiStore';
+import { useChannelNotificationStore } from '../stores/channelNotificationStore';
 
 /**
  * Headless component that bridges store events to native OS notifications and badge counts.
@@ -18,6 +19,8 @@ export function NotificationController() {
   const currentUser = useAuthStore((s) => s.user);
   const isInitialMount = useRef(true);
   const windowFocused = useRef(true);
+  const webPushActive = useRef(false);
+  const deliveredEventIds = useRef(new Set<string>());
 
   useEffect(() => onNotificationClick(({ channelId, spaceId, userId, origin }) => {
     if (!channelId || !userId || userId !== (isAndroid() ? getMyUserIdForOrigin(origin ?? '') : useAuthStore.getState().user?.id)) return;
@@ -35,6 +38,16 @@ export function NotificationController() {
     navigate(`/channels/${targetSpace ? encodeURIComponent(targetSpace) : '@me'}/${encodeURIComponent(channelId)}`);
   }), [navigate]);
   useEffect(() => { if (isAndroid()) void androidCall('sync'); }, []);
+  useEffect(() => { void useChannelNotificationStore.getState().load(); }, []);
+  useEffect(() => {
+    if (isElectron() || isAndroid() || !('serviceWorker' in navigator)) return;
+    const onPushChanged = (event: Event) => { webPushActive.current = Boolean((event as CustomEvent<boolean>).detail); };
+    window.addEventListener('backspace-web-push-changed', onPushChanged);
+    void navigator.serviceWorker.ready.then(async (registration) => {
+      webPushActive.current = Boolean(await registration.pushManager.getSubscription());
+    }).catch(() => {});
+    return () => window.removeEventListener('backspace-web-push-changed', onPushChanged);
+  }, []);
 
   // Track window focus state
   useEffect(() => {
@@ -79,6 +92,11 @@ export function NotificationController() {
         // The store keeps only 50 events; its length stops growing after that.
         const newEvents = state.realtimeMessageEvents.filter(event => !prevState.realtimeMessageEvents.includes(event));
         for (const { message } of newEvents) {
+          if (useChannelNotificationStore.getState().isMuted(message.channelId)) continue;
+          if (deliveredEventIds.current.has(message.id)) continue;
+          deliveredEventIds.current.add(message.id);
+          if (deliveredEventIds.current.size > 200) deliveredEventIds.current.delete(deliveredEventIds.current.values().next().value as string);
+          if (webPushActive.current) continue;
           const { channelToSpaceMap, channelOriginMap } = useSpaceStore.getState();
           if (message.userId !== getMyUserIdForOrigin(channelOriginMap.get(message.channelId) ?? '')) {
             const displayName = message.user?.displayName || message.user?.username || 'Someone';

@@ -225,6 +225,13 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   voice_disabled: 'Voice/video is not configured on this server',
   voice_connect_forbidden: 'Missing CONNECT permission',
   file_not_found: 'File not found',
+  favorite_media_too_large: 'Favorite media is too large',
+  favorite_media_invalid: 'Favorite media is invalid',
+  favorite_media_limit_reached: 'Favorite media limit reached',
+  favorite_media_not_found: 'Favorite media not found',
+  web_push_unavailable: 'Web Push is not configured',
+  web_push_subscription_invalid: 'Invalid Web Push subscription',
+  notification_setting_invalid: 'Invalid notification setting',
 };
 
 function fillPlaceholders(text: string, details: ErrorDetails | undefined): string {

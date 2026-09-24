@@ -35,6 +35,9 @@ services:
       - NODE_ENV=production
       - DB_PATH=/app/data/backspace.db
       - UPLOAD_DIR=/app/data/uploads
+      - WEB_PUSH_VAPID_PUBLIC_KEY=${WEB_PUSH_VAPID_PUBLIC_KEY:-}
+      - WEB_PUSH_VAPID_PRIVATE_KEY=${WEB_PUSH_VAPID_PRIVATE_KEY:-}
+      - WEB_PUSH_SUBJECT=${WEB_PUSH_SUBJECT:-}
       # Fail fast with a clear message if the secret is missing/empty, instead of
       # letting the container boot-crash on every `restart: unless-stopped` cycle
       # (a silent loop that only shows up in `docker compose logs backspace`).

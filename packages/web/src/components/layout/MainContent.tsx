@@ -29,6 +29,7 @@ import { joinVoiceChannel } from '../../utils/voice';
 import { SearchPopover } from '../chat/SearchPopover';
 import { isDmChannel, getChannelOrigin } from '../../stores/spaceStore';
 import { usePointerReveal, VOICE_CHROME_ATTR } from '../../hooks/usePointerReveal';
+import { useChannelNotificationStore } from '../../stores/channelNotificationStore';
 
 /**
  * Voice channel header, in both of its shapes.
@@ -75,6 +76,8 @@ export function MainContent() {
   const dmChannels = useSpaceStore((s) => s.dmChannels);
   const authUser = useAuthStore((s) => s.user);
   const openModal = useUIStore((s) => s.openModal);
+  const mutedChannel = useChannelNotificationStore((s) => s.mutedChannels.has(currentChannelId ?? ''));
+  const setChannelMuted = useChannelNotificationStore((s) => s.setMuted);
 
   const voiceContainerRef = useRef<HTMLDivElement>(null);
   // Fullscreen chrome is revealed by pointer movement and hidden once the
@@ -98,6 +101,10 @@ export function MainContent() {
   useEffect(() => {
     setSearchOpen(false);
   }, [currentChannelId]);
+
+  useEffect(() => {
+    void useChannelNotificationStore.getState().load();
+  }, []);
 
   // Handle actual browser fullscreen API.
   //
@@ -538,9 +545,16 @@ export function MainContent() {
           )}
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
-          <button className="w-8 h-8 flex items-center justify-center text-txt-tertiary hover:text-txt-primary transition-colors rounded-[6px] hover:bg-interactive-hover" title={t('spaces:main.notificationSettings')}>
+          <button
+            className={`w-8 h-8 flex items-center justify-center transition-colors rounded-[6px] hover:bg-interactive-hover ${mutedChannel ? 'text-accent-amber' : 'text-txt-tertiary hover:text-txt-primary'}`}
+            title={mutedChannel ? '取消静音提醒' : '静音此频道提醒'}
+            aria-label={mutedChannel ? '取消静音提醒' : '静音此频道提醒'}
+            onClick={() => { if (currentChannelId) void setChannelMuted(currentChannelId, !mutedChannel).catch(() => {}); }}
+          >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z" />
+              {mutedChannel
+                ? <path d="M4.27 3 3 4.27 7.73 9H7v7l-2 2v1h10.73l2 2L19 19.73 4.27 3zM12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm7-11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5-.43 0-.82.18-1.09.46L19 10.05V11h.01z" />
+                : <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z" />}
             </svg>
           </button>
           <button

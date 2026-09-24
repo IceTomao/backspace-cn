@@ -4,6 +4,7 @@ import { useAuthStore } from '../../../stores/authStore';
 import { useActivityStore } from '../../../stores/activityStore';
 import { api } from '../../../api/client';
 import { Toggle } from '../../ui/Toggle';
+import { disableWebPush, enableWebPush } from '../../../platform/notifications';
 
 export function PrivacyPanel() {
   const { t } = useTranslation(['settings', 'common']);
@@ -13,6 +14,8 @@ export function PrivacyPanel() {
   const [discoverable, setDiscoverable] = useState(user?.discoverable !== false);
   const [saving, setSaving] = useState(false);
   const [activityPreferences, setActivityPreferences] = useState({ showGames: true, showMusic: true, showActivityImages: true });
+  const [webPushEnabled, setWebPushEnabled] = useState(false);
+  const [webPushBusy, setWebPushBusy] = useState(false);
   const hasDesktopPreferences = Boolean(window.backspace?.getActivityPreferences);
 
   useEffect(() => {
@@ -22,6 +25,20 @@ export function PrivacyPanel() {
   useEffect(() => {
     window.backspace?.getActivityPreferences?.().then(setActivityPreferences).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setWebPushEnabled(typeof Notification !== 'undefined' && Notification.permission === 'granted');
+  }, []);
+
+  const toggleWebPush = async (enabled: boolean) => {
+    setWebPushBusy(true);
+    try {
+      const result = enabled ? await enableWebPush() : await disableWebPush();
+      setWebPushEnabled(enabled && result === true);
+    } finally {
+      setWebPushBusy(false);
+    }
+  };
 
   const setActivityPreference = async (patch: { showGames?: boolean; showMusic?: boolean; showActivityImages?: boolean }) => {
     const previous = activityPreferences;
@@ -52,6 +69,18 @@ export function PrivacyPanel() {
   return (
     <div className="space-y-5">
       <h2 className="text-lg font-semibold text-txt-primary mb-6">{t('settings:privacy.title')}</h2>
+      <div>
+        <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">{t('settings:privacy.webPush.sectionTitle')}</div>
+        <div className="rounded-lg bg-white/[0.03] border border-white/[0.04] p-3.5">
+          <div className="flex items-center justify-between py-1">
+            <div className="flex-1 mr-4">
+              <div className="text-sm text-txt-primary">{t('settings:privacy.webPush.label')}</div>
+              <div className="text-xs text-txt-tertiary mt-0.5">{t('settings:privacy.webPush.description')}</div>
+            </div>
+            <Toggle enabled={webPushEnabled} disabled={webPushBusy} onChange={(enabled) => void toggleWebPush(enabled)} />
+          </div>
+        </div>
+      </div>
       <div>
         <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">
           {t('settings:privacy.discovery.sectionTitle')}

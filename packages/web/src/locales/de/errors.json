@@ -201,5 +201,12 @@
   "internal_error": "Auf dem Server ist etwas schiefgelaufen. Versuche es erneut.",
   "voice_disabled": "Sprach- und Videochat sind auf dieser Instanz nicht eingerichtet.",
   "voice_connect_forbidden": "Du darfst diesem Sprachkanal nicht beitreten.",
-  "file_not_found": "Diese Datei wurde nicht gefunden."
+  "file_not_found": "Diese Datei wurde nicht gefunden.",
+  "favorite_media_too_large": "Das Favoritenmedium ist zu groß.",
+  "favorite_media_invalid": "Das Favoritenmedium ist ungültig.",
+  "favorite_media_limit_reached": "Das Limit für Favoriten wurde erreicht.",
+  "favorite_media_not_found": "Favoritenmedium nicht gefunden.",
+  "web_push_unavailable": "Web Push ist nicht konfiguriert.",
+  "web_push_subscription_invalid": "Das Web-Push-Abonnement ist ungültig.",
+  "notification_setting_invalid": "Die Benachrichtigungseinstellung ist ungültig."
 }

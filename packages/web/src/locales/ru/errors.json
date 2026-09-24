@@ -201,5 +201,12 @@
   "internal_error": "На сервере что-то пошло не так. Попробуйте ещё раз.",
   "voice_disabled": "Голосовая и видеосвязь на этом сервере не настроены.",
   "voice_connect_forbidden": "Вам нельзя подключаться к этому голосовому каналу.",
-  "file_not_found": "Файл не найден."
+  "file_not_found": "Файл не найден.",
+  "favorite_media_too_large": "Избранное изображение слишком большое.",
+  "favorite_media_invalid": "Избранное изображение недействительно.",
+  "favorite_media_limit_reached": "Достигнут лимит избранного.",
+  "favorite_media_not_found": "Избранное изображение не найдено.",
+  "web_push_unavailable": "Web Push не настроен.",
+  "web_push_subscription_invalid": "Подписка Web Push недействительна.",
+  "notification_setting_invalid": "Настройка уведомлений недействительна."
 }

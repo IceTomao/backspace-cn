@@ -122,6 +122,8 @@ function publishActivities(): void {
 }
 const keybindManager = new KeybindManager();
 let tray: Tray | null = null;
+let baseTrayIcon: Electron.NativeImage | null = null;
+let unreadBadgeCount = 0;
 let isQuitting = false;
 let pendingDeepLink: string | null = null;
 let themeManager: ThemeManager | null = null;
@@ -561,6 +563,7 @@ function createWindow(): void {
 
 function createTray(): void {
   const icon = loadTrayIcon();
+  baseTrayIcon = icon;
   tray = new Tray(icon);
 
   tray.setToolTip('Backspace');
@@ -575,6 +578,26 @@ function createTray(): void {
       mainWindow?.focus();
     }
   });
+}
+
+function makeUnreadBadgeIcon(count: number): Electron.NativeImage {
+  const label = count > 99 ? '99+' : String(count);
+  const width = label.length > 2 ? 34 : 28;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="32" viewBox="0 0 ${width} 32"><rect x="1" y="1" width="${width - 2}" height="30" rx="15" fill="#ef4444" stroke="#fff" stroke-width="2"/><text x="${width / 2}" y="21" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" fill="#fff">${label}</text></svg>`;
+  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+}
+
+function updateUnreadBadge(count: number): void {
+  unreadBadgeCount = Math.max(0, Math.min(9999, Math.floor(Number.isFinite(count) ? count : 0)));
+  if (app.setBadgeCount) app.setBadgeCount(unreadBadgeCount);
+  if (process.platform === 'win32') {
+    const overlay = unreadBadgeCount > 0 ? makeUnreadBadgeIcon(unreadBadgeCount) : null;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setOverlayIcon(overlay, unreadBadgeCount > 0 ? `未读消息：${unreadBadgeCount}` : '');
+    if (tray && !tray.isDestroyed()) {
+      tray.setImage(unreadBadgeCount > 0 ? makeUnreadBadgeIcon(unreadBadgeCount) : (baseTrayIcon ?? loadTrayIcon()));
+      tray.setToolTip(unreadBadgeCount > 0 ? `Backspace（未读消息：${unreadBadgeCount}）` : 'Backspace');
+    }
+  }
 }
 
 // ─── Notifications ──────────────────────────────────────────────────────────
@@ -661,9 +684,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.on('set-badge-count', (_event, count: number) => {
-    if (app.setBadgeCount) {
-      app.setBadgeCount(count);
-    }
+    updateUnreadBadge(count);
   });
 
   ipcMain.on('minimize-window', () => {
@@ -745,12 +766,14 @@ function registerIpcHandlers(): void {
 
     try {
       const { autoUpdater } = require('electron-updater');
-      autoUpdater.quitAndInstall();
+      isQuitting = true;
+      if (process.platform === 'win32') autoUpdater.quitAndInstall(false, true);
+      else autoUpdater.quitAndInstall();
     } catch {
       store.setStatus({
         phase: 'failed',
         version: statusVersion(snapshot.status),
-        message: 'The updater is not available in this build.',
+        message: '当前客户端不支持自动更新，请从发布页下载安装包。',
       });
       return;
     }
@@ -764,7 +787,7 @@ function registerIpcHandlers(): void {
       getUpdateStore().setStatus({
         phase: 'failed',
         version: statusVersion(current.status),
-        message: 'Restarting to install the update did not start.',
+        message: '重启安装没有启动，请重试或从发布页下载安装包。',
       });
     }, INSTALL_WATCHDOG_MS);
   });
@@ -1039,7 +1062,7 @@ function getUpdateStore(): UpdateStatusStore {
  */
 function notifyAboutUpdate(
   snapshot: UpdateSnapshot,
-  updater: { quitAndInstall: () => void },
+  updater: { quitAndInstall: (isSilent?: boolean, isForceRunAfter?: boolean) => void },
 ): void {
   if (!shouldPromptForUpdate(snapshot)) return;
   // A focused user can see the in-app toast. Notifying as well is noise.
@@ -1050,17 +1073,17 @@ function notifyAboutUpdate(
 
   if (snapshot.status.phase === 'ready' && snapshot.capability === 'auto') {
     showNotification(
-      'Backspace update ready',
-      `Click to restart and install version ${version}.`,
-      () => updater.quitAndInstall(),
+      'Backspace 更新已准备好',
+      `点击重启以安装版本 ${version}。`,
+      () => { isQuitting = true; process.platform === 'win32' ? updater.quitAndInstall(false, true) : updater.quitAndInstall(); },
     );
     return;
   }
 
   if (snapshot.status.phase === 'available' && snapshot.capability === 'auto') {
     showNotification(
-      `Backspace ${version} is available`,
-      'Click to download the update.',
+      `Backspace ${version} 可用`,
+      '点击下载更新。',
       () => requestAvailableUpdate(),
     );
     return;
@@ -1068,16 +1091,16 @@ function notifyAboutUpdate(
 
   if (snapshot.status.phase === 'failed') {
     showNotification(
-      `Backspace ${version} update failed`,
-      'Click to download the installer from GitHub Releases.',
+      `Backspace ${version} 更新失败`,
+      '点击从 GitHub Releases 下载安装包。',
       () => { void shell.openExternal(RELEASES_URL); },
     );
     return;
   }
 
   showNotification(
-    `Backspace ${version} is available`,
-    'Click to open the download page.',
+    `Backspace ${version} 可用`,
+    '点击打开下载页面。',
     () => { void shell.openExternal(RELEASES_URL); },
   );
 }
@@ -1103,7 +1126,7 @@ function initAutoUpdater(): void {
     // Discovery never starts a transfer. An installable Windows build waits
     // for explicit confirmation; manual-capability builds always use Releases.
     autoUpdater.autoDownload = false;
-    autoUpdater.autoInstallOnAppQuit = capability === 'auto';
+    autoUpdater.autoInstallOnAppQuit = false;
 
     if (capability === 'manual') {
       // Reclaim whatever earlier versions of this app already stranded.

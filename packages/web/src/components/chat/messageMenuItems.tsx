@@ -5,6 +5,7 @@ import { saveImage, copyImageToClipboard } from '../../utils/imageActions';
 import { useUIStore } from '../../stores/uiStore';
 import { useTransferStore } from '../../stores/transferStore';
 import i18n from '../../i18n';
+import { useFavoriteMediaStore } from '../../stores/favoriteMediaStore';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮'];
 
@@ -63,6 +64,18 @@ export function buildMessageMenuItems(params: MessageMenuParams): ContextMenuIte
 
   // ── Image Actions (when right-clicking an image) ──────────────────────
   if (imageUrl) {
+    items.push({
+      key: 'favorite-image',
+      type: 'action',
+      label: '添加到收藏表情',
+      icon: <span className="text-base leading-none">♥</span>,
+      onClick: () => {
+        void fetch(imageUrl).then((response) => response.blob()).then((blob) => {
+          const name = imageUrl.split('/').pop()?.split('?')[0] || '表情.png';
+          return useFavoriteMediaStore.getState().add(new File([blob], name, { type: blob.type || 'image/png' }));
+        });
+      },
+    });
     items.push({
       key: 'save-image',
       type: 'action',

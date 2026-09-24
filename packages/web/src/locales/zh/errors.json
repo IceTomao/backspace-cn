@@ -201,5 +201,12 @@
   "internal_error": "服务器出错了。请重试。",
   "voice_disabled": "此实例上未设置语音和视频。",
   "voice_connect_forbidden": "您不允许加入此语音频道。",
-  "file_not_found": "文件无法找到"
+  "file_not_found": "文件无法找到",
+  "favorite_media_too_large": "收藏图片太大。",
+  "favorite_media_invalid": "收藏图片无效。",
+  "favorite_media_limit_reached": "收藏表情数量或容量已达到上限。",
+  "favorite_media_not_found": "收藏表情不存在。",
+  "web_push_unavailable": "网页推送尚未配置。",
+  "web_push_subscription_invalid": "网页推送订阅无效。",
+  "notification_setting_invalid": "通知设置无效。"
 }

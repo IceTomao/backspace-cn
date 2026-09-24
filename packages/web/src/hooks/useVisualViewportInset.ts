@@ -128,8 +128,14 @@ export function useVisualViewportInset(): VisualViewportInset {
               keyboardOpen: false,
               textInputFocused: textInputFocusedRef.current,
               height: layoutPixels(vv.height),
-              offsetTop: layoutPixels(vv.offsetTop),
-            };
+            offsetTop: layoutPixels(vv.offsetTop),
+          };
+
+      const root = document.documentElement;
+      root.style.setProperty('--visual-viewport-height', `${layoutPixels(vv.height)}px`);
+      root.style.setProperty('--visual-viewport-top', `${layoutPixels(vv.offsetTop)}px`);
+      root.style.setProperty('--keyboard-occlusion', `${Math.max(0, layoutPixels(occlusion))}px`);
+      root.style.setProperty('--app-height', `${layoutPixels(vv.height)}px`);
 
       // Functional update + shallow compare so identical re-measurements
       // don't churn React state every animation frame during keyboard

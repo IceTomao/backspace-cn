@@ -1,6 +1,6 @@
 {
   "name": "@backspace/web",
-  "version": "1.3.11",
+  "version": "1.3.12",
   "private": true,
   "license": "AGPL-3.0-only",
   "author": "Jannis Braun",
@@ -16,8 +16,8 @@
     "e2e:identity-deletion": "playwright test e2e/identity-deletion.spec.ts"
   },
   "dependencies": {
-    "@capacitor/core": "8.5.2",
     "@backspace/shared": "workspace:*",
+    "@capacitor/core": "8.5.2",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@livekit/components-react": "^2.9.24",
@@ -35,6 +35,9 @@
     "react-router-dom": "^7.18.3",
     "remark-gfm": "^4.0.1",
     "tus-js-client": "^4.3.1",
+    "workbox-core": "^7.4.1",
+    "workbox-precaching": "^7.4.1",
+    "workbox-routing": "^7.4.1",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

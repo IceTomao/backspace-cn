@@ -30,6 +30,8 @@ import { adminTelemetryRoutes } from './routes/adminTelemetry.js';
 import { gifRoutes } from './routes/gif.js';
 import { federationRoutes } from './routes/federation.js';
 import { cspReportRoutes } from './routes/cspReport.js';
+import { notificationsRoutes } from './routes/notifications.js';
+import { favoriteMediaRoutes } from './routes/favoriteMedia.js';
 import { buildCspHeaderValue, CSP_REPORT_GROUP, CSP_REPORT_PATH } from './utils/csp.js';
 import { startFederationWorkers, stopFederationWorkers } from './utils/federationWorker.js';
 import { startBackupWorker, stopBackupWorker } from './utils/backupWorker.js';
@@ -206,6 +208,8 @@ async function main(): Promise<void> {
   await app.register(adminUpdateRoutes);
   await app.register(adminTelemetryRoutes);
   await app.register(gifRoutes);
+  await app.register(notificationsRoutes);
+  await app.register(favoriteMediaRoutes);
   await app.register(federationRoutes);
   // Registered here rather than beside the hook above so it sits behind the
   // rate limiter. The sink is unauthenticated by design and writes a log line
