@@ -54,24 +54,31 @@ export function updateBadgeCount(count: number): void {
 }
 
 export async function enableWebPush(): Promise<boolean> {
-  if (isElectron() || isAndroid() || !('serviceWorker' in navigator) || !('PushManager' in window)) return false;
-  if (!window.isSecureContext || !('Notification' in window)) return false;
+  if (isElectron() || isAndroid() || !window.isSecureContext || !('Notification' in window)) return false;
   const permission = Notification.permission === 'granted'
     ? 'granted'
     : await Notification.requestPermission();
   if (permission !== 'granted') return false;
-  const config = await api.notifications.webPush();
-  if (!config.enabled || !config.publicKey) return false;
-  const registration = await navigator.serviceWorker.ready;
-  let subscription = await registration.pushManager.getSubscription();
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(config.publicKey) as unknown as ArrayBuffer,
-    });
+  if ('serviceWorker' in navigator && 'PushManager' in window) {
+    try {
+      const config = await api.notifications.webPush();
+      if (config.enabled && config.publicKey) {
+        const registration = await navigator.serviceWorker.ready;
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(config.publicKey) as unknown as ArrayBuffer,
+          });
+        }
+        await api.notifications.subscribeWebPush(subscription.toJSON());
+        window.dispatchEvent(new CustomEvent('backspace-web-push-changed', { detail: true }));
+      }
+    } catch {
+      // Permission succeeded; use foreground notifications when persistent
+      // Push is unavailable or the instance has no VAPID configuration.
+    }
   }
-  await api.notifications.subscribeWebPush(subscription.toJSON());
-  window.dispatchEvent(new CustomEvent('backspace-web-push-changed', { detail: true }));
   return true;
 }
 

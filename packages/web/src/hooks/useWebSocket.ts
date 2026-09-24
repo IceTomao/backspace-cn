@@ -211,12 +211,6 @@ function handleEvent(origin: string, event: ServerEvent): void {
         // Whose acknowledgements to read: the store cannot import authStore
         // without dragging the audio pipeline into every settings test.
         useSettingsStore.getState().setUpdateAckUser(event.user.id);
-        // This is what moved the release lookup off the Updates panel: the dot
-        // has to be able to appear before an admin ever navigates there. Gated
-        // on the flag this event just delivered, not on store state.
-        if (event.user.isAdmin === true) {
-          void useSettingsStore.getState().fetchUpdateStatus();
-        }
       }
 
       // Normalize asset URLs for remote origins before dispatching to stores

@@ -17,7 +17,6 @@ import { DesktopDownloadPanel } from './settingsPanels/DesktopDownloadPanel';
 import { InstancePanel } from './settingsPanels/InstancePanel';
 import { KeybindsPanel } from './settingsPanels/KeybindsPanel';
 import { isElectron } from '../../platform/platform';
-import { useInstanceUpdateBadge } from '../../hooks/useInstanceUpdateBadge';
 import { SettingsSectionsProvider, useSettingsSectionsContext } from './SettingsSectionsContext';
 import { HiButton } from '../telemetry/answers/HiButton';
 
@@ -80,7 +79,6 @@ export function UserSettingsModal() {
   const isAdmin = useAuthStore((s) => s.user?.isAdmin);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const updateBadge = useInstanceUpdateBadge();
 
   const [tab, setTab] = useState<SettingsTab>('account');
   const [mobileView, setMobileView] = useState<'tabs' | 'content'>('tabs');
@@ -177,7 +175,6 @@ export function UserSettingsModal() {
                   className={`${tabClass('instance')} flex items-center gap-1.5`}
                 >
                   <span className="flex-1 min-w-0 truncate">{t('settings:nav.tabs.instance')}</span>
-                  {updateBadge && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent-amber" />}
                 </button>
                 {tab === 'instance' && <SidebarSubLinks />}
               </>

@@ -135,7 +135,15 @@ export function useVisualViewportInset(): VisualViewportInset {
       root.style.setProperty('--visual-viewport-height', `${layoutPixels(vv.height)}px`);
       root.style.setProperty('--visual-viewport-top', `${layoutPixels(vv.offsetTop)}px`);
       root.style.setProperty('--keyboard-occlusion', `${Math.max(0, layoutPixels(occlusion))}px`);
-      root.style.setProperty('--app-height', `${layoutPixels(vv.height)}px`);
+      // A closed iOS standalone PWA can report a visual viewport that ends
+      // above the home-indicator area. Using that value as the shell height
+      // leaves a large black strip below the bottom navigation. Keep the
+      // normal dynamic viewport height when the keyboard is closed; only use
+      // the visual viewport's pixel height while it is actually occluding the
+      // layout viewport.
+      root.style.setProperty('--app-height', occlusion > 1
+        ? `${layoutPixels(vv.height)}px`
+        : 'calc(100 * var(--app-dvh))');
 
       // Functional update + shallow compare so identical re-measurements
       // don't churn React state every animation frame during keyboard

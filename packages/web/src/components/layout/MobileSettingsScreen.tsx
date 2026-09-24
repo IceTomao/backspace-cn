@@ -16,7 +16,6 @@ import { TransferIndicator } from './TransferIndicator';
 import { isElectron } from '../../platform/platform';
 import { isAndroid } from '../../platform/android';
 import { AndroidSettings } from '../android/AndroidSettings';
-import { useInstanceUpdateBadge } from '../../hooks/useInstanceUpdateBadge';
 
 interface MobileSettingsScreenProps {
   initialPanel?: string;
@@ -103,7 +102,6 @@ export function MobileSettingsScreen({ initialPanel }: MobileSettingsScreenProps
   const { t } = useTranslation(['mobile', 'settings', 'common']);
   const pushMobileScreen = useUIStore((s) => s.pushMobileScreen);
   const isAdmin = useAuthStore((s) => s.user?.isAdmin);
-  const updateBadge = useInstanceUpdateBadge();
 
   // The browser's Desktop panel builds its download links from the instance
   // version, the same source the settings modal reads them from. Nothing else
@@ -152,7 +150,7 @@ export function MobileSettingsScreen({ initialPanel }: MobileSettingsScreenProps
     { id: 'connections', label: t('settings:nav.tabs.connections') },
     ...(isElectron() ? [{ id: 'keybinds', label: t('settings:nav.tabs.keybinds') }] : []),
     ...(!isAndroid() ? [{ id: 'desktop', label: t('settings:nav.tabs.desktop') }] : []),
-    ...(isAdmin ? [{ id: 'instance', label: t('settings:nav.tabs.instance'), dot: updateBadge }] : []),
+    ...(isAdmin ? [{ id: 'instance', label: t('settings:nav.tabs.instance') }] : []),
   ];
 
   return (
@@ -167,7 +165,6 @@ export function MobileSettingsScreen({ initialPanel }: MobileSettingsScreenProps
           >
             {sectionIcons[section.id]}
             <span className="text-sm text-txt-primary flex-1">{section.label}</span>
-            {section.dot && <span className="w-1.5 h-1.5 rounded-full bg-accent-amber" />}
             <svg className="w-4 h-4 text-txt-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
             </svg>

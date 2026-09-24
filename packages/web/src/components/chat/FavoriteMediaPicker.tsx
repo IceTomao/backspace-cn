@@ -33,7 +33,7 @@ export function FavoriteMediaPicker({ onSelect, mobile = false }: FavoriteMediaP
   }
 
   return (
-    <div data-backspace-favorite-picker="true" className={`overflow-y-auto p-2 ${mobile ? 'grid grid-cols-4 gap-2' : 'grid grid-cols-5 gap-2'}`}>
+    <div data-backspace-favorite-picker="true" className={`overflow-y-auto p-2 ${mobile ? 'grid w-full grid-cols-4 gap-2' : 'grid w-full grid-cols-5 gap-2'}`}>
       {items.map((item) => (
         <div key={item.id} className="group relative aspect-square min-w-0">
           <button

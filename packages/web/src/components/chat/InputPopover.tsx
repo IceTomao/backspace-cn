@@ -137,7 +137,9 @@ function DesktopPopover({
       className="fixed z-[300] animate-slide-up"
       style={{ top: -9999, left: -9999 }}
     >
-      <div className="glass rounded-xl overflow-hidden flex flex-col w-fit max-h-[435px]">
+      <div className={`glass rounded-xl overflow-hidden flex flex-col max-h-[435px] ${
+        activeTab === 'favorites' ? 'w-[430px] max-w-[calc(calc(100*var(--app-vw))-16px)]' : 'w-fit'
+      }`}>
         <TabBar activeTab={activeTab} availableTabs={availableTabs} onTabChange={onTabChange} />
         {/* Content */}
         <div className="flex-1 min-h-0 overflow-hidden">
