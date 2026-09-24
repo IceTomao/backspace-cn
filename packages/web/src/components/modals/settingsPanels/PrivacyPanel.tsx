@@ -12,7 +12,7 @@ export function PrivacyPanel() {
   const showActivity = useActivityStore((s) => s.showActivity);
   const [discoverable, setDiscoverable] = useState(user?.discoverable !== false);
   const [saving, setSaving] = useState(false);
-  const [activityPreferences, setActivityPreferences] = useState({ showGames: true, showMusic: true });
+  const [activityPreferences, setActivityPreferences] = useState({ showGames: true, showMusic: true, showActivityImages: true });
   const hasDesktopPreferences = Boolean(window.backspace?.getActivityPreferences);
 
   useEffect(() => {
@@ -23,7 +23,7 @@ export function PrivacyPanel() {
     window.backspace?.getActivityPreferences?.().then(setActivityPreferences).catch(() => {});
   }, []);
 
-  const setActivityPreference = async (patch: { showGames?: boolean; showMusic?: boolean }) => {
+  const setActivityPreference = async (patch: { showGames?: boolean; showMusic?: boolean; showActivityImages?: boolean }) => {
     const previous = activityPreferences;
     const next = { ...previous, ...patch };
     setActivityPreferences(next);
@@ -112,6 +112,13 @@ export function PrivacyPanel() {
                   <div className="text-xs text-txt-tertiary mt-0.5">{t('settings:privacy.activity.musicDescription')}</div>
                 </div>
                 <Toggle enabled={activityPreferences.showMusic} onChange={(showMusic) => void setActivityPreference({ showMusic })} />
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <div className="flex-1 mr-4">
+                  <div className="text-sm text-txt-primary">{t('settings:privacy.activity.imagesLabel')}</div>
+                  <div className="text-xs text-txt-tertiary mt-0.5">{t('settings:privacy.activity.imagesDescription')}</div>
+                </div>
+                <Toggle enabled={activityPreferences.showActivityImages} onChange={(showActivityImages) => void setActivityPreference({ showActivityImages })} />
               </div>
             </div>
           )}

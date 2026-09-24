@@ -158,8 +158,9 @@ interface BackspaceElectronAPI {
   getCurrentActivity: () => Promise<unknown>;
   onActivitiesDetected?: (callback: (activities: unknown[]) => void) => (() => void);
   getCurrentActivities?: () => Promise<unknown>;
-  getActivityPreferences?: () => Promise<{ showGames: boolean; showMusic: boolean }>;
-  setActivityPreferences?: (preferences: { showGames?: boolean; showMusic?: boolean }) => Promise<{ showGames: boolean; showMusic: boolean }>;
+  getActivityPreferences?: () => Promise<{ showGames: boolean; showMusic: boolean; showActivityImages: boolean }>;
+  setActivityPreferences?: (preferences: { showGames?: boolean; showMusic?: boolean; showActivityImages?: boolean }) => Promise<{ showGames: boolean; showMusic: boolean; showActivityImages: boolean }>;
+  setActivityAssetSession?: (session: { token: string | null; enabled: boolean }) => Promise<{ ok: boolean }>;
 
   // Keybind support
   getKeybindPortalStatus?: () => Promise<KeybindPortalStatus | null>;

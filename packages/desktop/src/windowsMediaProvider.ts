@@ -4,6 +4,7 @@ import path from 'path';
 import { app } from 'electron';
 import type { ActivityProvider, DetectedActivity } from './activityTypes';
 import { getMusicApp } from './musicApps';
+import type { ActivityAssetPublisher } from './activityAssetPublisher';
 
 interface MediaSnapshot {
   source?: string;
@@ -11,6 +12,8 @@ interface MediaSnapshot {
   artist?: string;
   album?: string;
   status?: 'playing' | 'paused' | 'stopped';
+  thumbnailBase64?: string;
+  thumbnailMime?: string;
 }
 
 const PAUSE_GRACE_MS = 120_000;
@@ -27,11 +30,12 @@ function compileHelper(): string | null {
   const metadata = path.join(windows, 'System32', 'WinMetadata');
   const source = helperSourcePath();
   const directory = path.join(app.getPath('userData'), 'windows-media-helper');
-  const output = path.join(directory, 'windows-media-helper-v2.exe');
+  const output = path.join(directory, 'windows-media-helper-v4.exe');
   const compiler = path.join(framework, 'csc.exe');
   if (!fs.existsSync(source) || !fs.existsSync(compiler)
     || !fs.existsSync(path.join(metadata, 'Windows.Foundation.winmd'))
-    || !fs.existsSync(path.join(metadata, 'Windows.Media.winmd'))) return null;
+    || !fs.existsSync(path.join(metadata, 'Windows.Media.winmd'))
+    || !fs.existsSync(path.join(metadata, 'Windows.Storage.winmd'))) return null;
   if (fs.existsSync(output)) return output;
   try {
     fs.mkdirSync(directory, { recursive: true });
@@ -41,6 +45,7 @@ function compileHelper(): string | null {
       `/r:${path.join(framework, 'System.Runtime.WindowsRuntime.dll')}`,
       `/r:${path.join(metadata, 'Windows.Foundation.winmd')}`,
       `/r:${path.join(metadata, 'Windows.Media.winmd')}`,
+      `/r:${path.join(metadata, 'Windows.Storage.winmd')}`,
       source,
     ], { windowsHide: true, stdio: 'ignore', timeout: 15_000 });
     return fs.existsSync(output) ? output : null;
@@ -62,11 +67,21 @@ export class WindowsMediaProvider implements ActivityProvider {
   private stopped = false;
   private buffer = '';
   private onChange: (() => void) | null = null;
+  private lastSnapshot: MediaSnapshot | null = null;
+  private mediaFingerprint: string | null = null;
+  private artworkKey: string | null = null;
+  private unsubscribePublisher: (() => void) | null = null;
+
+  constructor(private readonly publisher?: ActivityAssetPublisher) {}
 
   start(onChange: () => void): void {
     if (process.platform !== 'win32' || this.child || this.stopped === false && this.onChange) return;
     this.stopped = false;
     this.onChange = onChange;
+    this.unsubscribePublisher = this.publisher?.subscribe(() => {
+      this.artworkKey = null;
+      if (this.lastSnapshot) this.refreshArtwork(this.lastSnapshot);
+    }) ?? null;
     this.launch();
   }
 
@@ -79,6 +94,11 @@ export class WindowsMediaProvider implements ActivityProvider {
     this.child = null;
     this.activity = null;
     this.pausedAt = null;
+    this.lastSnapshot = null;
+    this.mediaFingerprint = null;
+    this.artworkKey = null;
+    this.unsubscribePublisher?.();
+    this.unsubscribePublisher = null;
   }
 
   getActivities(): DetectedActivity[] { return this.activity ? [this.activity] : []; }
@@ -116,8 +136,10 @@ export class WindowsMediaProvider implements ActivityProvider {
     const player = getMusicApp(snapshot.source);
     if (!player || !snapshot.title) { this.clear(); return; }
     if (snapshot.status === 'stopped') { this.clear(); return; }
+    this.lastSnapshot = snapshot;
 
     const state = [snapshot.artist, snapshot.album].filter(Boolean).join(' · ');
+    const fingerprint = [snapshot.source, snapshot.title, snapshot.artist, snapshot.album].join('\n');
     if (snapshot.status === 'paused') {
       if (!this.pausedAt) this.pausedAt = Date.now();
       if (Date.now() - this.pausedAt >= PAUSE_GRACE_MS) { this.clear(); return; }
@@ -125,15 +147,23 @@ export class WindowsMediaProvider implements ActivityProvider {
       this.pausedAt = null;
     }
 
+    const image = this.mediaFingerprint === fingerprint
+      ? this.activity?.assets?.largeImage ?? player.iconUrl
+      : player.iconUrl;
     const next: DetectedActivity = {
       source: 'music', type: 'listening', name: player.name,
       details: snapshot.title,
       state: snapshot.status === 'paused' ? [state, '已暂停'].filter(Boolean).join(' · ') : state || undefined,
-      assets: { largeImage: player.iconUrl, largeText: player.name },
+      assets: { largeImage: image, largeText: player.name },
     };
-    if (JSON.stringify(next) === JSON.stringify(this.activity)) return;
+    this.mediaFingerprint = fingerprint;
+    if (JSON.stringify(next) === JSON.stringify(this.activity)) {
+      this.refreshArtwork(snapshot);
+      return;
+    }
     this.activity = next;
     this.onChange?.();
+    this.refreshArtwork(snapshot);
 
     if (this.pausedAt) {
       setTimeout(() => {
@@ -142,8 +172,34 @@ export class WindowsMediaProvider implements ActivityProvider {
     }
   }
 
+  private refreshArtwork(snapshot: MediaSnapshot): void {
+    if (!this.activity || !this.publisher?.canPublish() || !snapshot.thumbnailBase64) return;
+    const fingerprint = [snapshot.source, snapshot.title, snapshot.artist, snapshot.album].join('\n');
+    const key = `${fingerprint}\n${snapshot.thumbnailBase64.slice(0, 64)}\n${snapshot.thumbnailBase64.length}`;
+    if (this.artworkKey === key) return;
+    this.artworkKey = key;
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(snapshot.thumbnailBase64, 'base64');
+      if (!bytes.length || bytes.length > 8 * 1024 * 1024) return;
+    } catch { return; }
+    void this.publisher.publish(bytes).then((url) => {
+      if (!url || this.mediaFingerprint !== fingerprint || !this.activity) return;
+      const next: DetectedActivity = {
+        ...this.activity,
+        assets: { largeImage: url, largeText: this.activity.name },
+      };
+      if (JSON.stringify(next) === JSON.stringify(this.activity)) return;
+      this.activity = next;
+      this.onChange?.();
+    });
+  }
+
   private clear(): void {
     this.pausedAt = null;
+    this.lastSnapshot = null;
+    this.mediaFingerprint = null;
+    this.artworkKey = null;
     if (!this.activity) return;
     this.activity = null;
     this.onChange?.();

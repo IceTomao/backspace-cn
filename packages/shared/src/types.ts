@@ -689,6 +689,7 @@ export interface SpaceInviteSystemPayload {
 
 export interface PaginatedQuery {
   before?: string;
+  after?: string;
   limit?: number;
 }
 

@@ -323,4 +323,22 @@ describe('DM reply targets are confined to their own channel', () => {
       expect(row!.replyTo).toBeNull();
     });
   });
+
+  it('supports chronological after-cursor pagination for newer DM messages', async () => {
+    const firstId = seedMessage(DM_A, 'attacker', 'first');
+    const secondId = seedMessage(DM_A, 'attacker', 'second');
+    const thirdId = seedMessage(DM_A, 'attacker', 'third');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/dm/${DM_A}/messages?after=${firstId}&limit=10`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const ids = (JSON.parse(res.body) as Array<{ id: string }>).map((message) => message.id);
+    expect(ids).toContain(secondId);
+    expect(ids).toContain(thirdId);
+    expect(ids.indexOf(secondId)).toBeLessThan(ids.indexOf(thirdId));
+    expect(ids).not.toContain(firstId);
+  });
 });

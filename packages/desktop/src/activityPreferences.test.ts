@@ -23,11 +23,17 @@ afterAll(() => {
 
 describe('activity preferences', () => {
   it('enables game and music activity by default', () => {
-    expect(loadActivityPreferences()).toEqual({ showGames: true, showMusic: true });
+    expect(loadActivityPreferences()).toEqual({ showGames: true, showMusic: true, showActivityImages: true });
   });
 
   it('persists an independent music choice without changing game visibility', () => {
-    expect(saveActivityPreferences({ showMusic: false })).toEqual({ showGames: true, showMusic: false });
-    expect(loadActivityPreferences()).toEqual({ showGames: true, showMusic: false });
+    expect(saveActivityPreferences({ showMusic: false })).toEqual({ showGames: true, showMusic: false, showActivityImages: true });
+    expect(loadActivityPreferences()).toEqual({ showGames: true, showMusic: false, showActivityImages: true });
+  });
+
+  it('persists the activity image privacy choice independently', () => {
+    expect(saveActivityPreferences({ showActivityImages: false })).toEqual({
+      showGames: true, showMusic: true, showActivityImages: false,
+    });
   });
 });

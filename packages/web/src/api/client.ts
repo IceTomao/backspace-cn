@@ -193,7 +193,7 @@ export class BackspaceApiClient {
     create: (spaceId: string, data: CreateChannelRequest) => Promise<Channel>;
     update: (id: string, data: UpdateChannelRequest) => Promise<Channel>;
     delete: (id: string) => Promise<{ success: boolean }>;
-    messages: (id: string, before?: string, limit?: number) => Promise<MessageWithUser[]>;
+    messages: (id: string, before?: string, limit?: number, after?: string) => Promise<MessageWithUser[]>;
     messagesAround: (id: string, messageId: string) => Promise<MessageWithUser[]>;
     sendMessage: (channelId: string, data: CreateMessageRequest) => Promise<MessageWithUser>;
     getOverrides: (channelId: string) => Promise<{ channelId: string; targetType: string; targetId: string; allow: string; deny: string }[]>;
@@ -225,7 +225,7 @@ export class BackspaceApiClient {
     create: (data: CreateDmRequest) => Promise<DmChannel>;
     createGroup: (data: CreateGroupDmRequest) => Promise<DmChannel>;
     close: (id: string) => Promise<{ success: boolean }>;
-    messages: (id: string, before?: string, limit?: number) => Promise<DmMessageWithUser[]>;
+    messages: (id: string, before?: string, limit?: number, after?: string) => Promise<DmMessageWithUser[]>;
     messagesAround: (id: string, messageId: string) => Promise<DmMessageWithUser[]>;
     sendMessage: (id: string, data: CreateDmMessageRequest) => Promise<DmMessageWithUser>;
     updateMessage: (id: string, data: UpdateMessageRequest) => Promise<DmMessageWithUser>;
@@ -520,9 +520,10 @@ export class BackspaceApiClient {
         request<Channel>('POST', `/spaces/${spaceId}/channels`, data),
       update: (id: string, data: UpdateChannelRequest) => request<Channel>('PATCH', `/channels/${id}`, data),
       delete: (id: string) => request<{ success: boolean }>('DELETE', `/channels/${id}`),
-      messages: (id: string, before?: string, limit = 50) => {
+      messages: (id: string, before?: string, limit = 50, after?: string) => {
         const params = new URLSearchParams();
         if (before) params.set('before', before);
+        if (after) params.set('after', after);
         params.set('limit', String(limit));
         return request<MessageWithUser[]>('GET', `/channels/${id}/messages?${params}`);
       },
@@ -576,9 +577,10 @@ export class BackspaceApiClient {
       create: (data: CreateDmRequest) => request<DmChannel>('POST', '/dm', data),
       createGroup: (data: CreateGroupDmRequest) => request<DmChannel>('POST', '/dm/group', data),
       close: (id: string) => request<{ success: boolean }>('DELETE', `/dm/${id}`),
-      messages: (id: string, before?: string, limit = 50) => {
+      messages: (id: string, before?: string, limit = 50, after?: string) => {
         const params = new URLSearchParams();
         if (before) params.set('before', before);
+        if (after) params.set('after', after);
         params.set('limit', String(limit));
         return request<DmMessageWithUser[]>('GET', `/dm/${id}/messages?${params}`);
       },

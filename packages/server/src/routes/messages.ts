@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, and, desc, lt, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, lt, gt, inArray } from 'drizzle-orm';
 import { getDb, schema } from '../db/index.js';
 import { authenticate } from '../utils/auth.js';
 import { generateSnowflake } from '../utils/snowflake.js';
@@ -218,6 +218,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
   }, async (request, reply) => {
     const { id } = request.params;
     const before = request.query.before;
+    const after = request.query.after;
     const limit = Math.min(Math.max(Number(request.query.limit) || 50, 1), 100);
 
     const spaceId = getChannelSpaceId(id);
@@ -233,7 +234,17 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
     let messageRows: (typeof schema.messages.$inferSelect)[];
 
-    if (before) {
+    if (after) {
+      messageRows = db.select()
+        .from(schema.messages)
+        .where(and(
+          eq(schema.messages.channelId, id),
+          gt(schema.messages.id, after),
+        ))
+        .orderBy(asc(schema.messages.id))
+        .limit(limit)
+        .all();
+    } else if (before) {
       messageRows = db.select()
         .from(schema.messages)
         .where(and(
@@ -252,8 +263,8 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
         .all();
     }
 
-    // Reverse to get chronological order
-    messageRows.reverse();
+    // Descending queries need reversing; `after` is already chronological.
+    if (!after) messageRows.reverse();
 
     if (messageRows.length === 0) {
       return reply.code(200).send([]);

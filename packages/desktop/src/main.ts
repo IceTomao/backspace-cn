@@ -68,6 +68,7 @@ import { getDesktopLanguage, isDesktopLanguage, saveStoredLanguage, translateDes
 import { DESKTOP_BUILD } from './buildConfig';
 import { ThemeManager, registerThemeStyles, registerThemeControls, windowThemeColors, type ThemeMode } from './theme';
 import { registerFavoriteImages } from './favoriteImages';
+import { ActivityAssetPublisher, registerActivityAssetSession } from './activityAssetPublisher';
 
 function showManagedUpdateNotice(): void {
   const language = getDesktopLanguage();
@@ -102,12 +103,15 @@ app.setName('Backspace');
 
 let mainWindow: BrowserWindow | null = null;
 let detectedActivities: DesktopActivity[] = [];
-let activityPreferences: ActivityPreferences = { showGames: true, showMusic: true };
+let activityPreferences: ActivityPreferences = { showGames: true, showMusic: true, showActivityImages: true };
+let activityAssetPublisher: ActivityAssetPublisher | null = null;
 
 function publishedActivities(): DesktopActivity[] {
-  return detectedActivities.filter((activity) => activity.type === 'listening'
+  const filtered = detectedActivities.filter((activity) => activity.type === 'listening'
     ? activityPreferences.showMusic
     : activityPreferences.showGames);
+  if (activityPreferences.showActivityImages) return filtered;
+  return filtered.map(({ assets: _assets, ...activity }) => activity);
 }
 
 function publishActivities(): void {
@@ -124,6 +128,7 @@ let themeManager: ThemeManager | null = null;
 let disposeThemeStyles: (() => void) | null = null;
 let disposeThemeControls: (() => void) | null = null;
 let disposeFavoriteImages: (() => void) | null = null;
+let disposeActivityAssetSession: (() => void) | null = null;
 
 function getWindowThemeColors(): { color: string; symbolColor: string } {
   if (process.platform === 'win32' && nativeTheme.shouldUseHighContrastColors) {
@@ -1341,6 +1346,10 @@ if (!gotTheLock) {
   // ─── App Lifecycle ──────────────────────────────────────────────────────────
 
   app.whenReady().then(async () => {
+    activityAssetPublisher = new ActivityAssetPublisher(() => mainWindow);
+    disposeActivityAssetSession = registerActivityAssetSession(
+      ipcMain, activityAssetPublisher, () => mainWindow, getResolvedInstanceUrl,
+    );
     if (process.platform === 'win32') {
       disposeFavoriteImages = registerFavoriteImages(
         ipcMain, () => mainWindow, getResolvedInstanceUrl, path.join(app.getPath('userData'), 'favorite-images'),
@@ -1566,14 +1575,16 @@ if (!gotTheLock) {
 
     // ─── Activity Detection ────────────────────────────────────────────────
     activityPreferences = loadActivityPreferences();
+    activityAssetPublisher?.setPreferenceEnabled(activityPreferences.showActivityImages);
     registerActivityPreferenceHandlers(ipcMain, (preferences) => {
       activityPreferences = preferences;
+      activityAssetPublisher?.setPreferenceEnabled(preferences.showActivityImages);
       publishActivities();
     });
     startActivityDetection((activities) => {
       detectedActivities = activities;
       publishActivities();
-    });
+    }, activityAssetPublisher ?? undefined);
 
     ipcMain.handle('get-current-activities', () => publishedActivities());
     ipcMain.handle('get-current-activity', () => getCurrentActivities()[0] ?? null);
@@ -1638,6 +1649,7 @@ if (!gotTheLock) {
     disposeThemeStyles?.();
     disposeThemeControls?.();
     disposeFavoriteImages?.();
+    disposeActivityAssetSession?.();
     stopActivityDetection();
     keybindManager.stop();
   });

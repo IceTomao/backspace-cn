@@ -502,4 +502,22 @@ describe('space-channel reply targets are confined to their own channel', () => 
       expect((cleanCall![2] as { message: { replyTo: { id: string } | null } }).message.replyTo?.id).toBe(cleanTargetId);
     });
   });
+
+  it('supports chronological after-cursor pagination for newer messages', async () => {
+    const firstId = seedMessage(GENERAL, 'attacker', 'first');
+    const secondId = seedMessage(GENERAL, 'attacker', 'second');
+    const thirdId = seedMessage(GENERAL, 'attacker', 'third');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/channels/${GENERAL}/messages?after=${firstId}&limit=10`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const ids = (JSON.parse(res.body) as Array<{ id: string }>).map((message) => message.id);
+    expect(ids).toContain(secondId);
+    expect(ids).toContain(thirdId);
+    expect(ids.indexOf(secondId)).toBeLessThan(ids.indexOf(thirdId));
+    expect(ids).not.toContain(firstId);
+  });
 });

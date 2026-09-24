@@ -5,9 +5,10 @@ import { app, type IpcMain } from 'electron';
 export interface ActivityPreferences {
   showGames: boolean;
   showMusic: boolean;
+  showActivityImages: boolean;
 }
 
-const DEFAULTS: ActivityPreferences = { showGames: true, showMusic: true };
+const DEFAULTS: ActivityPreferences = { showGames: true, showMusic: true, showActivityImages: true };
 
 function preferencesPath(): string {
   return path.join(app.getPath('userData'), 'activity-settings.json');
@@ -21,6 +22,7 @@ export function loadActivityPreferences(): ActivityPreferences {
     return {
       showGames: typeof input.showGames === 'boolean' ? input.showGames : DEFAULTS.showGames,
       showMusic: typeof input.showMusic === 'boolean' ? input.showMusic : DEFAULTS.showMusic,
+      showActivityImages: typeof input.showActivityImages === 'boolean' ? input.showActivityImages : DEFAULTS.showActivityImages,
     };
   } catch {
     return { ...DEFAULTS };
@@ -44,6 +46,7 @@ export function registerActivityPreferenceHandlers(ipc: IpcMain, onChange: (pref
     const patch: Partial<ActivityPreferences> = {};
     if (typeof raw.showGames === 'boolean') patch.showGames = raw.showGames;
     if (typeof raw.showMusic === 'boolean') patch.showMusic = raw.showMusic;
+    if (typeof raw.showActivityImages === 'boolean') patch.showActivityImages = raw.showActivityImages;
     const preferences = saveActivityPreferences(patch);
     onChange(preferences);
     return preferences;

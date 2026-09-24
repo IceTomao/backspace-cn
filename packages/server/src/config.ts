@@ -139,6 +139,10 @@ export const config = {
   },
 
   uploadDir: env('UPLOAD_DIR', resolve(__dirname, '../../../data/uploads')),
+  activityAssetDir: envOptional('ACTIVITY_ASSET_DIR')
+    ?? resolve(dirname(env('UPLOAD_DIR', resolve(__dirname, '../../../data/uploads'))), 'activity-assets'),
+  activityAssetTtlMs: envInt('ACTIVITY_ASSET_TTL_HOURS', 72) * 60 * 60 * 1000,
+  activityAssetMaxBytes: envInt('ACTIVITY_ASSET_MAX_BYTES', 512 * 1024 * 1024),
   tusUploadDir: resolve(env('UPLOAD_DIR', resolve(__dirname, '../../../data/uploads')), '.tus'),
   tusExpirationMs: envInt('TUS_EXPIRATION_HOURS', 24) * 60 * 60 * 1000,
   tusStragglerSweepMs: envInt('TUS_STRAGGLER_SWEEP_HOURS', 48) * 60 * 60 * 1000,

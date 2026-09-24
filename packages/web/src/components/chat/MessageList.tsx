@@ -67,9 +67,11 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
   const messages = useChatStore((s) => s.messages.get(channelId)) ?? EMPTY_MESSAGES;
   const loadMessages = useChatStore((s) => s.loadMessages);
   const loadMoreMessages = useChatStore((s) => s.loadMoreMessages);
+  const loadMoreNewerMessages = useChatStore((s) => s.loadMoreNewerMessages);
   const loadMessagesAround = useChatStore((s) => s.loadMessagesAround);
   const isLoading = useChatStore((s) => s.isLoading);
   const hasMore = useChatStore((s) => s.hasMore.get(channelId) ?? true);
+  const hasNewerMessages = useChatStore((s) => s.hasNewer.get(channelId) ?? false);
   const ackChannel = useChatStore((s) => s.ackChannel);
   const saveScrollPosition = useChatStore((s) => s.saveScrollPosition);
   const bottomScrollRequest = useChatStore((s) => s.bottomScrollRequests.get(channelId) ?? null);
@@ -99,6 +101,9 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
   const SMOOTH_SCROLL_USER_INTENT_THRESHOLD = 5000;
   const SMOOTH_SCROLL_DEADLINE_MS = 800;
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isLoadingNewer, setIsLoadingNewer] = useState(false);
+  const jumpTargetIdRef = useRef<string | null>(null);
+  const jumpTargetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showInitialSkeleton = useDelayedLoading(isLoading && messages.length === 0);
   // 50 ms threshold (vs the 200 ms default on showInitialSkeleton above) is
   // safe here because Task 2's constant-height slot eliminated the layout
@@ -299,12 +304,12 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
 
   // Ack channel when messages load or when new messages arrive while near bottom
   useEffect(() => {
-    if (messages.length > 0 && isNearBottom) {
+    if (messages.length > 0 && isNearBottom && !hasNewerMessages) {
       clearTimeout(ackTimerRef.current);
       ackTimerRef.current = setTimeout(() => ackChannel(channelId), 200);
     }
     return () => clearTimeout(ackTimerRef.current);
-  }, [channelId, messages.length, lastMessageId, isNearBottom, ackChannel]);
+  }, [channelId, messages.length, lastMessageId, isNearBottom, hasNewerMessages, ackChannel]);
 
   // Save scroll anchor (tracked by handleScroll) when leaving a channel, then reset tracking
   useEffect(() => {
@@ -338,6 +343,12 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
     // render a phantom pagination skeleton. Resetting here costs nothing and covers
     // the never-resolves case. Idempotent w.r.t. the finally block.
     setIsLoadingMore(false);
+    setIsLoadingNewer(false);
+    jumpTargetIdRef.current = null;
+    if (jumpTargetTimerRef.current) {
+      clearTimeout(jumpTargetTimerRef.current);
+      jumpTargetTimerRef.current = null;
+    }
 
     // Arm the clamp-scroll suppression flag. See `suppressNextLoadMoreRef`
     // declaration for rationale. The 250 ms fallback timer disarms it in case
@@ -380,28 +391,35 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
           if (el) {
             el.scrollIntoView({ block: 'start' });
             const dist = container.scrollHeight - container.scrollTop - container.clientHeight;
-            const near = dist < 5000;
+            const near = !hasNewerMessages && dist < 5000;
             setIsNearBottom(near);
             isNearBottomRef.current = near;
-            const atBot = dist < 150;
+            const atBot = !hasNewerMessages && dist < 150;
             setIsAtBottom(atBot);
             isAtBottomRef.current = atBot;
             return;
           }
         }
-        // No saved anchor or message not in cache — snap to bottom
-        container.scrollTop = container.scrollHeight;
-        lastProgrammaticBottomScrollRef.current = container.scrollTop;
-        isAtBottomRef.current = true;
-        setIsAtBottom(true);
+        // A historical around-load is intentionally not the latest page. Leave
+        // the window where the jump placed it; the jump effect will center the
+        // target after the DOM has rendered. Only a normal initial load snaps.
+        if (!hasNewerMessages) {
+          container.scrollTop = container.scrollHeight;
+          lastProgrammaticBottomScrollRef.current = container.scrollTop;
+          isAtBottomRef.current = true;
+          setIsAtBottom(true);
+        } else {
+          isAtBottomRef.current = false;
+          setIsAtBottom(false);
+        }
       });
-    } else if (messages.length > prev && isAtBottomRef.current) {
+    } else if (messages.length > prev && isAtBottomRef.current && !hasNewerMessages) {
       // New messages arrived while at bottom — smooth scroll
       beginSmoothScrollIntent('bottom');
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- isAtBottomRef read via ref intentionally
-  }, [messages.length, channelId, beginSmoothScrollIntent]);
+  }, [messages.length, channelId, beginSmoothScrollIntent, hasNewerMessages]);
 
   // A local composer send always returns the sender to the present, even if
   // they were reading history. The explicit request marker is intentionally
@@ -416,17 +434,27 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
     bottomScrollRequestTrackerRef.current = result.tracker;
     if (!result.shouldScroll) return;
 
-    requestAnimationFrame(() => {
-      if (currentChannelIdRef.current !== channelId) return;
-      isAtBottomRef.current = true;
-      setIsAtBottom(true);
-      isNearBottomRef.current = true;
-      setIsNearBottom(true);
-      visibleMsgIdRef.current = null;
-      beginSmoothScrollIntent('bottom');
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    });
-  }, [bottomScrollRequest, channelId, beginSmoothScrollIntent]);
+    let cancelled = false;
+    void (async () => {
+      if (hasNewerMessages) {
+        await loadMessages(channelId, true);
+      }
+      if (cancelled || currentChannelIdRef.current !== channelId) return;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (cancelled || currentChannelIdRef.current !== channelId) return;
+          isAtBottomRef.current = true;
+          setIsAtBottom(true);
+          isNearBottomRef.current = true;
+          setIsNearBottom(true);
+          visibleMsgIdRef.current = null;
+          beginSmoothScrollIntent('bottom');
+          bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        });
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [bottomScrollRequest, channelId, beginSmoothScrollIntent, hasNewerMessages, loadMessages]);
 
   // Auto-scroll when content height grows (embeds/images loading) while near bottom
   const hasMessages = messages.length > 0;
@@ -454,6 +482,11 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
 
     const handleMediaLoad = () => {
       const c = containerRef.current;
+      const target = jumpTargetIdRef.current ? document.getElementById(`msg-${jumpTargetIdRef.current}`) : null;
+      if (target) {
+        target.scrollIntoView({ block: 'center', behavior: 'auto' });
+        return;
+      }
       if (!c || !isAtBottomRef.current) return;
       c.scrollTop = c.scrollHeight;
       lastProgrammaticBottomScrollRef.current = c.scrollTop;
@@ -506,6 +539,11 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
         clearTimeout(smoothScrollFallbackTimerRef.current);
         smoothScrollFallbackTimerRef.current = null;
       }
+      if (jumpTargetTimerRef.current) {
+        clearTimeout(jumpTargetTimerRef.current);
+        jumpTargetTimerRef.current = null;
+      }
+      jumpTargetIdRef.current = null;
     };
   }, [channelId]);
 
@@ -513,6 +551,12 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
     const scrollToMessage = () => {
       const el = document.getElementById(`msg-${messageId}`);
       if (el) {
+        jumpTargetIdRef.current = messageId;
+        if (jumpTargetTimerRef.current) clearTimeout(jumpTargetTimerRef.current);
+        jumpTargetTimerRef.current = setTimeout(() => {
+          if (jumpTargetIdRef.current === messageId) jumpTargetIdRef.current = null;
+          jumpTargetTimerRef.current = null;
+        }, 2500);
         beginSmoothScrollIntent('message');
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('search-highlight');
@@ -547,7 +591,7 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
     // event firing, but our intent is "stay at bottom" — do not let a post-growth distance
     // measurement flip the at-bottom flags. Re-pin defensively (content may have grown
     // again) and update the sentinel. See docs/systems/message-list.md (Auto-scroll model).
-    if (sentinelMatch) {
+    if (sentinelMatch && !hasNewerMessages) {
       isAtBottomRef.current = true;
       setIsAtBottom(true);
       isNearBottomRef.current = true;
@@ -586,11 +630,12 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
     const userScrolledAway = distanceFromBottom >= SMOOTH_SCROLL_USER_INTENT_THRESHOLD;
     const suppressBottomFlip = intentActive && !userScrolledAway;
 
-    const atBottom = suppressBottomFlip ? true : atBottomMeasured;
+    const atBottom = !hasNewerMessages && (suppressBottomFlip ? true : atBottomMeasured);
     setIsAtBottom(atBottom);
     isAtBottomRef.current = atBottom;
-    setIsNearBottom(nearBottom);
-    isNearBottomRef.current = nearBottom;
+    const nearLatest = !hasNewerMessages && nearBottom;
+    setIsNearBottom(nearLatest);
+    isNearBottomRef.current = nearLatest;
 
     // Track top-visible message for scroll position persistence
     if (!nearBottom) {
@@ -678,7 +723,26 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
         setIsLoadingMore(false);
       }
     }
-  }, [channelId, hasMore, isLoadingMore, loadMoreMessages]);
+
+    if (
+      !suppressLoadMore &&
+      distanceFromBottom < 220 &&
+      hasNewerMessages &&
+      !isLoadingNewer
+    ) {
+      const requestChannelId = channelId;
+      setIsLoadingNewer(true);
+      try {
+        const loaded = await loadMoreNewerMessages(requestChannelId);
+        // Keep the current viewport anchored at the old page boundary. The
+        // user can continue scrolling through the newly appended page; the
+        // next bottom threshold loads the following page.
+        void loaded;
+      } finally {
+        setIsLoadingNewer(false);
+      }
+    }
+  }, [channelId, hasMore, hasNewerMessages, isLoadingMore, isLoadingNewer, loadMoreMessages, loadMoreNewerMessages]);
 
   if (!canReadHistory) {
     return (
@@ -803,11 +867,11 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
         </div>
       )}
 
-      {!isNearBottom && messages.length > 0 && (
+      {(!isNearBottom || hasNewerMessages) && messages.length > 0 && (
         <button
           onClick={() => {
-            beginSmoothScrollIntent('bottom');
-            bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+            const marker = `latest:${Date.now()}`;
+            useChatStore.getState().requestBottomScroll(channelId, marker);
           }}
           className="absolute bottom-20 left-1/2 -translate-x-1/2 z-[120] glass-bubble px-4 py-2 flex items-center gap-2 rounded-full text-txt-secondary hover:text-txt-primary transition-all animate-fade-in cursor-pointer"
         >

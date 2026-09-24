@@ -1,11 +1,29 @@
 import type { Activity } from '@backspace/shared';
 import { useActivityStore } from '../stores/activityStore';
+import { useAuthStore } from '../stores/authStore';
 
 let unsubscribe: (() => void) | null = null;
+let unsubscribeSession: (() => void) | null = null;
+
+function syncAssetSession(): void {
+  const { token, user } = useAuthStore.getState();
+  const enabled = useActivityStore.getState().showActivity && user?.showActivity !== false;
+  void window.backspace?.setActivityAssetSession?.({ token, enabled: Boolean(token && enabled) }).catch(() => {});
+}
 
 export function initActivityBridge(): void {
   if (unsubscribe) return; // already initialized
   if (!window.backspace?.onActivityDetected) return; // not Electron
+  syncAssetSession();
+  unsubscribeSession = (() => {
+    const auth = useAuthStore.subscribe((state, previous) => {
+      if (state.token !== previous.token || state.user?.showActivity !== previous.user?.showActivity) syncAssetSession();
+    });
+    const activity = useActivityStore.subscribe((state, previous) => {
+      if (state.showActivity !== previous.showActivity) syncAssetSession();
+    });
+    return () => { auth(); activity(); };
+  })();
 
   if (window.backspace.onActivitiesDetected) {
     unsubscribe = window.backspace.onActivitiesDetected((activities) => {
@@ -37,4 +55,7 @@ export function initActivityBridge(): void {
 export function teardownActivityBridge(): void {
   unsubscribe?.();
   unsubscribe = null;
+  unsubscribeSession?.();
+  unsubscribeSession = null;
+  void window.backspace?.setActivityAssetSession?.({ token: null, enabled: false }).catch(() => {});
 }

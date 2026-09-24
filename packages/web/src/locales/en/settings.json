@@ -274,7 +274,9 @@
       "gamesLabel": "Share Game Activity",
       "gamesDescription": "Share games, game modes, and play time.",
       "musicLabel": "Share Music Activity",
-      "musicDescription": "Share the songs and artists you are playing."
+      "musicDescription": "Share the songs and artists you are playing.",
+      "imagesLabel": "Share Activity Artwork",
+      "imagesDescription": "Upload compressed game icons and album artwork to your Backspace server."
     }
   },
   "connections": {

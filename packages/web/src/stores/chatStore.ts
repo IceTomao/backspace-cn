@@ -27,6 +27,7 @@ const EVICT_TO_CHANNELS = 15;
 // any of them are still waiting on the 30 s api-client timeout.
 const inFlightLoads = new Map<string, Promise<void>>();
 const inFlightLoadMores = new Map<string, Promise<boolean>>();
+const inFlightLoadNewers = new Map<string, Promise<boolean>>();
 
 interface TypingUser {
   userId: string;
@@ -44,6 +45,7 @@ interface ChatState {
   currentChannelId: string | null;
   typingUsers: Map<string, TypingUser[]>;
   hasMore: Map<string, boolean>;
+  hasNewer: Map<string, boolean>;
   isLoading: boolean;
   loadError: string | null;
   replyTo: MessageWithUser | null;
@@ -62,6 +64,7 @@ interface ChatState {
   loadMessages: (channelId: string, force?: boolean) => Promise<void>;
   clearAllMessages: () => void;
   loadMoreMessages: (channelId: string) => Promise<boolean>;
+  loadMoreNewerMessages: (channelId: string) => Promise<boolean>;
   sendMessage: (channelId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   editMessage: (messageId: string, content: string, channelId: string) => Promise<void>;
   deleteMessage: (messageId: string, channelId: string) => Promise<void>;
@@ -105,6 +108,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentChannelId: null,
   typingUsers: new Map(),
   hasMore: new Map(),
+  hasNewer: new Map(),
   isLoading: false,
   loadError: null,
   replyTo: null,
@@ -134,6 +138,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Evict stale channels if we have too many cached
       let newMessages = state.messages;
       let newHasMore = state.hasMore;
+      let newHasNewer = state.hasNewer;
       let newScrollPositions = state.scrollPositions;
       if (state.messages.size > MAX_CACHED_CHANNELS) {
         const entries = [...newAccessTimes.entries()]
@@ -144,10 +149,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (evictIds.size > 0) {
           newMessages = new Map(state.messages);
           newHasMore = new Map(state.hasMore);
+          newHasNewer = new Map(state.hasNewer);
           newScrollPositions = new Map(state.scrollPositions);
           for (const id of evictIds) {
             newMessages.delete(id);
             newHasMore.delete(id);
+            newHasNewer.delete(id);
             newAccessTimes.delete(id);
             newScrollPositions.delete(id);
           }
@@ -160,6 +167,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         channelAccessTimes: newAccessTimes,
         messages: newMessages,
         hasMore: newHasMore,
+        hasNewer: newHasNewer,
         scrollPositions: newScrollPositions,
       };
     });
@@ -175,6 +183,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearAllMessages: () => set({
     messages: new Map(),
     hasMore: new Map(),
+    hasNewer: new Map(),
     typingUsers: new Map(),
     readStates: new Map(),
     unreadChannels: new Set(),
@@ -227,9 +236,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           newMessages.set(channelId, messages as MessageWithUser[]);
           const newHasMore = new Map(state.hasMore);
           newHasMore.set(channelId, messages.length >= 50);
+          const newHasNewer = new Map(state.hasNewer);
+          newHasNewer.set(channelId, false);
           const newAccessTimes = new Map(state.channelAccessTimes);
           newAccessTimes.set(channelId, Date.now());
-          return { messages: newMessages, hasMore: newHasMore, channelAccessTimes: newAccessTimes, isLoading: false, loadError: null };
+          return { messages: newMessages, hasMore: newHasMore, hasNewer: newHasNewer, channelAccessTimes: newAccessTimes, isLoading: false, loadError: null };
         });
       } catch (err) {
         set({ isLoading: false, loadError: (err as Error).message || 'Failed to load messages' });
@@ -306,6 +317,63 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  loadMoreNewerMessages: async (channelId: string) => {
+    const existing = get().messages.get(channelId);
+    if (!existing || existing.length === 0) return false;
+    if (!get().hasNewer.get(channelId)) return false;
+
+    const newestMessage = existing[existing.length - 1];
+    if (!newestMessage) return false;
+    const existingPromise = inFlightLoadNewers.get(channelId);
+    if (existingPromise) return existingPromise;
+
+    const promise = (async () => {
+      try {
+        const isDm = isDmChannel(channelId);
+        const origin = getChannelOrigin(channelId);
+        const client = getApiForOrigin(origin);
+        const newerMessages = isDm
+          ? await client.dm.messages(channelId, undefined, 50, newestMessage.id)
+          : await client.channels.messages(channelId, undefined, 50, newestMessage.id);
+
+        if (origin) {
+          for (const msg of newerMessages) normalizeMessageAssets(msg, origin);
+        }
+
+        let added = false;
+        set((state) => {
+          const newMessages = new Map(state.messages);
+          const current = newMessages.get(channelId) ?? [];
+          const knownIds = new Set(current.map((message) => message.id));
+          const fresh = (newerMessages as MessageWithUser[]).filter((message) => !knownIds.has(message.id));
+          added = fresh.length > 0;
+          let combined = [...current, ...fresh].sort((left, right) => left.createdAt - right.createdAt);
+          const newHasMore = new Map(state.hasMore);
+          if (combined.length > MAX_MESSAGES_PER_CHANNEL) {
+            combined = combined.slice(combined.length - MAX_MESSAGES_PER_CHANNEL);
+            newHasMore.set(channelId, true);
+          }
+          newMessages.set(channelId, combined);
+          const newHasNewer = new Map(state.hasNewer);
+          newHasNewer.set(channelId, newerMessages.length >= 50 && fresh.length > 0);
+          return { messages: newMessages, hasMore: newHasMore, hasNewer: newHasNewer };
+        });
+        return added;
+      } catch {
+        return false;
+      }
+    })();
+
+    inFlightLoadNewers.set(channelId, promise);
+    try {
+      return await promise;
+    } finally {
+      if (inFlightLoadNewers.get(channelId) === promise) {
+        inFlightLoadNewers.delete(channelId);
+      }
+    }
+  },
+
   loadMessagesAround: async (channelId: string, messageId: string) => {
     const isDm = isDmChannel(channelId);
     if (!isDm && !useSpaceStore.getState().channelOriginMap.has(channelId)) return;
@@ -325,9 +393,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         newMessages.set(channelId, messages as MessageWithUser[]);
         const newHasMore = new Map(state.hasMore);
         newHasMore.set(channelId, true);
+        const newHasNewer = new Map(state.hasNewer);
+        newHasNewer.set(channelId, true);
         const newAccessTimes = new Map(state.channelAccessTimes);
         newAccessTimes.set(channelId, Date.now());
-        return { messages: newMessages, hasMore: newHasMore, channelAccessTimes: newAccessTimes };
+        return { messages: newMessages, hasMore: newHasMore, hasNewer: newHasNewer, channelAccessTimes: newAccessTimes };
       });
     } catch (err) {
       console.error('Failed to load messages around:', err);
@@ -490,6 +560,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if ('sourceMessageId' in normalizedMessage && normalizedMessage.sourceMessageId
         && current.find(m => m.id === normalizedMessage.sourceMessageId)) return state;
       if (current.find(m => 'sourceMessageId' in m && m.sourceMessageId === normalizedMessage.id)) return state;
+      if (state.hasNewer.get(channelId)) {
+        const newEvents = [...state.realtimeMessageEvents, { channelId, message: normalizedMessage }];
+        if (newEvents.length > 50) newEvents.splice(0, newEvents.length - 50);
+        return { realtimeMessageEvents: newEvents };
+      }
       // Dedup against pendingMessageStore by (content, sortedAttachmentIds).
       // No userId check — federation relays arrive with replicated user IDs.
       const sortedAttIds = (normalizedMessage.attachments ?? []).map((a) => a.id).sort();
@@ -799,15 +874,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const newReadStates = new Map(state.readStates);
       const newMessages = new Map(state.messages);
       const newHasMore = new Map(state.hasMore);
+      const newHasNewer = new Map(state.hasNewer);
       const bottomScrollRequests = new Map(state.bottomScrollRequests);
       for (const channelId of channelIds) {
         newUnread.delete(channelId);
         newReadStates.delete(channelId);
         newMessages.delete(channelId);
         newHasMore.delete(channelId);
+        newHasNewer.delete(channelId);
         bottomScrollRequests.delete(channelId);
       }
-      return { unreadChannels: newUnread, readStates: newReadStates, messages: newMessages, hasMore: newHasMore, bottomScrollRequests };
+      return { unreadChannels: newUnread, readStates: newReadStates, messages: newMessages, hasMore: newHasMore, hasNewer: newHasNewer, bottomScrollRequests };
     });
   },
 
@@ -823,6 +900,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const messages = copyDelete(state.messages);
       const typingUsers = copyDelete(state.typingUsers);
       const hasMore = copyDelete(state.hasMore);
+      const hasNewer = copyDelete(state.hasNewer);
       const readStates = copyDelete(state.readStates);
       const channelAccessTimes = copyDelete(state.channelAccessTimes);
       const scrollPositions = copyDelete(state.scrollPositions);
@@ -841,6 +919,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         messages,
         typingUsers,
         hasMore,
+        hasNewer,
         readStates,
         channelAccessTimes,
         scrollPositions,

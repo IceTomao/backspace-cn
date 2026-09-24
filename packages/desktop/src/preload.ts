@@ -386,8 +386,10 @@ contextBridge.exposeInMainWorld('backspace', {
   },
   getCurrentActivities: () => ipcRenderer.invoke('get-current-activities'),
   getActivityPreferences: () => ipcRenderer.invoke('get-activity-preferences'),
-  setActivityPreferences: (preferences: { showGames?: boolean; showMusic?: boolean }) =>
+  setActivityPreferences: (preferences: { showGames?: boolean; showMusic?: boolean; showActivityImages?: boolean }) =>
     ipcRenderer.invoke('set-activity-preferences', preferences),
+  setActivityAssetSession: (session: { token: string | null; enabled: boolean }) =>
+    ipcRenderer.invoke('set-activity-asset-session', session),
 
   // Keybind support
   getKeybindPortalStatus: () => ipcRenderer.invoke('keybind-portal-status'),

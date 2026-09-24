@@ -274,7 +274,9 @@
       "gamesLabel": "Spielaktivität teilen",
       "gamesDescription": "Teile Spiele, Spielmodi und Spielzeit.",
       "musicLabel": "Musikaktivität teilen",
-      "musicDescription": "Teile laufende Titel und Interpret:innen."
+      "musicDescription": "Teile laufende Titel und Interpret:innen.",
+      "imagesLabel": "Aktivitätsbilder teilen",
+      "imagesDescription": "Lade komprimierte Spielsymbole und Albumcover auf deinen Backspace-Server hoch."
     }
   },
   "connections": {

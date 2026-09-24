@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, and, or, desc, lt, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, or, desc, asc, lt, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db/index.js';
 import { authenticate } from '../utils/auth.js';
 import { generateSnowflake } from '../utils/snowflake.js';
@@ -2298,6 +2298,7 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string }; Querystring: PaginatedQuery }>('/api/dm/:id/messages', async (request, reply) => {
     const { id } = request.params;
     const before = request.query.before;
+    const after = request.query.after;
     const limit = Math.min(Math.max(Number(request.query.limit) || 50, 1), 100);
 
     if (!isDmMember(id, request.userId)) {
@@ -2308,7 +2309,17 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
 
     let messageRows: (typeof schema.dmMessages.$inferSelect)[];
 
-    if (before) {
+    if (after) {
+      messageRows = db.select()
+        .from(schema.dmMessages)
+        .where(and(
+          eq(schema.dmMessages.dmChannelId, id),
+          gt(schema.dmMessages.id, after),
+        ))
+        .orderBy(asc(schema.dmMessages.id))
+        .limit(limit)
+        .all();
+    } else if (before) {
       messageRows = db.select()
         .from(schema.dmMessages)
         .where(and(
@@ -2327,7 +2338,7 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
         .all();
     }
 
-    messageRows.reverse();
+    if (!after) messageRows.reverse();
 
     if (messageRows.length === 0) {
       return reply.code(200).send([]);

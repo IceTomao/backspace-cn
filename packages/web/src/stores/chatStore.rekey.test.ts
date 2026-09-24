@@ -63,6 +63,7 @@ beforeEach(() => {
     messages: new Map(),
     typingUsers: new Map(),
     hasMore: new Map(),
+    hasNewer: new Map(),
     readStates: new Map(),
     unreadChannels: new Set(),
     channelAccessTimes: new Map(),
@@ -79,6 +80,7 @@ describe('chatStore.rekeyChannelState', () => {
       messages: new Map([['A1', [msg('m1')]]]),
       typingUsers: new Map([['A1', [{ userId: 'u', username: 'u', timestamp: 1 }]]]),
       hasMore: new Map([['A1', true]]),
+      hasNewer: new Map([['A1', true]]),
       readStates: new Map([['A1', 'msg-last']]),
       channelAccessTimes: new Map([['A1', 123]]),
       scrollPositions: new Map([['A1', 'msg-scroll']]),
@@ -91,12 +93,14 @@ describe('chatStore.rekeyChannelState', () => {
     expect(s.messages.has('A1')).toBe(false);
     expect(s.typingUsers.has('A1')).toBe(false);
     expect(s.hasMore.has('A1')).toBe(false);
+    expect(s.hasNewer.has('A1')).toBe(false);
     expect(s.readStates.has('A1')).toBe(false);
     expect(s.channelAccessTimes.has('A1')).toBe(false);
     expect(s.scrollPositions.has('A1')).toBe(false);
     expect(s.bottomScrollRequests.has('A1')).toBe(false);
     // newId entries are NOT seeded for messages/hasMore/etc — they refetch naturally.
     expect(s.messages.has('B1')).toBe(false);
+    expect(s.hasNewer.has('B1')).toBe(false);
   });
 
   it('transfers unreadChannels membership only when oldId was unread', () => {

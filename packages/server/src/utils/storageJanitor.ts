@@ -8,6 +8,7 @@ import { deleteUploadFile, deleteAttachmentFiles } from './fileCleanup.js';
 import { generateSnowflake } from './snowflake.js';
 import { federationFetch } from './federationFetch.js';
 import type { StorageStats, StorageBreakdown, OrphanedFile, CleanupResult } from '@backspace/shared';
+import { cleanupActivityAssets } from './activityAssetStorage.js';
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.ico', '.bmp', '.avif']);
 const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.avi', '.mkv']);
@@ -934,6 +935,15 @@ export async function runFederationJanitor(): Promise<void> {
       cleanupTusStragglers();
     } catch (err) {
       console.warn('[storage-janitor] cleanupTusStragglers failed:', err);
+    }
+
+    try {
+      const activityAssets = cleanupActivityAssets();
+      if (activityAssets.deletedFiles > 0) {
+        console.log(`[storage-janitor] Activity asset sweep: deletedFiles=${activityAssets.deletedFiles} freedBytes=${activityAssets.freedBytes}`);
+      }
+    } catch (err) {
+      console.warn('[storage-janitor] Activity asset cleanup failed:', err);
     }
 
     // Once-per-day storage cleanup. Sweeps orphan disk files (unreferenced

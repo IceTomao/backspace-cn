@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "games": [
     { "id": "cs2", "name": "Counter-Strike 2", "processes": ["cs2.exe", "cs2"] },
     { "id": "dota2", "name": "Dota 2", "processes": ["dota2.exe", "dota2"] },
@@ -111,6 +111,7 @@
     { "id": "project-zomboid", "name": "Project Zomboid", "processes": ["ProjectZomboid64.exe", "ProjectZomboid"] },
     { "id": "the-long-dark", "name": "The Long Dark", "processes": ["tld.exe", "TheLongDark"] },
     { "id": "dying-light-2", "name": "Dying Light 2", "processes": ["DyingLightGame_x64_rwdi.exe"] },
+    { "id": "resident-evil-2", "name": "Resident Evil 2", "processes": ["re2.exe"], "platformIds": { "steam": "883710" } },
     { "id": "resident-evil-4", "name": "Resident Evil 4", "processes": ["re4.exe"] },
     { "id": "resident-evil-village", "name": "Resident Evil Village", "processes": ["re8.exe"] },
     { "id": "alan-wake-2", "name": "Alan Wake 2", "processes": ["AlanWake2.exe"] },
@@ -224,6 +225,7 @@
     { "id": "space-marine-2", "name": "Warhammer 40k: Space Marine 2", "processes": ["Warhammer40KSpaceMarine2.exe"] },
     { "id": "no-rest-for-the-wicked", "name": "No Rest for the Wicked", "processes": ["NoRestForTheWicked-Win64-Shipping.exe"] },
     { "id": "once-human", "name": "Once Human", "processes": ["OnceHuman.exe"] },
+    { "id": "neverness-to-everness", "name": "异环", "processes": ["NTE-Win64-Shipping.exe"] },
     { "id": "throne-and-liberty", "name": "Throne and Liberty", "processes": ["TLClient.exe"] },
     { "id": "deadlock", "name": "Deadlock", "processes": ["project8.exe", "deadlock"] },
     { "id": "marvel-rivals", "name": "Marvel Rivals", "processes": ["MarvelRivals-Win64-Shipping.exe"] },

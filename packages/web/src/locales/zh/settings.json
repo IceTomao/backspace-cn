@@ -274,7 +274,9 @@
       "gamesLabel": "分享游戏状态",
       "gamesDescription": "分享正在玩的游戏、游戏模式和游戏时长。",
       "musicLabel": "分享音乐状态",
-      "musicDescription": "分享正在播放的歌曲和艺术家信息。"
+      "musicDescription": "分享正在播放的歌曲和艺术家信息。",
+      "imagesLabel": "分享活动封面和图标",
+      "imagesDescription": "将压缩后的游戏图标和专辑封面上传到您的 Backspace 服务器。"
     }
   },
   "connections": {

@@ -1,6 +1,7 @@
 import type { Activity } from '@backspace/shared';
 import { getPrimaryActivity } from '@backspace/shared/src/activities.js';
 import type { TFunction } from 'i18next';
+import { Gamepad2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -69,8 +70,8 @@ export function ActivityCard({ activities, fallbackCustomStatus }: ActivityCardP
   }
 
   const music = primary.type === 'listening' ? null : activities.find((activity) => activity.type === 'listening');
-  const publicImage = primary.assets?.largeImage?.startsWith('https://') ? primary.assets.largeImage : null;
-  const musicImage = music?.assets?.largeImage?.startsWith('https://') ? music.assets.largeImage : null;
+  const publicImage = /^https?:\/\//.test(primary.assets?.largeImage ?? '') ? primary.assets!.largeImage! : null;
+  const musicImage = /^https?:\/\//.test(music?.assets?.largeImage ?? '') ? music!.assets!.largeImage! : null;
 
   // Rich activity — details, status, and elapsed (card wrapper is on the parent row)
   return (
@@ -78,6 +79,11 @@ export function ActivityCard({ activities, fallbackCustomStatus }: ActivityCardP
       <div className="flex min-w-0 gap-2">
         {publicImage && (
           <img src={publicImage} alt="" className="w-8 h-8 shrink-0 rounded object-cover" />
+        )}
+        {!publicImage && primary.type === 'playing' && (
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-white/[0.06] text-txt-tertiary">
+            <Gamepad2 size={18} aria-hidden="true" />
+          </div>
         )}
         <div className="min-w-0">
           <div className="text-[11px] leading-[1.3] text-txt-secondary truncate">

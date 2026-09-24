@@ -464,9 +464,11 @@ function validateActivities(raw: unknown): Activity[] | null {
     if (obj.assets && typeof obj.assets === 'object') {
       const aObj = obj.assets as Record<string, unknown>;
       const assets: ActivityAssets = {};
-      if (typeof aObj.largeImage === 'string' && aObj.largeImage.length <= ACTIVITY_LIMITS.MAX_URL_LENGTH) assets.largeImage = aObj.largeImage;
+      if (typeof aObj.largeImage === 'string' && aObj.largeImage.length <= ACTIVITY_LIMITS.MAX_URL_LENGTH
+        && (aObj.largeImage.startsWith('https://') || aObj.largeImage.startsWith('http://'))) assets.largeImage = aObj.largeImage;
       if (typeof aObj.largeText === 'string' && aObj.largeText.length <= ACTIVITY_LIMITS.MAX_ASSET_TEXT_LENGTH) assets.largeText = aObj.largeText;
-      if (typeof aObj.smallImage === 'string' && aObj.smallImage.length <= ACTIVITY_LIMITS.MAX_URL_LENGTH) assets.smallImage = aObj.smallImage;
+      if (typeof aObj.smallImage === 'string' && aObj.smallImage.length <= ACTIVITY_LIMITS.MAX_URL_LENGTH
+        && (aObj.smallImage.startsWith('https://') || aObj.smallImage.startsWith('http://'))) assets.smallImage = aObj.smallImage;
       if (typeof aObj.smallText === 'string' && aObj.smallText.length <= ACTIVITY_LIMITS.MAX_ASSET_TEXT_LENGTH) assets.smallText = aObj.smallText;
       if (Object.keys(assets).length > 0) activity.assets = assets;
     }

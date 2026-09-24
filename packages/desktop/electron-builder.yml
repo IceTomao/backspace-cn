@@ -31,6 +31,7 @@ files:
 asarUnpack:
   - "**/*.node"
   - "resources/windows-media.cs"
+  - "resources/windows-processes.cs"
   - "**/node_modules/@img/sharp-*/**/*"
 npmRebuild: false
 # afterPack also flips Electron security fuses (RunAsNode, EnableNodeCliInspectArguments,
