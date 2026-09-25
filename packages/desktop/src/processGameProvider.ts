@@ -77,6 +77,7 @@ function processCommand(): { executable: string; args: string[] } {
 
 export class ProcessGameProvider implements ActivityProvider {
   private entries: GameEntry[] = [];
+  private catalogVersion = 0;
   private installedGames: InstalledGame[] = [];
   private scanner: WindowsProcessScanner | null = null;
   private fallbackTimer: NodeJS.Timeout | null = null;
@@ -154,6 +155,7 @@ export class ProcessGameProvider implements ActivityProvider {
     const bundled = read(seed);
     const chosen = cached && (!bundled || cached.version >= bundled.version) ? cached : bundled;
     this.entries = chosen?.entries ?? [];
+    this.catalogVersion = chosen?.version ?? 0;
   }
 
   private refreshCatalog(): void {
@@ -302,8 +304,10 @@ export class ProcessGameProvider implements ActivityProvider {
     });
     if (!response || response.status !== 200) return;
     const dictionary = parseGameDictionary(response.body);
-    if (!dictionary || dictionary.entries.length < this.entries.length / 2) return;
+    if (!dictionary || dictionary.version < this.catalogVersion
+      || dictionary.entries.length < this.entries.length / 2) return;
     this.entries = dictionary.entries;
+    this.catalogVersion = dictionary.version;
     try { fs.writeFileSync(cache, response.body, 'utf8'); if (response.etag) fs.writeFileSync(etag, response.etag, 'utf8'); } catch { /* optional */ }
     if (this.lastSnapshot.processes.length) this.applySnapshot(this.lastSnapshot);
   }

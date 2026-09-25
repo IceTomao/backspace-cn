@@ -76,7 +76,7 @@ export function ActivityCard({ activities, fallbackCustomStatus }: ActivityCardP
   // Rich activity — details, status, and elapsed (card wrapper is on the parent row)
   return (
     <>
-      <div className="flex min-w-0 gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         {publicImage && (
           <img src={publicImage} alt="" className="w-8 h-8 shrink-0 rounded object-cover" />
         )}

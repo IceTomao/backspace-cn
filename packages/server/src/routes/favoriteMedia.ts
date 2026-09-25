@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { and, asc, eq } from 'drizzle-orm';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
@@ -69,12 +69,17 @@ export async function favoriteMediaRoutes(app: FastifyInstance): Promise<void> {
     if (rows.length >= FAVORITE_MEDIA_COUNT_LIMIT || rows.reduce((total, row) => total + row.size, 0) + bytes.length > FAVORITE_MEDIA_TOTAL_LIMIT) {
       return sendError(reply, 413, 'favorite_media_limit_reached');
     }
-    const id = hash;
-    const storageName = `${hash}.${detected.ext}`;
+    const id = randomUUID();
+    const storageName = `${id}.${detected.ext}`;
     const filePath = path.join(config.favoriteMediaDir, storageName);
-    const tempPath = `${filePath}.tmp-${process.pid}`;
-    fs.writeFileSync(tempPath, bytes, { flag: 'wx' });
-    fs.renameSync(tempPath, filePath);
+    const tempPath = `${filePath}.tmp`;
+    try {
+      fs.writeFileSync(tempPath, bytes, { flag: 'wx' });
+      fs.renameSync(tempPath, filePath);
+    } catch (error) {
+      try { fs.unlinkSync(tempPath); } catch {}
+      throw error;
+    }
     const now = Date.now();
     const row = {
       id, userId: request.userId, contentHash: hash, filename: name,
@@ -83,7 +88,16 @@ export async function favoriteMediaRoutes(app: FastifyInstance): Promise<void> {
       createdAt: now,
     };
     try { db.insert(schema.favoriteMedia).values(row).run(); }
-    catch (error) { try { fs.unlinkSync(filePath); } catch {} throw error; }
+    catch (error) {
+      try { fs.unlinkSync(filePath); } catch {}
+      if ((error as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        const duplicate = db.select().from(schema.favoriteMedia).where(and(
+          eq(schema.favoriteMedia.userId, request.userId), eq(schema.favoriteMedia.contentHash, hash),
+        )).get();
+        if (duplicate) return reply.send({ item: publicItem(duplicate), duplicate: true });
+      }
+      throw error;
+    }
     return reply.code(201).send({ item: publicItem(row) });
   });
 
