@@ -43,7 +43,7 @@ const LOCAL_VERSION_RE = /^(?:link:|file:|https?:|git\+)/;
 function sections(text: string): Map<string, string[]> {
   const out = new Map<string, string[]>();
   let current: string[] | null = null;
-  for (const line of text.split('\n')) {
+  for (const line of text.split(/\r?\n/)) {
     const m = /^([A-Za-z]+):(.*)$/.exec(line);
     if (m) {
       current = [];

@@ -62,6 +62,11 @@ function withPackages(extra: string, base: string = BASE): string {
 }
 
 describe('parseLockfile', () => {
+  it('accepts CRLF lockfiles', () => {
+    const parsed = parseLockfile(BASE.replace(/\n/g, '\r\n'));
+    expect(parsed.ok).toBe(true);
+  });
+
   it('parses the repository lockfile with every entry registry-resolved', () => {
     const parsed = parseLockfile(realLockfile);
     if (!parsed.ok) throw new Error(parsed.reason);

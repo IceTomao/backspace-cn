@@ -77,6 +77,29 @@ Tailwind variant resolves to `html[data-viewport="desktop"] &`.
 See `design-system.md` for the coordinate model and the `layoutPixels` /
 `visualPixels` conversion rules.
 
+### iOS Home Screen Status Bar Placement
+
+On a tested iOS Home Screen installation, `screen.height` was 1194 CSS px and
+`innerHeight`, `documentElement.clientHeight`, and `visualViewport.height` were
+1162 CSS px. With `apple-mobile-web-app-status-bar-style=black-translucent`,
+the status bar overlaid the page (`safe-area-inset-top: 32px`) and a fixed
+bottom-edge marker stopped 32 px above the physical screen bottom. Adding
+`apple-mobile-web-app-capable=yes` alone did not change this. The gap also
+appeared with the desktop layout (`MobileShell` unmounted), ruling out the
+mobile shell height as its cause in that test.
+
+In an otherwise identical standalone test page, switching the status bar style
+to `black` kept `innerHeight` at 1162 px but moved the fixed bottom-edge marker
+to the physical bottom. The top and bottom safe-area insets both reported 0.
+The app therefore uses `apple-mobile-web-app-capable=yes` with status bar style
+`black`. Keep interactive controls inside the web viewport and verify keyboard
+clearance and home-indicator behavior on each device; do not add a fixed height
+to compensate for the former bottom gap. On this device `navigator.standalone`
+was true even when `(display-mode: standalone)` reported false for the main
+app, so inspect both signals when debugging. Apple documents the different
+content placement for these status bar styles:
+https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/SafariHTMLRef/Articles/MetaTags.html
+
 ### Desktop-to-Mobile Transition (`uiStore:setIsMobile`)
 
 | Direction | State changes |
@@ -91,7 +114,7 @@ The `setIsMobile` function is a no-op if the value hasn't changed (`prev === isM
 ## Architecture Overview
 
 ```
-MobileShell (calc(100*var(--app-dvh)) flex column)
+MobileShell (height: var(--app-height), flex column)
   +-- MobileScreenStack (flex-1, relative, overflow-hidden)
   |     +-- Root screen (spaces | dms | you) — always rendered, visibility-hidden when covered
   |     +-- Stacked screens (absolute inset-0, bg-surface-base, z-10)

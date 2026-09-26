@@ -1,4 +1,3 @@
-import { RnnoiseWorkletNode, loadRnnoise } from '@sapphi-red/web-noise-suppressor';
 import rnnoiseWorkletPath from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url';
 import rnnoiseWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url';
 import rnnoiseWasmSimdPath from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url';
@@ -431,12 +430,17 @@ export class AudioManager {
   }
 
   async setRnnoiseEnabled(enabled: boolean): Promise<void> {
+    if (enabled && typeof AudioWorkletNode === 'undefined') {
+      this.rnnoiseEnabled = false;
+      return;
+    }
     if (enabled === this.rnnoiseEnabled && this.rnnoiseReady) return;
     if (!this.isInitialized) this.initContext();
 
     if (enabled && !this.rnnoiseReady) {
       try {
         console.log('[AudioManager] Loading RNNoise worklet...');
+        const { RnnoiseWorkletNode, loadRnnoise } = await import('@sapphi-red/web-noise-suppressor');
         await this.ctx!.audioWorklet.addModule(rnnoiseWorkletPath);
 
         // loadRnnoise handles SIMD feature detection and returns the right binary

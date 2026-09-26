@@ -150,9 +150,9 @@ describe('createStore', () => {
     });
 
     it('propagates a permission error rather than treating it as absent', () => {
-      // Root can read past permission bits, so this case is only meaningful
-      // for a non-root test runner; skip rather than false-fail under root.
-      if (process.getuid?.() === 0) return;
+      // Root and Windows can read past chmod bits, so this case only runs
+      // where the permission change can actually block file reads.
+      if (process.platform === 'win32' || process.getuid?.() === 0) return;
       const store = createStore(dir);
       const file = path.join(dir, 'stars.csv');
       writeFileSync(file, 'date,total\n2026-08-01,1\n', 'utf8');

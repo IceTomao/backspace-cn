@@ -40,7 +40,9 @@ function loadManifest(): VendorManifest {
 
 function sha256Hex(filePath: string): string {
   const bytes = readFileSync(filePath);
-  return createHash('sha256').update(bytes).digest('hex');
+  // Git checks text files out as CRLF on Windows; the manifest hashes the LF blob.
+  const committedBytes = Buffer.from(bytes.toString('utf8').replace(/\r\n/g, '\n'));
+  return createHash('sha256').update(committedBytes).digest('hex');
 }
 
 describe('vendor.json checksum manifest', () => {
