@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, Download, X } from 'lucide-react';
+import { ArrowLeft, Copy, Download, Heart, MoreHorizontal, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useContextMenu } from '../../hooks/useContextMenu';
 import { layoutPixels } from '../../platform/interfaceScale';
@@ -7,6 +7,7 @@ import { isElectron } from '../../platform/platform';
 import { useContextMenuStore, type ContextMenuItem } from '../../stores/contextMenuStore';
 import { useUIStore } from '../../stores/uiStore';
 import { copyImageToClipboard, saveImage } from '../../utils/imageActions';
+import { addImageToFavorites } from './messageMenuItems';
 import {
   MIN_IMAGE_SCALE,
   RESET_IMAGE_TRANSFORM,
@@ -43,6 +44,7 @@ export function ImagePreview() {
   const pinchRef = useRef<PinchGesture | null>(null);
   const transformRef = useRef<ImageTransform>(RESET_IMAGE_TRANSFORM);
   const [transform, setTransform] = useState<ImageTransform>(RESET_IMAGE_TRANSFORM);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const applyTransform = useCallback((next: ImageTransform) => {
     transformRef.current = next;
@@ -57,6 +59,7 @@ export function ImagePreview() {
 
   const closePreview = useCallback(() => {
     useContextMenuStore.getState().close();
+    setMobileMenuOpen(false);
     resetTransform();
     closeImagePreview();
   }, [closeImagePreview, resetTransform]);
@@ -106,6 +109,7 @@ export function ImagePreview() {
 
   useEffect(() => {
     resetTransform();
+    setMobileMenuOpen(false);
   }, [activeModal, imageUrl, resetTransform]);
 
   useEffect(() => {
@@ -119,12 +123,13 @@ export function ImagePreview() {
     if (activeModal !== 'imagePreview') return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      if (mobileMenuOpen) { setMobileMenuOpen(false); return; }
       if (useContextMenuStore.getState().menu) return;
       closePreview();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeModal, closePreview]);
+  }, [activeModal, closePreview, mobileMenuOpen]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -229,12 +234,49 @@ export function ImagePreview() {
   return (
     <div
       ref={viewportRef}
-      className={`fixed inset-x-0 bottom-0 z-[190] flex items-center justify-center overflow-hidden bg-surface-overlay animate-fade-in ${topInsetClass}`}
+      className={`fixed inset-x-0 bottom-0 z-[190] flex items-center justify-center overflow-hidden animate-fade-in ${isMobile ? 'bg-surface-base' : 'bg-surface-overlay'} ${topInsetClass}`}
+      style={isMobile ? { paddingTop: 'calc(56px + var(--safe-top))', paddingBottom: 'var(--safe-bottom)' } : undefined}
       onClick={(event) => {
-        if (event.target === event.currentTarget) closePreview();
+        if (!isMobile && event.target === event.currentTarget) closePreview();
+        if (isMobile && event.target === event.currentTarget) setMobileMenuOpen(false);
       }}
     >
-      <div className="absolute top-4 right-4 z-10">
+      {isMobile ? (
+        <header
+          className="absolute inset-x-0 top-0 z-10 flex h-[calc(56px+var(--safe-top))] items-end justify-between border-b border-border-soft bg-surface-base px-3 pb-2"
+        >
+          <button
+            type="button"
+            className="flex h-10 items-center gap-1 rounded px-2 text-txt-primary"
+            onClick={closePreview}
+            aria-label={t('common:actions.back')}
+          >
+            <ArrowLeft className="h-5 w-5" aria-hidden="true" />
+            <span>{t('common:actions.back')}</span>
+          </button>
+          <div className="relative">
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded text-txt-primary"
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              aria-label={t('chat:preview.more')}
+              aria-expanded={mobileMenuOpen}
+            >
+              <MoreHorizontal className="h-6 w-6" aria-hidden="true" />
+            </button>
+            {mobileMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 w-48 rounded-md border border-border-soft bg-surface-elevated py-1 shadow-elevation-high">
+                <button type="button" className="flex h-11 w-full items-center gap-3 px-3 text-left text-sm text-txt-primary" onClick={() => { setMobileMenuOpen(false); void addImageToFavorites(imageUrl); }}>
+                  <Heart className="h-4 w-4" aria-hidden="true" />{t('chat:favorites.add')}
+                </button>
+                <button type="button" className="flex h-11 w-full items-center gap-3 px-3 text-left text-sm text-txt-primary" onClick={() => { setMobileMenuOpen(false); void saveImage(imageUrl); }}>
+                  <Download className="h-4 w-4" aria-hidden="true" />{t('chat:menu.saveImage')}
+                </button>
+              </div>
+            )}
+          </div>
+        </header>
+      ) : <div className="absolute top-4 right-4 z-10">
         <button
           type="button"
           className="flex h-9 w-9 items-center justify-center text-white/70 hover:text-white transition-colors"
@@ -247,22 +289,22 @@ export function ImagePreview() {
         >
           <X className="h-6 w-6" aria-hidden="true" />
         </button>
-      </div>
+      </div>}
       <img
         ref={imageRef}
         src={imageUrl}
         alt={t('chat:preview.alt')}
         draggable={false}
-        data-context-menu
-        className={`max-w-[calc(90*var(--app-vw))] max-h-[calc(90*var(--app-vh))] select-none object-contain rounded shadow-elevation-high ${transform.scale > MIN_IMAGE_SCALE ? 'cursor-grab active:cursor-grabbing' : isMobile ? 'cursor-default' : 'cursor-zoom-in'}`}
+        data-context-menu={isMobile ? undefined : true}
+        className={`select-none object-contain ${isMobile ? 'max-w-full max-h-full' : 'max-w-[calc(90*var(--app-vw))] max-h-[calc(90*var(--app-vh))] rounded shadow-elevation-high'} ${transform.scale > MIN_IMAGE_SCALE ? 'cursor-grab active:cursor-grabbing' : isMobile ? 'cursor-default' : 'cursor-zoom-in'}`}
         style={{
           touchAction: 'none',
           transform: `translate3d(${transform.offsetX}px, ${transform.offsetY}px, 0) scale(${transform.scale})`,
           transformOrigin: 'center center',
         }}
         onLoad={resetTransform}
-        onClick={(event) => event.stopPropagation()}
-        onContextMenu={onContextMenu}
+        onClick={(event) => { event.stopPropagation(); setMobileMenuOpen(false); }}
+        onContextMenu={isMobile ? (event) => event.preventDefault() : onContextMenu}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}

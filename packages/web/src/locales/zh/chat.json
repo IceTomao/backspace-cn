@@ -127,7 +127,8 @@
   "preview": {
     "save": "保存图像",
     "copy": "复制图像",
-    "alt": "图片预览"
+    "alt": "图片预览",
+    "more": "更多图片操作"
   },
   "invite": {
     "sentBy": "{{name}}发送了邀请",
@@ -138,5 +139,5 @@
     "joining": "正在加入…",
     "joinFailed": "加入失败"
   },
-  "favorites": { "empty": "暂无收藏表情，可在图片菜单中添加", "remove": "移除收藏", "added": "已添加到收藏表情", "addFailed": "收藏表情失败，请重试" }
+  "favorites": { "empty": "暂无收藏表情，可在图片菜单中添加", "add": "添加到收藏表情", "remove": "移除收藏", "added": "已添加到收藏表情", "addFailed": "收藏表情失败，请重试" }
 }

@@ -127,7 +127,8 @@
   "preview": {
     "save": "Bild speichern",
     "copy": "Bild kopieren",
-    "alt": "Bildvorschau"
+    "alt": "Bildvorschau",
+    "more": "Weitere Bildaktionen"
   },
   "invite": {
     "sentBy": "{{name}} hat eine Einladung geschickt",
@@ -138,5 +139,5 @@
     "joining": "Beitritt läuft…",
     "joinFailed": "Beitritt fehlgeschlagen"
   },
-  "favorites": { "empty": "Noch keine Favoriten. Über ein Bildmenü hinzufügen.", "remove": "Favorit entfernen", "added": "Zu Favoriten hinzugefügt", "addFailed": "Favorit konnte nicht hinzugefügt werden. Bitte erneut versuchen." }
+  "favorites": { "empty": "Noch keine Favoriten. Über ein Bildmenü hinzufügen.", "add": "Zu Favoriten hinzufügen", "remove": "Favorit entfernen", "added": "Zu Favoriten hinzugefügt", "addFailed": "Favorit konnte nicht hinzugefügt werden. Bitte erneut versuchen." }
 }

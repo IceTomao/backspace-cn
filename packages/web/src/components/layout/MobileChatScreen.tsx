@@ -1,10 +1,13 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useUIStore } from '../../stores/uiStore';
 import { useChatStore } from '../../stores/chatStore';
 import { useSpaceStore } from '../../stores/spaceStore';
 import { useAuthStore } from '../../stores/authStore';
 import { MessageList } from '../chat/MessageList';
 import { MessageInput } from '../chat/MessageInput';
+import { SearchPopover } from '../chat/SearchPopover';
 import { TransferIndicator } from './TransferIndicator';
 import { parseFederatedUsername } from '../../utils/identity';
 import { formatDmHeaderName, formatDmInputLabel, isDeletedPartnerDm } from '../../utils/dmFormatters';
@@ -19,8 +22,13 @@ interface MobileChatScreenProps {
 }
 
 export function MobileChatScreen({ params }: MobileChatScreenProps) {
+  const { t } = useTranslation('common');
   const popMobileScreen = useUIStore((s) => s.popMobileScreen);
   const pushMobileScreen = useUIStore((s) => s.pushMobileScreen);
+  const searchOpen = useUIStore((s) => s.mobileSearchOpen);
+  const setSearchOpen = useUIStore((s) => s.setMobileSearchOpen);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const [jumpToMessageId, setJumpToMessageId] = useState<string | null>(null);
 
   const channelId = params?.channelId;
   const spaceId = params?.spaceId;
@@ -37,6 +45,11 @@ export function MobileChatScreen({ params }: MobileChatScreenProps) {
     setCurrentChannel(channelId);
     loadMessages(channelId);
   }, [channelId, setCurrentChannel, loadMessages]);
+
+  useEffect(() => {
+    setSearchOpen(false);
+    setJumpToMessageId(null);
+  }, [channelId, setSearchOpen]);
 
   // Resolve the "main other member" of a 1:1 DM up-front so we can route it
   // through useCanonicalUserView (hook, must run unconditionally). Group DMs
@@ -91,6 +104,13 @@ export function MobileChatScreen({ params }: MobileChatScreenProps) {
             {isDm ? channelName : `# ${channelName}`}
           </h1>
         </div>
+        <button
+          ref={searchButtonRef}
+          type="button"
+          onClick={() => setSearchOpen(true)}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded text-txt-secondary hover:text-txt-primary"
+          aria-label={t('actions.search')}
+        ><Search className="h-5 w-5" aria-hidden="true" /></button>
         <TransferIndicator />
         {/* Members button — shown for space channels AND group DMs. 1-on-1
             DMs have no roster, so it stays hidden there. Tapping a space-
@@ -128,11 +148,19 @@ export function MobileChatScreen({ params }: MobileChatScreenProps) {
           TypingIndicator is rendered inside MessageInput itself (anchored
           `absolute bottom-full` to the bubble), so we don't render it here. */}
       <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
-        {channelId && <MessageList channelId={channelId} />}
+        {channelId && <MessageList channelId={channelId} jumpToMessageId={jumpToMessageId} onJumpComplete={() => setJumpToMessageId(null)} />}
         {channelId && (dmPartnerDeleted
           ? <DmDeletedNotice />
           : <MessageInput channelId={channelId} channelName={channelName} placeholder={inputPlaceholder} />)}
       </div>
+      {channelId && <SearchPopover
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        anchorRef={searchButtonRef}
+        channelId={channelId}
+        isDm={isDm}
+        onJumpToMessage={(id) => { setSearchOpen(false); setJumpToMessageId(id); }}
+      />}
     </div>
   );
 }

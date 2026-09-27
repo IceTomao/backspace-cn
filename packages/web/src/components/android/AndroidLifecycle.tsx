@@ -12,7 +12,9 @@ export function AndroidLifecycle() {
   useEffect(() => {
     const back = onAndroid('back', () => {
       const ui = useUIStore.getState();
-      if (ui.mobileStack.length) history.back();
+      if (ui.activeModal === 'imagePreview') ui.closeImagePreview();
+      else if (ui.mobileSearchOpen) ui.setMobileSearchOpen(false);
+      else if (ui.mobileStack.length) history.back();
       else if (window.location.pathname !== '/channels/@me' && !window.location.pathname.startsWith('/login')) navigate('/channels/@me');
       else void androidCall('minimize');
     });

@@ -46,6 +46,7 @@ interface UIState {
   isMobile: boolean;
   showDms: boolean;
   imagePreviewUrl: string | null;
+  mobileSearchOpen: boolean;
   userProfilePopout: {
     user: User | null;
     /** Rect of the element the card was opened from. The card places itself off
@@ -63,6 +64,7 @@ interface UIState {
   setShowDms: (show: boolean) => void;
   openImagePreview: (url: string) => void;
   closeImagePreview: () => void;
+  setMobileSearchOpen: (open: boolean) => void;
   openUserProfile: (user: User, anchor: AnchorRect, placement?: Placement) => void;
   closeUserProfile: () => void;
   addToast: (message: string, type?: 'info' | 'warning' | 'success', duration?: number, action?: ToastAction) => void;
@@ -103,6 +105,7 @@ export const useUIStore = create<UIState>()(
       isMobile: false,
       showDms: false,
       imagePreviewUrl: null,
+      mobileSearchOpen: false,
       userProfilePopout: {
         user: null,
         anchor: null,
@@ -132,6 +135,7 @@ export const useUIStore = create<UIState>()(
 
       openImagePreview: (url) => set({ activeModal: 'imagePreview', imagePreviewUrl: url }),
       closeImagePreview: () => set({ activeModal: null, imagePreviewUrl: null }),
+      setMobileSearchOpen: (open) => set({ mobileSearchOpen: open }),
 
       openUserProfile: (user, anchor, placement = 'right') => {
         if (get().isMobile) {

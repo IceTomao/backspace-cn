@@ -7,6 +7,8 @@ import { useFloatingPosition } from '../../hooks/useFloatingPosition';
 import { isDmChannel, getChannelOrigin, getApiForOrigin } from '../../stores/spaceStore';
 import { Avatar } from '../ui/Avatar';
 import { useCanonicalUserView } from '../../utils/userViewLookup';
+import { useUIStore } from '../../stores/uiStore';
+import { ArrowLeft, Search } from 'lucide-react';
 import type { MessageWithUser, DmMessageWithUser, User } from '@backspace/shared';
 
 type AnyMessage = MessageWithUser | DmMessageWithUser;
@@ -99,12 +101,13 @@ function SearchResultRow({
 
 export function SearchPopover({ open, onClose, anchorRef, channelId, isDm, onJumpToMessage }: SearchPopoverProps) {
   const { t } = useTranslation(['search', 'common']);
+  const isMobile = useUIStore((state) => state.isMobile);
   const popoverRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { style } = useFloatingPosition(anchorRef, popoverRef, {
     placement: 'bottom',
     offset: 8,
-    enabled: open,
+    enabled: open && !isMobile,
   });
 
   const [query, setQuery] = useState('');
@@ -137,7 +140,7 @@ export function SearchPopover({ open, onClose, anchorRef, channelId, isDm, onJum
 
   // Click-outside handler
   useEffect(() => {
-    if (!open) return;
+    if (!open || isMobile) return;
     const handleClick = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         onClose();
@@ -145,7 +148,7 @@ export function SearchPopover({ open, onClose, anchorRef, channelId, isDm, onJum
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [open, onClose]);
+  }, [open, onClose, isMobile]);
 
   // Escape handler
   useEffect(() => {
@@ -215,9 +218,18 @@ export function SearchPopover({ open, onClose, anchorRef, channelId, isDm, onJum
   return createPortal(
     <div
       ref={popoverRef}
-      style={style}
-      className="w-[420px] max-h-[500px] glass rounded-lg shadow-xl flex flex-col animate-fade-in"
+      style={isMobile ? { paddingTop: 'var(--safe-top)', paddingBottom: 'var(--safe-bottom)' } : style}
+      className={isMobile
+        ? 'fixed inset-0 z-[250] flex flex-col bg-surface-base text-txt-primary'
+        : 'w-[420px] max-h-[500px] glass rounded-lg shadow-xl flex flex-col animate-fade-in'}
     >
+      {isMobile && <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border-soft px-3">
+        <button type="button" className="flex h-9 w-9 items-center justify-center text-txt-primary" onClick={onClose} aria-label={t('common:actions.back')}>
+          <ArrowLeft className="h-5 w-5" aria-hidden="true" />
+        </button>
+        <Search className="h-4 w-4 text-txt-secondary" aria-hidden="true" />
+        <span className="text-sm font-semibold">{t('search:input.placeholder')}</span>
+      </header>}
       {/* Search input */}
       <div className="p-3 border-b border-white/[0.07]">
         <div className="flex items-center gap-2 bg-surface-input rounded-lg px-3 py-2 border border-white/[0.06] shadow-input">

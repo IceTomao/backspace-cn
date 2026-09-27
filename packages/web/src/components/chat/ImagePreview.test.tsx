@@ -4,7 +4,6 @@ import { useUIStore } from '../../stores/uiStore';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { isElectron } from '../../platform/platform';
 import { copyImageToClipboard, saveImage } from '../../utils/imageActions';
-import { ContextMenuRenderer } from '../ui/ContextMenuRenderer';
 import { ImagePreview } from './ImagePreview';
 
 vi.mock('../../platform/platform', () => ({
@@ -115,26 +114,18 @@ describe('ImagePreview', () => {
     expect(useUIStore.getState().activeModal).toBeNull();
   });
 
-  it('opens the same actions after a mobile long-press', () => {
-    vi.useFakeTimers();
+  it('shows a safe-area mobile viewer with a back button and image actions', () => {
     useUIStore.setState({ isMobile: true });
-    render(
-      <>
-        <ImagePreview />
-        <ContextMenuRenderer />
-      </>,
-    );
-    const image = screen.getByRole('img');
+    const { container } = render(<ImagePreview />);
+    expect(container.firstElementChild).toHaveStyle({ paddingTop: 'calc(56px + var(--safe-top))' });
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
 
-    fireEvent.touchStart(image, {
-      touches: [{ clientX: 40, clientY: 50 }],
-    });
-    act(() => vi.advanceTimersByTime(500));
+    fireEvent.click(screen.getByRole('button', { name: 'More image actions' }));
+    expect(screen.getByRole('button', { name: 'Add to favorite media' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Image' }));
+    expect(saveImage).toHaveBeenCalledWith('/test-image.png');
 
-    expect(useContextMenuStore.getState().menu?.items.map((item) => item.key)).toEqual([
-      'copy-preview-image',
-      'save-preview-image',
-    ]);
-    expect(useUIStore.getState().activeModal).toBe('imagePreview');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(useUIStore.getState().activeModal).toBeNull();
   });
 });

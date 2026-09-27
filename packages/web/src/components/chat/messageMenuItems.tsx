@@ -9,6 +9,19 @@ import { useFavoriteMediaStore } from '../../stores/favoriteMediaStore';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮'];
 
+export async function addImageToFavorites(imageUrl: string): Promise<void> {
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const name = imageUrl.split('/').pop()?.split('?')[0] || '表情.png';
+    await useFavoriteMediaStore.getState().add(new File([blob], name, { type: blob.type || 'image/png' }));
+    useUIStore.getState().addToast(i18n.t('chat:favorites.added'), 'success');
+  } catch {
+    useUIStore.getState().addToast(i18n.t('chat:favorites.addFailed'), 'warning');
+  }
+}
+
 interface MessageMenuParams {
   message: MessageWithUser;
   selectedText: string;
@@ -69,16 +82,7 @@ export function buildMessageMenuItems(params: MessageMenuParams): ContextMenuIte
       type: 'action',
       label: '添加到收藏表情',
       icon: <span className="text-base leading-none">♥</span>,
-      onClick: () => {
-        void fetch(imageUrl).then((response) => {
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.blob();
-        }).then((blob) => {
-          const name = imageUrl.split('/').pop()?.split('?')[0] || '表情.png';
-          return useFavoriteMediaStore.getState().add(new File([blob], name, { type: blob.type || 'image/png' }));
-        }).then(() => useUIStore.getState().addToast(i18n.t('chat:favorites.added'), 'success'))
-          .catch(() => useUIStore.getState().addToast(i18n.t('chat:favorites.addFailed'), 'warning'));
-      },
+      onClick: () => { void addImageToFavorites(imageUrl); },
     });
     items.push({
       key: 'save-image',

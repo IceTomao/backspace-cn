@@ -127,7 +127,8 @@
   "preview": {
     "save": "Save image",
     "copy": "Copy image",
-    "alt": "Image preview"
+    "alt": "Image preview",
+    "more": "More image actions"
   },
   "invite": {
     "sentBy": "{{name}} sent an invite",
@@ -138,5 +139,5 @@
     "joining": "Joining…",
     "joinFailed": "Failed to join"
   },
-  "favorites": { "empty": "No favorite media yet. Add one from an image menu.", "remove": "Remove favorite", "added": "Added to favorites", "addFailed": "Could not add favorite. Try again." }
+  "favorites": { "empty": "No favorite media yet. Add one from an image menu.", "add": "Add to favorite media", "remove": "Remove favorite", "added": "Added to favorites", "addFailed": "Could not add favorite. Try again." }
 }
