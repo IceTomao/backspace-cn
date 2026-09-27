@@ -100,6 +100,25 @@ app, so inspect both signals when debugging. Apple documents the different
 content placement for these status bar styles:
 https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/SafariHTMLRef/Articles/MetaTags.html
 
+### Android APK System Bars and Notifications
+
+The Capacitor APK bundles the current Web mobile UI. Its WebView draws edge to
+edge; `MainActivity` forwards system-bar and display-cutout insets to
+`androidMain.ts`, which replaces the CSS safe-area variables once rather than
+adding native and WebView insets together. Android uses the WebView's `100dvh`
+for `--app-height`; the bottom navigation adds the native bottom inset as
+padding. Verify gesture and three-button navigation, keyboard open/closed,
+orientation, and light/dark themes on a physical device before release.
+
+Android message alerts use the native WebSocket while **background online** is
+enabled. The native runtime loads muted channel IDs per connected server and
+filters self-authored messages and DND status. The Android privacy toggle
+requests notification permission and enables background online when turned on;
+turning the message toggle off leaves background online unchanged. Process-dead
+push is not supported. `.github/workflows/android-debug.yml` packages current
+Web assets into a debug APK on `master`, PRs, and manual runs. Its debug signing
+does not guarantee upgrade compatibility with an older manually signed APK.
+
 ### Desktop-to-Mobile Transition (`uiStore:setIsMobile`)
 
 | Direction | State changes |

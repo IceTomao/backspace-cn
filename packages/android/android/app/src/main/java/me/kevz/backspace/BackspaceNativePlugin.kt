@@ -55,7 +55,7 @@ class BackspaceNativePlugin : Plugin() {
                 requestPermissionForAlias("microphone", call, "microphoneResult")
                 return@runOnUiThread
             }
-            if (((action == "preferences" && data.optBoolean("background")) ||
+            if (((action == "preferences" && (data.optBoolean("background") || data.optBoolean("messageNotifications"))) ||
                 action in setOf("joinVoice", "startCall", "acceptCall")) &&
                 Build.VERSION.SDK_INT >= 33 && getPermissionState("notifications") != PermissionState.GRANTED) {
                 requestPermissionForAlias("notifications", call, "notificationResult")
@@ -115,13 +115,16 @@ class BackspaceNativePlugin : Plugin() {
                     "bootstrap" -> {
                         val stored = runtime.storage()
                         runtime.restoreAudioIntent(stored)
-                        JSONObject().put("settings", runtime.settings()).put("storage", stored)
+                        JSONObject().put("settings", runtime.settings()).put("storage", stored).put("insets", runtime.insets())
                     }
                     "storage" -> {
                         runtime.putStorage(data.getString("key"), if (data.isNull("value")) null else data.getString("value"))
                         JSONObject()
                     }
                     "preferences" -> { runtime.preferences(data); runtime.settings() }
+                    "channelNotification" -> {
+                        runtime.setChannelMuted(data.getString("channelId"), data.getBoolean("muted")); JSONObject()
+                    }
                     "switchServer" -> { runtime.switchServer(data.getString("server")); runtime.settings() }
                     "connect" -> { runtime.connect(data.optString("origin"), data.getString("token")); JSONObject() }
                     "disconnect" -> { runtime.disconnect(data.optString("origin")); JSONObject() }

@@ -5,6 +5,47 @@ import { useActivityStore } from '../../../stores/activityStore';
 import { api } from '../../../api/client';
 import { Toggle } from '../../ui/Toggle';
 import { disableWebPush, enableWebPush } from '../../../platform/notifications';
+import { androidCall, isAndroid, onAndroid, type AndroidPreferences } from '../../../platform/android';
+
+function AndroidNotificationSetting() {
+  const { t } = useTranslation('settings');
+  const [settings, setSettings] = useState<AndroidPreferences | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    void androidCall<AndroidPreferences>('preferences').then(setSettings).catch(() => setError(t('android.failed')));
+    return onAndroid<AndroidPreferences>('preferences', setSettings);
+  }, [t]);
+
+  const toggle = async (enabled: boolean) => {
+    setBusy(true);
+    setError('');
+    try {
+      const update = enabled ? { messageNotifications: true, background: true } : { messageNotifications: false };
+      setSettings(await androidCall<AndroidPreferences>('preferences', update));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t('android.failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <div>
+    <div className="text-[11px] font-semibold text-txt-tertiary uppercase mb-1.5">{t('android.notifications')}</div>
+    <div className="rounded-lg bg-white/[0.03] border border-white/[0.04] p-3.5">
+      <div className="flex items-center justify-between py-1">
+        <div className="flex-1 mr-4">
+          <div className="text-sm text-txt-primary">{t('android.messageNotifications')}</div>
+          <div className="text-xs text-txt-tertiary mt-0.5">{t('android.messageNotificationsDescription')}</div>
+        </div>
+        <Toggle ariaLabel={t('android.messageNotifications')} enabled={Boolean(settings?.messageNotifications && settings.notificationsAllowed && settings.background)} disabled={busy || !settings} onChange={(enabled) => void toggle(enabled)} />
+      </div>
+      {settings && !settings.notificationsAllowed && <p className="text-xs text-txt-tertiary mt-2">{t('android.notificationPermission')}</p>}
+      {error && <p role="alert" className="text-xs text-txt-danger mt-2">{error}</p>}
+    </div>
+  </div>;
+}
 
 export function PrivacyPanel() {
   const { t } = useTranslation(['settings', 'common']);
@@ -69,7 +110,7 @@ export function PrivacyPanel() {
   return (
     <div className="space-y-5">
       <h2 className="text-lg font-semibold text-txt-primary mb-6">{t('settings:privacy.title')}</h2>
-      <div>
+      {isAndroid() ? <AndroidNotificationSetting /> : <div>
         <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">{t('settings:privacy.webPush.sectionTitle')}</div>
         <div className="rounded-lg bg-white/[0.03] border border-white/[0.04] p-3.5">
           <div className="flex items-center justify-between py-1">
@@ -80,7 +121,7 @@ export function PrivacyPanel() {
             <Toggle enabled={webPushEnabled} disabled={webPushBusy} onChange={(enabled) => void toggleWebPush(enabled)} />
           </div>
         </div>
-      </div>
+      </div>}
       <div>
         <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">
           {t('settings:privacy.discovery.sectionTitle')}

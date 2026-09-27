@@ -20,6 +20,6 @@ object ClientPolicy {
     }.getOrDefault(false)
     fun microphoneAllowed(foreground: Boolean, granted: Boolean) = foreground && granted
     fun theme(value: String): String = value.takeIf { it in setOf("system", "light", "dark") } ?: "system"
-    fun shouldNotify(selfId: String, authorId: String, isDm: Boolean, content: String, all: Boolean, muted: Boolean): Boolean =
-        !muted && selfId.isNotEmpty() && selfId != authorId && (isDm || all || content.contains("<@$selfId>"))
+    fun shouldNotify(selfId: String, authorId: String, muted: Boolean): Boolean =
+        !muted && selfId.isNotEmpty() && selfId != authorId
 }

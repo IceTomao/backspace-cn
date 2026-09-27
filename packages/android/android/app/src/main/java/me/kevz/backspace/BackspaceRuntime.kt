@@ -49,8 +49,18 @@ class BackspaceRuntime internal constructor(
         private set
     var background = prefs.getBoolean("background", false)
         private set
+    var messageNotifications = prefs.getBoolean("messageNotifications", true)
+        private set
     var emit: ((String, JSONObject) -> Unit)? = null
     var onTheme: (() -> Unit)? = null
+    private var insets = JSONObject().put("top", 0).put("right", 0).put("bottom", 0).put("left", 0)
+    fun insets(): JSONObject = JSONObject(insets.toString())
+    fun setInsets(top: Float, right: Float, bottom: Float, left: Float) {
+        val next = JSONObject().put("top", top).put("right", right).put("bottom", bottom).put("left", left)
+        if (insets.toString() == next.toString()) return
+        insets = next
+        emit?.invoke("insets", next)
+    }
     private val sockets = mutableMapOf<String, SocketSession>()
     private var room: Room? = null
     private var roomEvents: Job? = null
@@ -113,7 +123,9 @@ class BackspaceRuntime internal constructor(
         val theme = ClientPolicy.theme(prefs.getString("theme", "system")!!)
         val dark = theme == "dark" || (theme == "system" &&
             context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
-        return JSONObject().put("server", server).put("theme", theme).put("dark", dark).put("background", background)
+        return JSONObject().put("server", server).put("theme", theme).put("dark", dark)
+            .put("background", background).put("messageNotifications", messageNotifications)
+            .put("notificationsAllowed", context.getSystemService(NotificationManager::class.java).areNotificationsEnabled())
     }
     fun storage(): JSONObject = vault.read(server)
     fun putStorage(key: String, value: String?) {
@@ -147,6 +159,11 @@ class BackspaceRuntime internal constructor(
             check(prefs.edit().putString("theme", theme).commit())
         }
         if (data.has("background")) setBackground(data.getBoolean("background"))
+        if (data.has("messageNotifications")) {
+            val enabled = data.getBoolean("messageNotifications")
+            check(prefs.edit().putBoolean("messageNotifications", enabled).commit())
+            messageNotifications = enabled
+        }
         onTheme?.invoke()
         emit?.invoke("preferences", settings())
     }
@@ -158,6 +175,7 @@ class BackspaceRuntime internal constructor(
             updateService()
             check(prefs.edit().putBoolean("background", value).commit())
             reconcileConnections()
+            if (value) sockets.values.filter { it.ready }.forEach(::refreshMutedChannels)
         } catch (e: Exception) { background = before; throw e }
         emit?.invoke("preferences", settings())
     }
@@ -169,6 +187,13 @@ class BackspaceRuntime internal constructor(
             emitVoice()
         }
         reconcileConnections()
+    }
+    fun setChannelMuted(channelId: String, muted: Boolean) {
+        require(channelId.isNotBlank() && channelId.length <= 256)
+        sockets.values.forEach { session ->
+            session.pendingMuteUpdates[channelId] = muted
+            session.mutedChannels?.let { if (muted) it.add(channelId) else it.remove(channelId) }
+        }
     }
     private fun reconcileConnections() {
         for (session in sockets.values) {
@@ -244,6 +269,8 @@ class BackspaceRuntime internal constructor(
         var ready = false
         var userId = ""
         var userStatus = "online"
+        var mutedChannels: MutableSet<String>? = null
+        val pendingMuteUpdates = mutableMapOf<String, Boolean>()
         var snapshot: JSONObject? = null
         var snapshotSequence = 0L
         val restrictions = mutableMapOf<String, JSONObject>()
@@ -301,6 +328,7 @@ class BackspaceRuntime internal constructor(
                             backlog.clear()
                             overflow = false
                             emit?.invoke("socketStatus", JSONObject().put("origin", origin).put("connected", true))
+                            if (background) refreshMutedChannels(this@SocketSession)
                             if (inCall && voiceOrigin == origin) {
                                 if (!voiceIsDm) ws.send(JSONObject().put("type", "voice_join").put("channelId", voiceChannel).toString())
                                 broadcastVoice()
@@ -354,6 +382,28 @@ class BackspaceRuntime internal constructor(
         }
         private fun emitEvent(id: Long, event: JSONObject) {
             emit?.invoke("socketEvent", JSONObject().put("origin", origin).put("sequence", id).put("event", event))
+        }
+    }
+
+    private fun refreshMutedChannels(session: SocketSession) {
+        scope.launch {
+            val muted = runCatching { withContext(Dispatchers.IO) {
+                val url = (session.origin.ifEmpty { server }) + "/api/users/@me/channel-notifications"
+                http.newCall(Request.Builder().url(url).header("Authorization", "Bearer ${session.token}").build())
+                    .execute().use { response ->
+                        check(response.isSuccessful)
+                        val values = JSONObject(response.body?.string() ?: "{}").getJSONArray("mutedChannelIds")
+                        buildSet { for (index in 0 until values.length()) add(values.getString(index)) }
+                    }
+            } }.getOrNull()
+            if (muted != null && sockets[session.origin] === session) {
+                val current = muted.toMutableSet()
+                session.pendingMuteUpdates.forEach { (channelId, isMuted) ->
+                    if (isMuted) current.add(channelId) else current.remove(channelId)
+                }
+                session.pendingMuteUpdates.clear()
+                session.mutedChannels = current
+            }
         }
     }
 
@@ -444,16 +494,14 @@ class BackspaceRuntime internal constructor(
         permissionMute = state?.optBoolean("permissionMuted") ?: false
     }
     private fun notifyMessage(session: SocketSession, event: JSONObject) {
-        if (foreground || (!background && !inCall) || session.userStatus == "dnd") return
+        if (foreground || !background || !messageNotifications || session.userStatus == "dnd") return
         val message = event.optJSONObject("message") ?: return
+        val channel = message.optString("channelId").ifEmpty { message.optString("dmChannelId") }
+        val muted = session.mutedChannels ?: return
+        if (channel.isBlank() || !ClientPolicy.shouldNotify(session.userId, message.optString("userId"), channel in muted)) return
         val id = session.origin + ":" + message.optString("id")
         if (!seenMessages.add(id)) return
         if (seenMessages.size > 512) seenMessages.remove(seenMessages.first())
-        val voiceSettings = runCatching { JSONObject(storage().optString("backspace-voice-settings", "{}")).optJSONObject("state") }.getOrNull()
-        if (!ClientPolicy.shouldNotify(session.userId, message.optString("userId"),
-                event.optString("type") == "dm_message_created", message.optString("content"),
-                voiceSettings?.optBoolean("messageSoundAllChannels") ?: false, false)) return
-        val channel = message.optString("channelId").ifEmpty { message.optString("dmChannelId") }
         val data = JSONObject().put("origin", session.origin).put("channelId", channel).put("userId", session.userId)
         val name = message.optJSONObject("user")?.let { it.optString("displayName").ifEmpty { it.optString("username") } } ?: "新消息"
         val content = message.optString("content").ifEmpty { "收到附件" }.take(120)

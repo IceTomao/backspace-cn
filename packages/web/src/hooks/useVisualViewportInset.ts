@@ -1,4 +1,5 @@
 import { layoutPixels } from '../platform/interfaceScale';
+import { isAndroid } from '../platform/android';
 import { useEffect, useState } from 'react';
 
 /**
@@ -150,7 +151,7 @@ export function useVisualViewportInset(): VisualViewportInset {
       // viewport already ends at the keyboard and must remain the shell edge.
       root.style.setProperty('--app-height', keyboardOpen
         ? `${layoutPixels(vv.height)}px`
-        : 'calc(100 * var(--app-dvh) + var(--safe-bottom))');
+        : isAndroid() ? 'calc(100 * var(--app-dvh))' : 'calc(100 * var(--app-dvh) + var(--safe-bottom))');
 
       // Functional update + shallow compare so identical re-measurements
       // don't churn React state every animation frame during keyboard

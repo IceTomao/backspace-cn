@@ -33,10 +33,9 @@ class ClientPolicyTest {
         assertTrue(ClientPolicy.microphoneAllowed(true, true))
     }
     @Test fun notificationRules() {
-        assertFalse(ClientPolicy.shouldNotify("me", "me", true, "", true, false))
-        assertFalse(ClientPolicy.shouldNotify("me", "other", true, "", true, true))
-        assertFalse(ClientPolicy.shouldNotify("me", "other", false, "", false, false))
-        assertTrue(ClientPolicy.shouldNotify("me", "other", false, "<@me>", false, false))
-        assertTrue(ClientPolicy.shouldNotify("me", "other", true, "", false, false))
+        assertFalse(ClientPolicy.shouldNotify("me", "me", false))
+        assertFalse(ClientPolicy.shouldNotify("me", "other", true))
+        assertFalse(ClientPolicy.shouldNotify("", "other", false))
+        assertTrue(ClientPolicy.shouldNotify("me", "other", false))
     }
 }

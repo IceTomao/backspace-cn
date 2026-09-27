@@ -2,6 +2,7 @@
   "android": {
     "theme": "Design", "system": "System", "light": "Hell", "dark": "Dunkel",
     "background": "Im Hintergrund online bleiben", "server": "Server", "switch": "Server wechseln",
+    "notifications": "Benachrichtigungen", "messageNotifications": "Nachrichtenbenachrichtigungen", "messageNotificationsDescription": "Nachrichten empfangen, wenn die App im Hintergrund online bleibt. Aktiviert auch die Hintergrundverbindung.", "notificationPermission": "Systembenachrichtigungen sind deaktiviert. Bitte erlaube Benachrichtigungen und versuche es erneut.",
     "switchConfirm": "Der Serverwechsel beendet den aktuellen Anruf. Fortfahren?", "busy": "Wird verarbeitet...",
     "failed": "Vorgang fehlgeschlagen. Bitte erneut versuchen.", "audioDevice": "Audiogerät",
     "autoDevice": "Automatisch", "bluetooth": "Bluetooth-Headsets zulassen",

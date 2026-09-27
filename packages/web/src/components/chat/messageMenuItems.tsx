@@ -70,10 +70,14 @@ export function buildMessageMenuItems(params: MessageMenuParams): ContextMenuIte
       label: '添加到收藏表情',
       icon: <span className="text-base leading-none">♥</span>,
       onClick: () => {
-        void fetch(imageUrl).then((response) => response.blob()).then((blob) => {
+        void fetch(imageUrl).then((response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.blob();
+        }).then((blob) => {
           const name = imageUrl.split('/').pop()?.split('?')[0] || '表情.png';
           return useFavoriteMediaStore.getState().add(new File([blob], name, { type: blob.type || 'image/png' }));
-        });
+        }).then(() => useUIStore.getState().addToast(i18n.t('chat:favorites.added'), 'success'))
+          .catch(() => useUIStore.getState().addToast(i18n.t('chat:favorites.addFailed'), 'warning'));
       },
     });
     items.push({

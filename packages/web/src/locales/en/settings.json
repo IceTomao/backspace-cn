@@ -2,6 +2,7 @@
   "android": {
     "theme": "Theme", "system": "Follow system", "light": "Light", "dark": "Dark",
     "background": "Stay online in background", "server": "Server", "switch": "Switch server",
+    "notifications": "Notifications", "messageNotifications": "Message notifications", "messageNotificationsDescription": "Receive messages while the app stays online in the background. Enabling this also enables background connection.", "notificationPermission": "System notification permission is off. Allow notifications and try again.",
     "switchConfirm": "Switching servers ends the current call. Continue?", "busy": "Working...",
     "failed": "Operation failed. Please try again.", "audioDevice": "Audio device",
     "autoDevice": "Automatic", "bluetooth": "Allow Bluetooth headsets",

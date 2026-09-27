@@ -138,5 +138,5 @@
     "joining": "Beitritt läuft…",
     "joinFailed": "Beitritt fehlgeschlagen"
   },
-  "favorites": { "empty": "Noch keine Favoriten. Über ein Bildmenü hinzufügen.", "remove": "Favorit entfernen" }
+  "favorites": { "empty": "Noch keine Favoriten. Über ein Bildmenü hinzufügen.", "remove": "Favorit entfernen", "added": "Zu Favoriten hinzugefügt", "addFailed": "Favorit konnte nicht hinzugefügt werden. Bitte erneut versuchen." }
 }

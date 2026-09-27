@@ -67,6 +67,17 @@ class BackspaceRuntimeTest {
         runtime.setBackground(false)
         assertTrue(created[0].closed)
     }
+    @Test fun messageNotificationPreferenceDoesNotDisableBackgroundConnection() {
+        runtime.setForeground(true)
+        runtime.setBackground(true)
+        runtime.preferences(JSONObject().put("messageNotifications", false))
+        assertFalse(runtime.messageNotifications)
+        assertTrue(runtime.background)
+        assertFalse(runtime.settings().getBoolean("messageNotifications"))
+        val restored = BackspaceRuntime(context, vault, factory)
+        assertFalse(restored.messageNotifications)
+        restored.scope.cancel()
+    }
     @Test fun profilesAndSaveFailureAreIsolated() {
         runtime.putStorage("backspace_token", "first-session")
         runtime.switchServer("https://second.example")

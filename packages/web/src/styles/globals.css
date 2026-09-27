@@ -98,6 +98,10 @@
     --notification: 253 164 175;
   }
 
+  html[data-platform="android"] {
+    --app-height: calc(100 * var(--app-dvh));
+  }
+
   * {
     @apply border-0;
     outline: none !important;

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFavoriteMediaStore } from '../../stores/favoriteMediaStore';
+import { X } from 'lucide-react';
 
 interface FavoriteMediaPickerProps {
   onSelect: (file: File) => void;
@@ -16,7 +17,7 @@ export function FavoriteMediaPicker({ onSelect, mobile = false }: FavoriteMediaP
   const remove = useFavoriteMediaStore((state) => state.remove);
   const [urls, setUrls] = useState<Record<string, string>>({});
 
-  useEffect(() => { if (!loaded) void load(); }, [load, loaded]);
+  useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     let active = true;
     for (const item of items) {
@@ -54,9 +55,9 @@ export function FavoriteMediaPicker({ onSelect, mobile = false }: FavoriteMediaP
             type="button"
             aria-label={t('favorites.remove')}
             title={t('favorites.remove')}
-            className="absolute right-0.5 top-0.5 hidden h-5 w-5 rounded bg-black/70 text-xs text-white hover:bg-black group-hover:block"
-            onClick={() => void remove(item.id)}
-          >×</button>
+            className={`absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded bg-black/70 text-white hover:bg-black ${mobile ? '' : 'desktop:hidden desktop:group-hover:flex'}`}
+            onClick={(event) => { event.stopPropagation(); void remove(item.id); }}
+          ><X className="h-4 w-4" /></button>
         </div>
       ))}
     </div>

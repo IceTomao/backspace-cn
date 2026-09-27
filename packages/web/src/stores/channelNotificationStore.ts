@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api } from '../api/client';
+import { androidCall, isAndroid } from '../platform/android';
 
 interface ChannelNotificationState {
   mutedChannels: Set<string>;
@@ -29,6 +30,7 @@ export const useChannelNotificationStore = create<ChannelNotificationState>((set
     set({ mutedChannels: next });
     try {
       await api.channels.setNotificationSetting(channelId, muted);
+      if (isAndroid()) void androidCall('channelNotification', { channelId, muted }).catch(() => {});
     } catch (error) {
       set({ mutedChannels: previous });
       throw error;

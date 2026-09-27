@@ -138,5 +138,5 @@
     "joining": "Joining…",
     "joinFailed": "Failed to join"
   },
-  "favorites": { "empty": "No favorite media yet. Add one from an image menu.", "remove": "Remove favorite" }
+  "favorites": { "empty": "No favorite media yet. Add one from an image menu.", "remove": "Remove favorite", "added": "Added to favorites", "addFailed": "Could not add favorite. Try again." }
 }

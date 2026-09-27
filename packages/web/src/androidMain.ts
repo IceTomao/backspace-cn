@@ -2,6 +2,15 @@ import { androidCall, onAndroid, setAndroidServer, type AndroidPreferences } fro
 import { appStorage, hydrateAppStorage } from './platform/appStorage';
 import desktopTheme from '../../desktop/resources/theme.css?raw';
 
+interface AndroidInsets { top: number; right: number; bottom: number; left: number }
+
+function applyInsets(insets: AndroidInsets): void {
+  const root = document.documentElement;
+  for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+    root.style.setProperty(`--safe-${side}`, `calc(${insets[side]}px / var(--interface-scale))`);
+  }
+}
+
 const themeStyle = document.createElement('style');
 function applyTheme(settings: AndroidPreferences): void {
   document.documentElement.dataset.androidTheme = settings.dark ? 'dark' : 'light';
@@ -10,7 +19,10 @@ function applyTheme(settings: AndroidPreferences): void {
     .replace('@media (prefers-color-scheme: light)', settings.dark ? '@media not all' : '@media all');
 }
 async function boot(): Promise<void> {
-  const state = await androidCall<{ settings: AndroidPreferences; storage: Record<string, string> }>('bootstrap');
+  const state = await androidCall<{ settings: AndroidPreferences; storage: Record<string, string>; insets: AndroidInsets }>('bootstrap');
+  document.documentElement.dataset.platform = 'android';
+  applyInsets(state.insets);
+  onAndroid<AndroidInsets>('insets', applyInsets);
   setAndroidServer(state.settings.server);
   hydrateAppStorage(state.storage);
   if (!appStorage.getItem('backspace-language')) appStorage.setItem('backspace-language', 'zh');

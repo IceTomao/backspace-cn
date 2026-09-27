@@ -5,6 +5,8 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Bundle;
 import androidx.core.view.WindowCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.webkit.WebViewFeature;
 import androidx.webkit.WebViewCompat;
 import androidx.activity.OnBackPressedCallback;
@@ -15,6 +17,15 @@ public class MainActivity extends BridgeActivity {
     @Override public void onCreate(Bundle state) {
         registerPlugin(BackspaceNativePlugin.class);
         super.onCreate(state);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        ViewCompat.setOnApplyWindowInsetsListener(bridge.getWebView(), (view, insets) -> {
+            var bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            float density = getResources().getDisplayMetrics().density;
+            BackspaceRuntime.get(this).setInsets(bars.top / density, bars.right / density,
+                bars.bottom / density, bars.left / density);
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(bridge.getWebView());
         bridge.getWebView().removeJavascriptInterface("androidBridge");
         // Reject legacy WebViews whose bridge cannot restrict calls to a main-frame origin.
         var webViewPackage = WebViewCompat.getCurrentWebViewPackage(this);
@@ -39,7 +50,9 @@ public class MainActivity extends BridgeActivity {
     }
     private void applyTheme() {
         boolean dark = BackspaceRuntime.get(this).settings().optBoolean("dark");
-        bridge.getWebView().setBackgroundColor(Color.parseColor(dark ? "#0b0b10" : "#ffffff"));
+        int color = Color.parseColor(dark ? "#0b0b10" : "#ffffff");
+        bridge.getWebView().setBackgroundColor(color);
+        getWindow().getDecorView().setBackgroundColor(color);
         var controller = WindowCompat.getInsetsController(getWindow(), bridge.getWebView());
         controller.setAppearanceLightStatusBars(!dark);
         controller.setAppearanceLightNavigationBars(!dark);
@@ -47,6 +60,7 @@ public class MainActivity extends BridgeActivity {
     @Override public void onConfigurationChanged(Configuration config) {
         super.onConfigurationChanged(config);
         applyTheme();
+        ViewCompat.requestApplyInsets(bridge.getWebView());
         BackspaceRuntime.get(this).preferences(new JSONObject());
     }
     @Override public void onResume() {
