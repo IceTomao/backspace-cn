@@ -17,7 +17,7 @@ services:
     # pulled, `docker compose up --build` (install.sh's fallback, and deploy.sh)
     # builds from source instead and tags the result under this same ref.
     # Override the tag with BACKSPACE_IMAGE_TAG in .env (defaults to `latest`).
-    image: ${BACKSPACE_IMAGE:-ghcr.io/thezwiss/backspace}:${BACKSPACE_IMAGE_TAG:-latest}
+    image: ${BACKSPACE_IMAGE:-ghcr.io/icetomao/backspace-cn}:${BACKSPACE_IMAGE_TAG:-latest}
     build:
       context: .
       args:

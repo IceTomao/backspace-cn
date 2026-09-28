@@ -29,17 +29,17 @@ Source files:
 
 ## 1. Pipeline Overview
 
-Backspace ships as a single application container. In the default **All-in-One** deployment it is fronted by the bundled Caddy (automatic HTTPS); behind an operator's own reverse proxy or a tunnel, Caddy is dropped and the container is published on a host loopback port instead (see [Deployment modes](#deployment-modes) below). The application image is a **prebuilt multi-architecture image published to GHCR** — `docker compose pull` (install.sh's default path) fetches `ghcr.io/thezwiss/backspace` for `linux/amd64` or `linux/arm64`, so weak/ARM hosts skip the heavy local build; a from-source build is the fallback when the image can't be pulled.
+Backspace ships as a single application container. In the default **All-in-One** deployment it is fronted by the bundled Caddy (automatic HTTPS); behind an operator's own reverse proxy or a tunnel, Caddy is dropped and the container is published on a host loopback port instead (see [Deployment modes](#deployment-modes) below). The application image is a **prebuilt multi-architecture image published to GHCR** — `docker compose pull` (install.sh's default path) fetches `ghcr.io/icetomao/backspace-cn` for `linux/amd64` or `linux/arm64`, so weak/ARM hosts skip the heavy local build; a from-source build is the fallback when the image can't be pulled.
 
 ### Prebuilt image (GHCR)
 
-`.github/workflows/docker-publish.yml` builds and pushes the application image to `ghcr.io/thezwiss/backspace` on every `v*` tag (and on manual `workflow_dispatch`). It is deliberately **separate from** the desktop-installer workflow (`release.yml`): the two share the `v*` tag trigger but build entirely different artifacts and must not be entangled.
+`.github/workflows/docker-publish.yml` builds and pushes the application image to `ghcr.io/icetomao/backspace-cn` on every `v*` tag (and on manual `workflow_dispatch`). It is deliberately **separate from** the desktop-installer workflow (`release.yml`): the two share the `v*` tag trigger but build entirely different artifacts and must not be entangled.
 
 - **Multi-arch.** `docker/setup-qemu-action` + `buildx` build `linux/amd64,linux/arm64` in one push, so a Raspberry Pi pulls a native image instead of cross-building (the Vite build OOMs small ARM boxes).
 - **Tags.** `docker/metadata-action` derives `{version}`, `{major}.{minor}`, `latest` (on `v*` tags), and `sha-<short>`. A `workflow_dispatch` with an extra `tag` input publishes that tag too (e.g. `latest` without cutting a release).
 - **AGPL § 13 commit stamping is preserved.** The workflow resolves `git rev-parse --short HEAD` and passes it as `--build-arg BACKSPACE_COMMIT=…`, exactly like `install.sh`/`deploy.sh`, plus OCI labels (`source`, `licenses=AGPL-3.0-only`, `revision`). The pulled image therefore advertises its exact source version via `GET /api/instance/info`.
 - **Auth.** The push authenticates with the built-in `GITHUB_TOKEN` (`permissions: packages: write`). The GHCR package must be set **public** once for unauthenticated `docker pull` to work.
-- **Compose wiring.** `docker-compose.yml` declares **both** `image: ${BACKSPACE_IMAGE:-ghcr.io/thezwiss/backspace}:${BACKSPACE_IMAGE_TAG:-latest}` **and** `build: .`. `pull`/`up` uses the image; `up --build` (deploy.sh, or install.sh's fallback) builds from source and tags the result under the same ref. Operators pin a version or point at a fork's registry via `BACKSPACE_IMAGE` / `BACKSPACE_IMAGE_TAG`.
+- **Compose wiring.** `docker-compose.yml` declares **both** `image: ${BACKSPACE_IMAGE:-ghcr.io/icetomao/backspace-cn}:${BACKSPACE_IMAGE_TAG:-latest}` **and** `build: .`. `pull`/`up` uses the image; `up --build` (deploy.sh, or install.sh's fallback) builds from source and tags the result under the same ref. Operators pin a version or point at a fork's registry via `BACKSPACE_IMAGE` / `BACKSPACE_IMAGE_TAG`.
 
 ### Deployment modes
 
@@ -397,7 +397,7 @@ The third-party images are **pinned to explicit tags** in `docker-compose.yml`, 
 
 Pinning makes deploys reproducible — a rebuild pulls the exact same proxy/SFU version every time, so an upstream release can't silently change behavior under you.
 
-The `backspace` image itself defaults to `ghcr.io/thezwiss/backspace:latest` (`BACKSPACE_IMAGE` / `BACKSPACE_IMAGE_TAG`). `latest` is chosen for a frictionless first install, but it is a **moving** tag: operators who want reproducible upgrades should pin `BACKSPACE_IMAGE_TAG` to a released version (e.g. `1.0.0`) in `.env` and bump it deliberately. On the source-build paths (`deploy.sh`, `install.sh`'s fallback) the image is built from the `Dockerfile`, which pins the `node:24-slim` base by digest.
+The `backspace` image itself defaults to `ghcr.io/icetomao/backspace-cn:latest` (`BACKSPACE_IMAGE` / `BACKSPACE_IMAGE_TAG`). `latest` is chosen for a frictionless first install, but it is a **moving** tag: operators who want reproducible upgrades should pin `BACKSPACE_IMAGE_TAG` to a released version (e.g. `1.0.0`) in `.env` and bump it deliberately. On the source-build paths (`deploy.sh`, `install.sh`'s fallback) the image is built from the `Dockerfile`, which pins the `node:24-slim` base by digest.
 
 **Upgrade procedure:** bump the tag in `docker-compose.yml` → test the new version (locally or on one box) → redeploy. Concretely:
 

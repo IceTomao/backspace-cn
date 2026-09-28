@@ -567,7 +567,7 @@ The most important:
 | `HOST`               | no       | `0.0.0.0`   | Bind address |
 | `REGISTRATION_OPEN`  | no       | `true`      | Set `false` to close signups after setup |
 | `MAX_UPLOAD_SIZE`    | no       | `104857600` | Max upload size in bytes (100 MB; 90 MB in `tunnel` mode) |
-| `BACKSPACE_IMAGE` / `BACKSPACE_IMAGE_TAG` | no | `ghcr.io/thezwiss/backspace` / `latest` | Prebuilt image to pull; pin a tag or point at your fork's registry |
+| `BACKSPACE_IMAGE` / `BACKSPACE_IMAGE_TAG` | no | `ghcr.io/icetomao/backspace-cn` / `latest` | Prebuilt image to pull; pin a tag or point at your fork's registry |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | no | none | Enable voice/video |
 | `COMPOSE_PROFILES`   | no       | none        | Set to `voice` to start the bundled LiveKit service |
 | `FEDERATION_ALLOW_PRIVATE_PEERS` | no | `false` | Set `true` only on a LAN-only deployment, so instances on private addresses can still peer when a user adds a handle. Admin-driven peering with a private peer works either way. |

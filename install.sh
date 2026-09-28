@@ -711,7 +711,7 @@ if [[ "${BACKSPACE_BUILD:-false}" == "true" ]]; then
   build_from_source
   record_install_channel source
 else
-  image_ref="${BACKSPACE_IMAGE:-ghcr.io/thezwiss/backspace}:${BACKSPACE_IMAGE_TAG:-latest}"
+  image_ref="${BACKSPACE_IMAGE:-ghcr.io/icetomao/backspace-cn}:${BACKSPACE_IMAGE_TAG:-latest}"
   info "Fetching prebuilt image ${image_ref} ..."
   if $COMPOSE pull backspace; then
     success "Pulled prebuilt image"
