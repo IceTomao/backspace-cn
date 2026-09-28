@@ -7,6 +7,10 @@
     "failed": "Vorgang fehlgeschlagen. Bitte erneut versuchen.", "audioDevice": "Audiogerät",
     "autoDevice": "Automatisch", "bluetooth": "Bluetooth-Headsets zulassen",
     "volume": "Empfangslautstärke", "allMessages": "Alle Kanäle benachrichtigen",
+    "mediaStatus": "Aktuelle Wiedergabe teilen",
+    "mediaAccessRequired": "Der Benachrichtigungszugriff ist erforderlich, um Titeldetails und Cover unterstützter Musik-Apps auszulesen.",
+    "mediaAccessGranted": "Titeldetails werden nur gelesen und geteilt, wenn Backspace online ist und das Teilen von Aktivitäten erlaubt ist.",
+    "grantMediaAccess": "Systemeinstellungen öffnen",
     "offline": "Verbindung nicht möglich", "retry": "Verbindung erneut versuchen",
     "storageFailed": "Lokale Einstellungen konnten nicht gespeichert werden. Gerätespeicher prüfen; die Anmeldung bleibt möglicherweise nicht erhalten."
   },
