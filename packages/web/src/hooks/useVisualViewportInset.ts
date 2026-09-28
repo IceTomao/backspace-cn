@@ -1,272 +1,230 @@
+import { useSyncExternalStore } from 'react';
 import { layoutPixels } from '../platform/interfaceScale';
 import { isAndroid } from '../platform/android';
-import { useEffect, useState } from 'react';
 
-/**
- * Live geometry of `window.visualViewport`, plus a derived `inset` string
- * that floating overlays (e.g. the chat composer) can paste into a `bottom`
- * style to sit just above the iOS / Android soft keyboard when one is open,
- * or above the system home indicator when one is not.
- *
- * Why this hook exists
- * --------------------
- * On iOS Safari (and PWA), `var(--safe-bottom)` is defined relative
- * to the **layout** viewport, not the **visual** viewport. When the soft
- * keyboard slides up, the layout viewport stays the same height and the home-
- * indicator inset still reports ~34 px — so a composer pinned to
- * `bottom: var(--safe-bottom) + 6px` ends up `~40px` above the
- * layout-bottom, which on iPhone 14 Pro is `300+ px` above the keyboard top.
- *
- * `window.visualViewport` reports the live size of the visible region. When
- * the keyboard is open, `visualViewport.height` shrinks and
- * `visualViewport.offsetTop` may become non-zero. The bottom of the visual
- * viewport (in layout-viewport coordinates) is therefore
- * `visualViewport.offsetTop + visualViewport.height`. The distance between
- * that line and the layout-viewport bottom is the keyboard occlusion:
- *   keyboardOcclusion = window.innerHeight - (offsetTop + height)
- *
- * When the keyboard is closed, that value is ~0 and we fall back to the
- * standard `safe-area-inset-bottom` so the overlay sits above the home
- * indicator. When the keyboard is open, we use the keyboard occlusion
- * directly — `safe-area-inset-bottom` no longer applies because the home
- * indicator is occluded by the keyboard.
- *
- * iOS PWA standalone caveats
- * --------------------------
- * In iOS Safari standalone PWA mode, `visualViewport.resize` events are
- * known to fire late, fire only once after the keyboard finishes animating,
- * or in some iOS versions not fire at all for the keyboard transition. To
- * cover those cases we additionally:
- *   1. Listen to `focusin` / `focusout` on `window` and re-measure (a focus
- *      change on a text input is a strong signal that the keyboard is about
- *      to open / close).
- *   2. Poll `visualViewport` for ~600ms after a focus change so we catch the
- *      shrunk height even when no `resize` event ever lands.
- *   3. Listen to `vv.scroll` events too — on some iOS builds the keyboard
- *      transition fires `scroll` (offsetTop change) without `resize`.
- *
- * Consumers
- * ---------
- * - `MobileShell.tsx` reads `{ height, keyboardOpen }` and uses `height` as
- *   the container's CSS height when the keyboard is open. This is the
- *   primary mechanism for the composer to sit flush above the keyboard:
- *   the container shrinks to the visible region, so a `position: absolute;
- *   bottom: 0` child naturally lands on the keyboard's top edge regardless
- *   of how reliably the `inset` value tracks the keyboard.
- * - `MessageInput.tsx` reads `{ value, keyboardOpen }` and uses them only
- *   on desktop fallback paths and for the breathing-room toggle (above the
- *   home indicator vs flush with the keyboard).
- */
 export interface VisualViewportInset {
-  /** CSS string for `bottom`: either `var(--safe-bottom)` or `<n>px`. */
   value: string;
-  /** True if the soft keyboard is occluding the bottom of the layout viewport. */
   keyboardOpen: boolean;
-  /**
-   * True if a text-entry element currently has focus. Used as a focus-based
-   * fallback signal for the iOS PWA case where `interactive-widget=resizes-content`
-   * (or iOS's native standalone behavior) shrinks the layout viewport itself
-   * for the keyboard — `vv.height` ends up matching `innerHeight`, so
-   * `keyboardOpen` (which infers from height delta) stays false even though
-   * the keyboard IS up. Consumers that need a "is the keyboard most likely
-   * up" signal should OR `keyboardOpen || textInputFocused`.
-   */
+  keyboardVisible: boolean;
   textInputFocused: boolean;
-  /**
-   * Live `visualViewport.height` in pixels, or `null` if `visualViewport` is
-   * unavailable. Consumers that want to size a container to the visible
-   * region (e.g. MobileShell when the keyboard is open) read this directly.
-   */
   height: number | null;
-  /**
-   * Live `visualViewport.offsetTop` in pixels (0 when no scroll occlusion at
-   * the top of the visible region), or `null` if `visualViewport` is
-   * unavailable.
-   */
   offsetTop: number | null;
 }
 
 const FALLBACK: VisualViewportInset = {
   value: 'var(--safe-bottom)',
   keyboardOpen: false,
+  keyboardVisible: false,
   textInputFocused: false,
   height: null,
   offsetTop: null,
 };
 
+const listeners = new Set<() => void>();
+let snapshot = FALLBACK;
+let stop: (() => void) | null = null;
+
+function isIosStandalone(): boolean {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = (typeof window.matchMedia === 'function'
+    && window.matchMedia('(display-mode: standalone)').matches)
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return ios && standalone;
+}
+
+function publish(next: VisualViewportInset) {
+  if (Object.keys(next).every((key) => next[key as keyof VisualViewportInset] === snapshot[key as keyof VisualViewportInset])) return;
+  snapshot = next;
+  listeners.forEach((listener) => listener());
+}
+
+function start(): () => void {
+  const vv = window.visualViewport;
+  if (!vv) return () => {};
+
+  const root = document.documentElement;
+  const standalone = isIosStandalone();
+  const shell = () => document.querySelector<HTMLElement>('[data-mobile-shell]');
+  const isEditable = (target: Element | null) => target instanceof HTMLElement && (
+    target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+  );
+  let focused = isEditable(document.activeElement);
+  let closedInnerHeight = window.innerHeight;
+  let closedOcclusion = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+  let closedShellHeight = shell()?.getBoundingClientRect().height ?? window.innerHeight;
+  let closedShellTop = shell()?.getBoundingClientRect().top ?? 0;
+  let shellOffset = 0;
+  let raf = 0;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let scrollResetAttempted = false;
+  let focusPendingUntil = 0;
+  let orientationSettlingUntil = 0;
+  let orientationTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const measure = () => {
+    const innerHeight = window.innerHeight;
+    const occlusion = Math.max(0, innerHeight - vv.offsetTop - vv.height);
+    const layoutShrink = closedInnerHeight - innerHeight;
+    // A closed PWA can leave a safe-area-sized visual viewport gap.
+    const keyboardOpen = focused && occlusion > closedOcclusion + 16;
+    const keyboardVisible = focused && (keyboardOpen || layoutShrink > 80 || performance.now() < focusPendingUntil);
+
+    if (!keyboardVisible && innerHeight >= closedInnerHeight - 16) {
+      closedInnerHeight = Math.max(closedInnerHeight, innerHeight);
+      closedOcclusion = occlusion;
+    }
+
+    root.style.setProperty('--visual-viewport-height', `${layoutPixels(vv.height)}px`);
+    root.style.setProperty('--visual-viewport-top', `${layoutPixels(vv.offsetTop)}px`);
+    root.style.setProperty('--keyboard-occlusion', `${keyboardOpen ? layoutPixels(occlusion) : 0}px`);
+
+    const normalHeight = isAndroid()
+      ? 'calc(100 * var(--app-dvh))'
+      : 'calc(100 * var(--app-dvh) + var(--safe-bottom))';
+    const orientationSettling = performance.now() < orientationSettlingUntil;
+    const restoring = standalone && !keyboardVisible && !orientationSettling && layoutShrink > 16;
+    root.style.setProperty('--app-height', keyboardOpen
+      ? `${layoutPixels(vv.height)}px`
+      : restoring ? `${layoutPixels(closedShellHeight)}px` : normalHeight);
+
+    // Keep the measured pre-keyboard height if WebKit's 100dvh is still short.
+    const element = shell();
+    if (standalone && !keyboardVisible && !restoring && !orientationSettling && element
+      && element.getBoundingClientRect().height < closedShellHeight - 16) {
+      root.style.setProperty('--app-height', `${layoutPixels(closedShellHeight)}px`);
+    }
+
+    if (standalone && !keyboardVisible && !orientationSettling && element) {
+      const scrollOffset = window.scrollY || root.scrollTop || document.body.scrollTop;
+      if (scrollOffset && !scrollResetAttempted) {
+        scrollResetAttempted = true;
+        window.scrollTo(0, 0);
+        root.scrollTop = 0;
+        document.body.scrollTop = 0;
+      } else if (!scrollOffset) {
+        const unadjustedTop = element.getBoundingClientRect().top - shellOffset;
+        const nextOffset = Math.max(0, closedShellTop - unadjustedTop);
+        if (Math.abs(nextOffset - shellOffset) > 1) {
+          shellOffset = nextOffset;
+          root.style.setProperty('--mobile-shell-offset', `${layoutPixels(shellOffset)}px`);
+        }
+      }
+    } else if (shellOffset) {
+      shellOffset = 0;
+      root.style.setProperty('--mobile-shell-offset', '0px');
+    }
+
+    if (!keyboardVisible && !focused && innerHeight >= closedInnerHeight - 16 && element
+      && Math.abs(shellOffset) < 1) {
+      closedShellHeight = Math.max(closedShellHeight, element.getBoundingClientRect().height);
+    }
+
+    publish({
+      value: keyboardOpen ? `${Math.round(layoutPixels(occlusion))}px` : 'var(--safe-bottom)',
+      keyboardOpen,
+      keyboardVisible,
+      textInputFocused: focused,
+      height: layoutPixels(vv.height),
+      offsetTop: layoutPixels(vv.offsetTop),
+    });
+  };
+
+  const schedule = () => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => { raf = 0; measure(); });
+  };
+
+  // iOS can start changing viewport geometry after several apparently stable frames.
+  const poll = () => {
+    if (pollTimer) clearInterval(pollTimer);
+    let ticks = 0;
+    pollTimer = setInterval(() => {
+      measure();
+      if (++ticks >= 32) {
+        clearInterval(pollTimer!);
+        pollTimer = null;
+        measure();
+      }
+    }, 32);
+  };
+
+  const onFocus = (event: FocusEvent) => {
+    if (!isEditable(event.target as Element | null)) return;
+    focused = event.type === 'focusin';
+    focusPendingUntil = focused ? performance.now() + 700 : 0;
+    scrollResetAttempted = false;
+    schedule();
+    poll();
+  };
+  const onViewportChange = () => { schedule(); if (focused) poll(); };
+  const onReturn = () => { if (!document.hidden) { schedule(); poll(); } };
+  const onOrientation = () => {
+    shellOffset = 0;
+    root.style.setProperty('--mobile-shell-offset', '0px');
+    orientationSettlingUntil = performance.now() + 500;
+    if (!focused) {
+      closedInnerHeight = window.innerHeight;
+      closedOcclusion = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+      root.style.setProperty('--app-height', isAndroid()
+        ? 'calc(100 * var(--app-dvh))'
+        : 'calc(100 * var(--app-dvh) + var(--safe-bottom))');
+      if (orientationTimer) clearTimeout(orientationTimer);
+      orientationTimer = setTimeout(() => {
+        closedInnerHeight = window.innerHeight;
+        closedOcclusion = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+        closedShellHeight = shell()?.getBoundingClientRect().height ?? window.innerHeight;
+        schedule();
+      }, 500);
+    }
+    scrollResetAttempted = false;
+    schedule();
+    poll();
+  };
+
+  measure();
+  vv.addEventListener('resize', onViewportChange);
+  vv.addEventListener('scroll', onViewportChange);
+  window.addEventListener('resize', onViewportChange);
+  window.addEventListener('focusin', onFocus, true);
+  window.addEventListener('focusout', onFocus, true);
+  window.addEventListener('pageshow', onReturn);
+  document.addEventListener('visibilitychange', onReturn);
+  window.addEventListener('orientationchange', onOrientation);
+
+  return () => {
+    if (raf) cancelAnimationFrame(raf);
+    if (pollTimer) clearInterval(pollTimer);
+    if (orientationTimer) clearTimeout(orientationTimer);
+    vv.removeEventListener('resize', onViewportChange);
+    vv.removeEventListener('scroll', onViewportChange);
+    window.removeEventListener('resize', onViewportChange);
+    window.removeEventListener('focusin', onFocus, true);
+    window.removeEventListener('focusout', onFocus, true);
+    window.removeEventListener('pageshow', onReturn);
+    document.removeEventListener('visibilitychange', onReturn);
+    window.removeEventListener('orientationchange', onOrientation);
+    root.style.removeProperty('--visual-viewport-height');
+    root.style.removeProperty('--visual-viewport-top');
+    root.style.removeProperty('--keyboard-occlusion');
+    root.style.removeProperty('--app-height');
+    root.style.removeProperty('--mobile-shell-offset');
+  };
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  if (listeners.size === 1) stop = start();
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      stop?.();
+      stop = null;
+      snapshot = FALLBACK;
+    }
+  };
+}
+
 export function useVisualViewportInset(): VisualViewportInset {
-  const [inset, setInset] = useState<VisualViewportInset>(FALLBACK);
-  // Mutable ref so `measure()` reads the latest focus state without React
-  // re-renders racing the visualViewport update path.
-  const textInputFocusedRef = { current: false } as { current: boolean };
-
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    let raf = 0;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    let pollDeadline = 0;
-
-    const measure = () => {
-      // Distance from the bottom of the layout viewport (window.innerHeight)
-      // to the bottom of the visual viewport (offsetTop + height). On iOS
-      // when the keyboard is up, this equals the keyboard's height.
-      const occlusion = window.innerHeight - (vv.offsetTop + vv.height);
-      // In an installed iOS PWA, the visual viewport can end above the home
-      // indicator even while the keyboard is closed. That safe-area gap is
-      // also greater than 1px, so `occlusion > 1` alone misclassifies every
-      // normal screen as keyboard-open and shortens the shell. A keyboard
-      // transition is tied to a focused text control; focusin/focusout are
-      // also the fallback signals used below for iOS versions that delay
-      // visualViewport resize events.
-      const keyboardOpen = textInputFocusedRef.current && occlusion > 1;
-      // Sub-pixel noise on iOS — anything under 1 px we treat as "no
-      // keyboard" so we don't flap between safe-area and a 0.4 px offset.
-      const next: VisualViewportInset =
-        keyboardOpen
-          ? {
-              value: `${Math.round(layoutPixels(occlusion))}px`,
-              keyboardOpen: true,
-              textInputFocused: textInputFocusedRef.current,
-              height: layoutPixels(vv.height),
-              offsetTop: layoutPixels(vv.offsetTop),
-            }
-          : {
-              value: 'var(--safe-bottom)',
-              keyboardOpen: false,
-              textInputFocused: textInputFocusedRef.current,
-              height: layoutPixels(vv.height),
-            offsetTop: layoutPixels(vv.offsetTop),
-          };
-
-      const root = document.documentElement;
-      root.style.setProperty('--visual-viewport-height', `${layoutPixels(vv.height)}px`);
-      root.style.setProperty('--visual-viewport-top', `${layoutPixels(vv.offsetTop)}px`);
-      root.style.setProperty('--keyboard-occlusion', `${keyboardOpen ? Math.max(0, layoutPixels(occlusion)) : 0}px`);
-      // A closed iOS standalone PWA can report a dynamic viewport that ends
-      // above the home-indicator area. Using that value by itself leaves a
-      // black strip below the bottom navigation. Restore the bottom safe area
-      // while the keyboard is closed; when the keyboard is open, the visual
-      // viewport already ends at the keyboard and must remain the shell edge.
-      root.style.setProperty('--app-height', keyboardOpen
-        ? `${layoutPixels(vv.height)}px`
-        : isAndroid() ? 'calc(100 * var(--app-dvh))' : 'calc(100 * var(--app-dvh) + var(--safe-bottom))');
-
-      // Functional update + shallow compare so identical re-measurements
-      // don't churn React state every animation frame during keyboard
-      // transitions.
-      //
-      // ALL returned fields must be in this comparison, otherwise an
-      // observable change to one of them is silently dropped — the historical
-      // bug was `textInputFocused` being absent here. On iOS PWA standalone
-      // the layout viewport is shrunk natively for the keyboard, so
-      // `vv.height` matches `innerHeight` and `keyboardOpen`/`value` stay
-      // unchanged across the transition. The only signal that flips is
-      // `textInputFocused`. Without it in the compare, consumers
-      // (`MessageInput`'s `--composer-clearance` effect, the composer's
-      // inline `bottom` style) never see the focus change propagate, the
-      // composer stayed pinned above the home indicator while the keyboard
-      // was actually up, and on close the clearance variable was computed
-      // off a stale `bottom` value — surfacing as a -4 px overlap between
-      // the last message and the composer's top edge.
-      setInset((prev) =>
-        prev.value === next.value &&
-        prev.keyboardOpen === next.keyboardOpen &&
-        prev.textInputFocused === next.textInputFocused &&
-        prev.height === next.height &&
-        prev.offsetTop === next.offsetTop
-          ? prev
-          : next,
-      );
-    };
-
-    const update = () => {
-      // Schedule a single rAF — `resize`/`scroll` on visualViewport can fire
-      // many times per frame on iOS during keyboard transitions; coalescing
-      // avoids redundant React state updates.
-      if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        measure();
-      });
-    };
-
-    /**
-     * iOS PWA fallback: poll for ~600 ms after a focus change. iOS Safari
-     * (especially in standalone PWA mode) often fails to dispatch a
-     * `visualViewport.resize` event when the soft keyboard opens — but the
-     * `vv.height` value itself does update once the keyboard finishes
-     * animating. Polling at ~16 ms intervals from `focusin` until the
-     * deadline ensures we observe the shrunk height even when no event
-     * fires. The interval clears as soon as we observe a steady state for
-     * two consecutive frames.
-     */
-    let lastPolledHeight = vv.height;
-    let stableFrames = 0;
-    const startPolling = (durationMs: number) => {
-      pollDeadline = performance.now() + durationMs;
-      lastPolledHeight = vv.height;
-      stableFrames = 0;
-      if (pollTimer) clearInterval(pollTimer);
-      pollTimer = setInterval(() => {
-        measure();
-        if (vv.height === lastPolledHeight) {
-          stableFrames += 1;
-        } else {
-          lastPolledHeight = vv.height;
-          stableFrames = 0;
-        }
-        if (stableFrames >= 3 || performance.now() > pollDeadline) {
-          if (pollTimer) {
-            clearInterval(pollTimer);
-            pollTimer = null;
-          }
-          // One last measurement after we stop, in case the value just
-          // settled this tick.
-          measure();
-        }
-      }, 32);
-    };
-
-    const onFocusChange = (e: FocusEvent) => {
-      // Only react to focus changes on text-entry elements — focusing a
-      // <button> never opens the soft keyboard, so polling for it would
-      // waste cycles.
-      const t = e.target as Element | null;
-      if (!t) return;
-      const tag = t.tagName;
-      const editable =
-        tag === 'INPUT' ||
-        tag === 'TEXTAREA' ||
-        (t as HTMLElement).isContentEditable === true;
-      if (!editable) return;
-      // Track focus state — used as a fallback signal in the iOS PWA case
-      // where `vv.height` doesn't shrink for the keyboard (because iOS
-      // native-shifts the layout viewport instead). `focusin` → focused;
-      // `focusout` → unfocused. Capture phase listener so we see all events.
-      textInputFocusedRef.current = e.type === 'focusin';
-      // Immediate measure + a polling window for laggy iOS PWA event flows.
-      update();
-      startPolling(600);
-    };
-
-    measure();
-    vv.addEventListener('resize', update);
-    window.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
-    window.addEventListener('focusin', onFocusChange, true);
-    window.addEventListener('focusout', onFocusChange, true);
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      if (pollTimer) clearInterval(pollTimer);
-      vv.removeEventListener('resize', update);
-      window.removeEventListener('resize', update);
-      vv.removeEventListener('scroll', update);
-      window.removeEventListener('focusin', onFocusChange, true);
-      window.removeEventListener('focusout', onFocusChange, true);
-    };
-  }, []);
-
-  return inset;
+  return useSyncExternalStore(subscribe, () => snapshot, () => FALLBACK);
 }

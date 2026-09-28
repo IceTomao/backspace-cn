@@ -164,16 +164,18 @@ export function MobileShell() {
   // `visualViewport.resize` event fires in standalone PWA mode. When the
   // keyboard is closed we use `100dvh` so the shell extends through the
   // home-indicator safe area as designed. See `useVisualViewportInset` for
-  // the iOS-PWA-specific fallback (focusin polling) that updates `height`
-  // even when no `resize` event ever lands.
+  // the iOS-PWA-specific polling and recovery when viewport events arrive late.
   useVisualViewportInset();
 
   return (
     <div
+      data-mobile-shell
       className="flex min-h-0 flex-col overflow-hidden"
       style={{
         height: 'var(--app-height)',
         paddingTop: 'var(--safe-top)',
+        position: 'relative',
+        top: 'var(--mobile-shell-offset, 0px)',
       }}
     >
       <MobileScreenStack

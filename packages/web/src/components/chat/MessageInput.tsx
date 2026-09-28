@@ -649,7 +649,7 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
   //   here. This dodges the long-standing iOS-standalone bug where
   //   `visualViewport.resize` fires late or not at all when the soft
   //   keyboard opens. The hook's `focusin` polling fallback covers the
-  //   remaining gap by re-reading `vv.height` for ~600 ms after a text
+  //   remaining gap by re-reading `vv.height` for ~1 second after a text
   //   input gains focus, even when no resize event ever lands.
   //
   // The horizontal inset is symmetric: `left-2 right-2` on mobile (matches
@@ -659,15 +659,15 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
   // `z-[110]` keeps the bubble above any in-chat overlays (mention popover,
   // staged-attachment tiles) but below modals (`z-[300]+`).
   const isMobile = useUIStore((s) => s.isMobile);
-  const { keyboardOpen, textInputFocused } = useVisualViewportInset();
+  const { keyboardOpen, keyboardVisible, textInputFocused } = useVisualViewportInset();
   // iOS PWA standalone shrinks the *layout viewport* itself for the keyboard
   // (interactive-widget=resizes-content / native standalone behavior), so
   // `vv.height` matches `innerHeight` and the height-delta-inferred
-  // `keyboardOpen` stays false even though the keyboard IS up. Focus state is
-  // the robust fallback: a text input being focused means the keyboard is up.
+  // `keyboardOpen` stays false even though the keyboard IS up. A measured
+  // layout shrink keeps the composer near the keyboard in that case.
   // - keyboardOpen true (Android Chrome): MobileShell already shrunk to
   //   `vv.height`; composer at `bottom: 0` lands on the keyboard top.
-  // - keyboardOpen false but textInputFocused true (iOS PWA): layout viewport
+  // - keyboardOpen false but keyboardVisible true (iOS PWA): layout viewport
   //   already shrunk by iOS; composer at `bottom: 4px` lands ~4 px above the
   //   keyboard top — the tight visual gap the user wants.
   // - both false: composer 6 px above the home indicator, the rest state.
@@ -675,7 +675,7 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
     ? {
         bottom: keyboardOpen
           ? '0px'
-          : textInputFocused
+          : keyboardVisible
             ? '4px'
             : 'calc(var(--safe-bottom) + 6px)',
       }
@@ -770,7 +770,7 @@ export function MessageInput({ channelId, channelName, placeholder }: MessageInp
     // offset between renders. The ResizeObserver itself is what catches
     // continuous textarea-autosize growth; these deps just ensure we're
     // attached to the live element after a remount.
-  }, [composerEl, isMobile, keyboardOpen, textInputFocused, chatReplyTo, stagedTransfers.length]);
+  }, [composerEl, isMobile, keyboardOpen, keyboardVisible, textInputFocused, chatReplyTo, stagedTransfers.length]);
 
   // Combined ref: keep `popoverAnchorRef` populated (InputPopover / mention
   // popover anchor + scroll-into-view targets) AND notify the
