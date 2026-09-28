@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import com.getcapacitor.*
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
@@ -122,6 +123,11 @@ class BackspaceNativePlugin : Plugin() {
                         JSONObject()
                     }
                     "preferences" -> { runtime.preferences(data); runtime.settings() }
+                    "setMediaStatusEnabled" -> { runtime.setMediaStatusEnabled(data.getBoolean("enabled")); runtime.settings() }
+                    "openMediaAccessSettings" -> {
+                        activity.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        JSONObject()
+                    }
                     "switchServer" -> { runtime.switchServer(data.getString("server")); runtime.settings() }
                     "connect" -> { runtime.connect(data.optString("origin"), data.getString("token")); JSONObject() }
                     "disconnect" -> { runtime.disconnect(data.optString("origin")); JSONObject() }

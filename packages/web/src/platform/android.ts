@@ -6,6 +6,8 @@ export interface AndroidPreferences {
   theme: AndroidTheme;
   dark: boolean;
   background: boolean;
+  mediaStatusEnabled: boolean;
+  mediaAccess: boolean;
   server: string;
 }
 export interface NativeVoiceState {

@@ -4,4 +4,6 @@
     <string name="title_activity_main">Backspace</string>
     <string name="package_name">me.kevz.backspace</string>
     <string name="custom_url_scheme">me.kevz.backspace</string>
+    <string name="media_listener_label">Backspace 媒体状态</string>
+    <string name="media_listener_description">仅在启用媒体状态分享时读取支持的音乐应用的歌曲信息和封面。</string>
 </resources>

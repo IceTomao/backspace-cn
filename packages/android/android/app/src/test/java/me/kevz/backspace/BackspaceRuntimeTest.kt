@@ -90,6 +90,32 @@ class BackspaceRuntimeTest {
         assertTrue(restored.settings().getBoolean("dark"))
         restored.scope.cancel()
     }
+    @Test fun mediaStatusPolicyRecognizesOnlySupportedPlayersAndPreservesTrackFields() {
+        assertEquals("Apple Music", MediaStatusPolicy.playerName("com.apple.android.music"))
+        assertEquals("网易云音乐", MediaStatusPolicy.playerName("com.netease.cloudmusic"))
+        assertEquals("QQ 音乐", MediaStatusPolicy.playerName("com.tencent.qqmusic"))
+        assertEquals("Spotify", MediaStatusPolicy.playerName("com.spotify.music"))
+        assertNull(MediaStatusPolicy.playerName("com.example.player"))
+
+        val playing = MediaStatusPolicy.activity("Spotify", "Track", "Artist", "Album", false, 1234L)
+        assertEquals("listening", playing.getString("type"))
+        assertEquals("Track", playing.getString("details"))
+        assertEquals("Artist · Album", playing.getString("state"))
+        assertEquals(1234L, playing.getJSONObject("timestamps").getLong("start"))
+
+        val paused = MediaStatusPolicy.activity("Spotify", "Track", "Artist", null, true, 1234L)
+        assertEquals("Artist · 已暂停", paused.getString("state"))
+    }
+    @Test fun mediaSharingIsDisabledByDefault() {
+        assertFalse(runtime.settings().getBoolean("mediaStatusEnabled"))
+    }
+    @Test fun mediaCaptureRequiresOptInPermissionAnOnlineSessionAndActivityVisibility() {
+        assertFalse(MediaStatusPolicy.shouldCapture(false, true, true, true))
+        assertFalse(MediaStatusPolicy.shouldCapture(true, false, true, true))
+        assertFalse(MediaStatusPolicy.shouldCapture(true, true, false, true))
+        assertFalse(MediaStatusPolicy.shouldCapture(true, true, true, false))
+        assertTrue(MediaStatusPolicy.shouldCapture(true, true, true, true))
+    }
     @Test fun replaysOrderedEventsWithoutCreatingAnotherSocketAndCleansListener() {
         val ids = mutableListOf<Long>()
         runtime.emit = { name, value -> if (name == "socketEvent") ids.add(value.getLong("sequence")) }

@@ -41,4 +41,30 @@ describe('ActivityCard', () => {
     expect(screen.getByText('排位单人/双人 · 游戏中')).toBeInTheDocument();
     expect(screen.getByText('Spotify · Blinding Lights · The Weeknd · After Hours')).toBeInTheDocument();
   });
+
+  it('renders a shared album cover for a listening activity', () => {
+    const activity: Activity = {
+      type: 'listening',
+      name: '网易云音乐',
+      details: '歌曲名',
+      state: '歌手 · 专辑',
+      assets: { largeImage: 'https://chat.example.com/api/media-artwork/cover-id' },
+    };
+
+    const { container } = render(<ActivityCard activities={[activity]} />);
+
+    expect(container.querySelector('img')).toHaveAttribute('src', activity.assets?.largeImage);
+    expect(screen.getByText('歌曲名')).toBeInTheDocument();
+    expect(screen.getByText('歌手 · 专辑')).toBeInTheDocument();
+  });
+
+  it('renders song details when no public album cover is available', () => {
+    const { container } = render(<ActivityCard activities={[{
+      type: 'listening', name: 'Apple Music', details: '歌曲名', state: '歌手',
+      assets: { largeImage: 'content://local/artwork' },
+    }]} />);
+
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(screen.getByText('歌曲名')).toBeInTheDocument();
+  });
 });
