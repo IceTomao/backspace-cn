@@ -1,0 +1,5 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="media_listener_label">Backspace media status</string>
+    <string name="media_listener_description">Reads track details and artwork from supported music apps only while media status sharing is enabled.</string>
+</resources>

@@ -23,6 +23,18 @@ export function AndroidSettings({ serverOnly = false }: { serverOnly?: boolean }
     catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
+  async function openMediaAccessSettings() {
+    setBusy(true); setError('');
+    try { await androidCall('openMediaAccessSettings'); }
+    catch (e) { setError(errorText(e)); }
+    finally { setBusy(false); }
+  }
+  async function setMediaStatusEnabled(enabled: boolean) {
+    setBusy(true); setError('');
+    try { setSettings(await androidCall<AndroidPreferences>('setMediaStatusEnabled', { enabled })); }
+    catch (e) { setError(errorText(e)); }
+    finally { setBusy(false); }
+  }
   async function changeServer() {
     if (!window.confirm(t('android.switchConfirm'))) return;
     setBusy(true); setError('');
@@ -44,6 +56,16 @@ export function AndroidSettings({ serverOnly = false }: { serverOnly?: boolean }
         {t('android.background')}
         <input type="checkbox" disabled={busy} checked={settings.background} onChange={e => void update({ background: e.target.checked })} />
       </label>
+      <div className="space-y-2 py-3 border-b border-border-soft">
+        <label className="flex items-center justify-between gap-3">
+          <span>{t('android.mediaStatus')}</span>
+          <input type="checkbox" disabled={busy || !settings.mediaAccess} checked={settings.mediaStatusEnabled}
+            onChange={e => void setMediaStatusEnabled(e.target.checked)} />
+        </label>
+        <p className="text-xs text-txt-tertiary">{t(settings.mediaAccess ? 'android.mediaAccessGranted' : 'android.mediaAccessRequired')}</p>
+        {!settings.mediaAccess && <button type="button" className="text-accent-primary underline disabled:opacity-50"
+          disabled={busy} onClick={() => void openMediaAccessSettings()}>{t('android.grantMediaAccess')}</button>}
+      </div>
     </>}
     <label className="block">
       <span className="block font-semibold mb-2">{t('android.server')}</span>

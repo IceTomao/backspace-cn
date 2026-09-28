@@ -7,6 +7,10 @@
     "failed": "Operation failed. Please try again.", "audioDevice": "Audio device",
     "autoDevice": "Automatic", "bluetooth": "Allow Bluetooth headsets",
     "volume": "Receive volume", "allMessages": "Notify for all channels",
+    "mediaStatus": "Share now playing",
+    "mediaAccessRequired": "Notification access is required to read track details and artwork from supported music apps.",
+    "mediaAccessGranted": "Track details are read and shared only while Backspace is online and activity sharing is allowed.",
+    "grantMediaAccess": "Open system settings",
     "offline": "Unable to connect", "retry": "Retry connection",
     "storageFailed": "Could not save local settings. Check device storage; this login may not persist."
   },

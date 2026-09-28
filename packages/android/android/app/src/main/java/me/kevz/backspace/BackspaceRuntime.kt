@@ -4,9 +4,11 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.net.Uri
+import android.util.Base64
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import io.livekit.android.ConnectOptions
@@ -23,8 +25,11 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.util.concurrent.TimeUnit
+
+private const val MEDIA_ACTIVITY_MIN_INTERVAL_MS = 3_200L
 
 class BackspaceRuntime internal constructor(
     private val context: Context,
@@ -51,6 +56,17 @@ class BackspaceRuntime internal constructor(
         private set
     var messageNotifications = prefs.getBoolean("messageNotifications", true)
         private set
+    private var mediaStatusEnabled = prefs.getBoolean("mediaStatusEnabled", false)
+    private var mediaSignature: String? = null
+    private var mediaActivity: JSONObject? = null
+    private var mediaArtworkId: String? = null
+    private var mediaArtworkUrl: String? = null
+    private var mediaArtworkPending = false
+    private var mediaGeneration = 0
+    private var mediaTrackStartedAt = 0L
+    private var mediaPauseJob: Job? = null
+    private var mediaPausedAt: Long? = null
+    private var expiredPausedSignature: String? = null
     var emit: ((String, JSONObject) -> Unit)? = null
     var onTheme: (() -> Unit)? = null
     private var insets = JSONObject().put("top", 0).put("right", 0).put("bottom", 0).put("left", 0)
@@ -126,6 +142,231 @@ class BackspaceRuntime internal constructor(
         return JSONObject().put("server", server).put("theme", theme).put("dark", dark)
             .put("background", background).put("messageNotifications", messageNotifications)
             .put("notificationsAllowed", context.getSystemService(NotificationManager::class.java).areNotificationsEnabled())
+            .put("mediaStatusEnabled", mediaStatusEnabled)
+            .put("mediaAccess", MediaSessionListenerService.hasAccess(context))
+    }
+    fun setMediaStatusEnabled(value: Boolean) {
+        if (value && !MediaSessionListenerService.hasAccess(context)) {
+            error("请先授予通知访问权限")
+        }
+        check(prefs.edit().putBoolean("mediaStatusEnabled", value).commit())
+        mediaStatusEnabled = value
+        if (!value) clearMediaActivity()
+        refreshMediaCapture()
+        emit?.invoke("preferences", settings())
+    }
+    fun shouldCaptureMedia(): Boolean = mediaStatusEnabled &&
+        MediaStatusPolicy.shouldCapture(
+            enabled = mediaStatusEnabled,
+            permissionGranted = MediaSessionListenerService.hasAccess(context),
+            online = sockets.values.any { it.ready },
+            showActivity = sockets.values.any { it.ready && it.showActivity }
+        )
+
+    fun onMediaSessionChanged(snapshot: MediaSessionSnapshot?) {
+        handler.post {
+            if (!shouldCaptureMedia() || snapshot == null) {
+                clearMediaActivity()
+                return@post
+            }
+            applyMediaSnapshot(snapshot)
+        }
+    }
+
+    private fun applyMediaSnapshot(snapshot: MediaSessionSnapshot) {
+        val player = MediaStatusPolicy.playerName(snapshot.packageName) ?: run {
+            clearMediaActivity()
+            return
+        }
+        if (snapshot.title.isBlank()) {
+            clearMediaActivity()
+            return
+        }
+        val signature = listOf(snapshot.packageName, snapshot.title, snapshot.artist, snapshot.album).joinToString("\u0000")
+        if (!snapshot.playing && signature == expiredPausedSignature) return
+        if (signature != mediaSignature) {
+            mediaGeneration++
+            mediaPauseJob?.cancel()
+            mediaPauseJob = null
+            mediaPausedAt = null
+            expiredPausedSignature = null
+            deleteMediaArtwork(mediaArtworkId)
+            mediaArtworkId = null
+            mediaArtworkUrl = null
+            mediaArtworkPending = false
+            mediaSignature = signature
+            mediaTrackStartedAt = System.currentTimeMillis()
+        }
+        if (snapshot.playing) expiredPausedSignature = null
+        val next = MediaStatusPolicy.activity(
+            player, snapshot.title, snapshot.artist, snapshot.album,
+            paused = !snapshot.playing, startedAt = mediaTrackStartedAt
+        )
+        mediaActivity = next
+        mediaArtworkUrl?.let { next.put("assets", JSONObject().put("largeImage", it).put("largeText", snapshot.title)) }
+
+        if (signature != lastArtworkSignature && snapshot.artwork != null) {
+            lastArtworkSignature = signature
+            mediaArtworkPending = true
+            val generation = mediaGeneration
+            scope.launch {
+                val session = sockets[""]?.takeIf { it.ready && it.showActivity }
+                if (session == null) {
+                    if (generation == mediaGeneration) {
+                        mediaArtworkPending = false
+                        lastArtworkSignature = null
+                        mediaActivity?.let(::publishMediaActivity)
+                    }
+                    return@launch
+                }
+                val uploaded = uploadMediaArtwork(session, snapshot.artwork)
+                if (uploaded == null) {
+                    if (generation == mediaGeneration) {
+                        mediaArtworkPending = false
+                        lastArtworkSignature = null
+                        mediaActivity?.let(::publishMediaActivity)
+                    }
+                    return@launch
+                }
+                if (generation != mediaGeneration || !shouldCaptureMedia()) {
+                    deleteMediaArtwork(uploaded.first)
+                    return@launch
+                }
+                mediaArtworkPending = false
+                val previousId = mediaArtworkId
+                mediaArtworkId = uploaded.first
+                mediaArtworkUrl = uploaded.second
+                mediaActivity?.put("assets", JSONObject().put("largeImage", uploaded.second)
+                    .put("largeText", snapshot.title))
+                mediaActivity?.let(::publishMediaActivity)
+                deleteMediaArtwork(previousId)
+            }
+        } else if (!mediaArtworkPending) publishMediaActivity(next)
+        if (snapshot.playing) {
+            mediaPauseJob?.cancel()
+            mediaPauseJob = null
+            mediaPausedAt = null
+        } else if (mediaPausedAt == null) {
+            mediaPausedAt = System.currentTimeMillis()
+            mediaPauseJob?.cancel()
+            mediaPauseJob = scope.launch {
+                delay(120_000)
+                if (mediaSignature == signature) {
+                    expiredPausedSignature = signature
+                    clearMediaActivity()
+                }
+            }
+        }
+    }
+
+    private var lastArtworkSignature: String? = null
+
+    private fun publishMediaActivity(activity: JSONObject?) {
+        val activities = JSONArray().apply { if (activity != null) put(activity) }
+        sockets.values.filter { it.ready && it.showActivity }.forEach { session ->
+            val serialized = activities.toString()
+            sendMediaActivityUpdate(session, serialized,
+                JSONObject().put("type", "activity_update").put("activities", activities).toString())
+        }
+    }
+
+    private fun sendMediaActivityUpdate(session: SocketSession, state: String, payload: String) {
+        if (!session.ready || !session.showActivity) return
+        if (state == session.lastActivityUpdate) {
+            clearPendingMediaActivity(session)
+            return
+        }
+        val wait = MEDIA_ACTIVITY_MIN_INTERVAL_MS - (System.currentTimeMillis() - session.lastActivityUpdateAt)
+        if (wait > 0) {
+            session.pendingActivityState = state
+            session.pendingActivityPayload = payload
+            if (session.activityUpdateJob?.isActive != true) {
+                session.activityUpdateJob = scope.launch {
+                    delay(wait)
+                    val pendingState = session.pendingActivityState
+                    val pendingPayload = session.pendingActivityPayload
+                    session.pendingActivityState = null
+                    session.pendingActivityPayload = null
+                    session.activityUpdateJob = null
+                    if (pendingState != null && pendingPayload != null) {
+                        sendMediaActivityUpdate(session, pendingState, pendingPayload)
+                    }
+                }
+            }
+            return
+        }
+        clearPendingMediaActivity(session)
+        if (session.socket?.send(payload) == true) {
+            session.lastActivityUpdate = state
+            session.lastActivityUpdateAt = System.currentTimeMillis()
+        }
+    }
+
+    private fun clearPendingMediaActivity(session: SocketSession) {
+        session.activityUpdateJob?.cancel()
+        session.activityUpdateJob = null
+        session.pendingActivityState = null
+        session.pendingActivityPayload = null
+    }
+
+    private fun clearMediaActivity() {
+        mediaGeneration++
+        mediaPauseJob?.cancel()
+        mediaPauseJob = null
+        if (mediaActivity != null || mediaArtworkId != null) publishMediaActivity(null)
+        mediaActivity = null
+        mediaSignature = null
+        lastArtworkSignature = null
+        mediaPausedAt = null
+        mediaTrackStartedAt = 0L
+        mediaArtworkUrl = null
+        mediaArtworkPending = false
+        deleteMediaArtwork(mediaArtworkId)
+        mediaArtworkId = null
+    }
+
+    private fun refreshMediaCapture() {
+        if (!shouldCaptureMedia()) clearMediaActivity()
+        MediaSessionListenerService.refresh()
+    }
+
+    private suspend fun uploadMediaArtwork(session: SocketSession, artwork: Bitmap): Pair<String, String>? =
+        withContext(Dispatchers.IO) {
+            try {
+                val scaled = if (artwork.width > 512 || artwork.height > 512) {
+                    val factor = minOf(512f / artwork.width, 512f / artwork.height)
+                    Bitmap.createScaledBitmap(artwork, (artwork.width * factor).toInt().coerceAtLeast(1),
+                        (artwork.height * factor).toInt().coerceAtLeast(1), true)
+                } else artwork
+                val output = ByteArrayOutputStream()
+                if (!scaled.compress(Bitmap.CompressFormat.JPEG, 82, output)) return@withContext null
+                if (scaled !== artwork) scaled.recycle()
+                if (output.size() > 256 * 1024) return@withContext null
+                val body = JSONObject().put("image", Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP))
+                    .toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder().url("$server/api/media-artwork")
+                    .header("Authorization", "Bearer ${session.token}").post(body).build()
+                http.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@withContext null
+                    val result = JSONObject(response.body?.string() ?: return@withContext null)
+                    val id = result.getString("path").substringAfterLast('/')
+                    id to "$server${result.getString("path")}"
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+    private fun deleteMediaArtwork(id: String?) {
+        if (id.isNullOrBlank()) return
+        val session = sockets[""] ?: return
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val request = Request.Builder().url("$server/api/media-artwork/$id")
+                    .header("Authorization", "Bearer ${session.token}").delete().build()
+                http.newCall(request).execute().close()
+            }
+        }
     }
     fun storage(): JSONObject = vault.read(server)
     fun putStorage(key: String, value: String?) {
@@ -135,6 +376,7 @@ class BackspaceRuntime internal constructor(
         if (key == "backspace_token" && value == null) {
             background = false
             prefs.edit().putBoolean("background", false).commit()
+            clearMediaActivity()
             hangup()
             sockets.keys.toList().forEach(::disconnect)
             clearNotifications()
@@ -147,6 +389,7 @@ class BackspaceRuntime internal constructor(
         val normalized = ClientPolicy.server(value)
         check(prefs.edit().putString("server", normalized).putBoolean("background", false).commit())
         background = false
+        clearMediaActivity()
         hangup()
         sockets.keys.toList().forEach(::disconnect)
         clearNotifications()
@@ -187,6 +430,7 @@ class BackspaceRuntime internal constructor(
             emitVoice()
         }
         reconcileConnections()
+        refreshMediaCapture()
     }
     fun setChannelMuted(channelId: String, muted: Boolean) {
         require(channelId.isNotBlank() && channelId.length <= 256)
@@ -199,6 +443,7 @@ class BackspaceRuntime internal constructor(
         for (session in sockets.values) {
             if (ClientPolicy.shouldConnect(foreground, background, inCall)) session.open() else session.pause()
         }
+        refreshMediaCapture()
     }
     private fun updateService() {
         if (serviceStopping) return
@@ -231,10 +476,14 @@ class BackspaceRuntime internal constructor(
     fun disconnect(origin: String) {
         if (inCall && voiceOrigin == origin) hangup()
         sockets.remove(origin)?.let {
+            if (it.ready && it.showActivity && mediaActivity != null) {
+                it.socket?.send(JSONObject().put("type", "activity_update").put("activities", JSONArray()).toString())
+            }
             it.incomingTimeout?.cancel()
             it.incoming = null
             it.pause()
         }
+        refreshMediaCapture()
     }
     fun send(origin: String, event: JSONObject) {
         require(event.optString("type") != "auth" && event.toString().length <= 1_000_000)
@@ -271,6 +520,12 @@ class BackspaceRuntime internal constructor(
         var userStatus = "online"
         var mutedChannels: MutableSet<String>? = null
         val pendingMuteUpdates = mutableMapOf<String, Boolean>()
+        var showActivity = true
+        var lastActivityUpdate: String? = null
+        var lastActivityUpdateAt = 0L
+        var pendingActivityState: String? = null
+        var pendingActivityPayload: String? = null
+        var activityUpdateJob: Job? = null
         var snapshot: JSONObject? = null
         var snapshotSequence = 0L
         val restrictions = mutableMapOf<String, JSONObject>()
@@ -321,19 +576,40 @@ class BackspaceRuntime internal constructor(
                         val eventSequence = ++sequence
                         if (event.optString("type") == "ready") {
                             ready = true
-                            userId = event.getJSONObject("user").getString("id")
-                            userStatus = event.getJSONObject("user").optString("status", "online")
+                            val user = event.getJSONObject("user")
+                            userId = user.getString("id")
+                            userStatus = user.optString("status", "online")
+                            showActivity = user.optBoolean("showActivity", true)
+                            clearPendingMediaActivity(this@SocketSession)
+                            lastActivityUpdate = null
+                            lastActivityUpdateAt = 0L
                             snapshot = event
                             snapshotSequence = eventSequence
                             backlog.clear()
                             overflow = false
                             emit?.invoke("socketStatus", JSONObject().put("origin", origin).put("connected", true))
                             if (background) refreshMutedChannels(this@SocketSession)
+                            refreshMediaCapture()
+                            if (showActivity && mediaActivity != null) publishMediaActivity(mediaActivity)
                             if (inCall && voiceOrigin == origin) {
                                 if (!voiceIsDm) ws.send(JSONObject().put("type", "voice_join").put("channelId", voiceChannel).toString())
                                 broadcastVoice()
                             }
                         } else {
+                            if (event.optString("type") == "user_updated") {
+                                val user = event.optJSONObject("user")
+                                if (user != null && user.optString("id") == userId && user.has("showActivity")) {
+                                    showActivity = user.optBoolean("showActivity")
+                                    if (showActivity) {
+                                        if (mediaActivity != null) publishMediaActivity(mediaActivity)
+                                    } else {
+                                        clearPendingMediaActivity(this@SocketSession)
+                                        lastActivityUpdate = null
+                                        clearMediaActivity()
+                                    }
+                                    refreshMediaCapture()
+                                }
+                            }
                             if (backlog.size >= 512) { backlog.removeFirst(); overflow = true }
                             backlog.addLast(eventSequence to event)
                         }
@@ -349,6 +625,8 @@ class BackspaceRuntime internal constructor(
             if (epoch != generation) return
             socket = null
             ready = false
+            clearPendingMediaActivity(this)
+            refreshMediaCapture()
             heartbeat?.cancel()
             emit?.invoke("socketStatus", JSONObject().put("origin", origin).put("connected", false))
             if (code in setOf(4001, 4003, 4004)) {
@@ -366,9 +644,11 @@ class BackspaceRuntime internal constructor(
             epoch++
             reconnect?.cancel(); reconnect = null
             heartbeat?.cancel(); heartbeat = null
+            clearPendingMediaActivity(this)
             socket?.close(1000, null); socket = null
             ready = false
             emit?.invoke("socketStatus", JSONObject().put("origin", origin).put("connected", false))
+            refreshMediaCapture()
         }
         fun replay() {
             if (overflow) {

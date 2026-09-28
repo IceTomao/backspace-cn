@@ -7,6 +7,10 @@
     "failed": "操作失败，请重试", "audioDevice": "音频设备",
     "autoDevice": "自动选择", "bluetooth": "允许连接蓝牙耳机",
     "volume": "接收音量", "allMessages": "全部频道消息提醒",
+    "mediaStatus": "分享正在播放的音乐",
+    "mediaAccessRequired": "需要授予通知访问权限，才能读取支持的音乐应用的歌曲信息和专辑封面。",
+    "mediaAccessGranted": "仅在 Backspace 在线且允许分享活动状态时采集和分享歌曲信息。",
+    "grantMediaAccess": "前往系统设置授权",
     "offline": "暂时无法连接", "retry": "重试连接",
     "storageFailed": "本地设置保存失败，请检查手机存储空间。此次登录可能无法保留。"
   },

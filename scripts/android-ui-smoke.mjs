@@ -48,7 +48,10 @@ try {
     await page.addInitScript(() => {
       const listeners = new Map();
       const stored = {};
-      const settings = { server: 'https://chat.kevz.me:2096', theme: 'system', dark: false, background: false };
+      const settings = {
+        server: 'https://chat.kevz.me:2096', theme: 'system', dark: false, background: false,
+        mediaStatusEnabled: false, mediaAccess: false,
+      };
       window.androidBridge = {};
       window.__theme = dark => {
         settings.dark = dark;

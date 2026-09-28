@@ -8,6 +8,8 @@ export interface AndroidPreferences {
   background: boolean;
   messageNotifications: boolean;
   notificationsAllowed: boolean;
+  mediaStatusEnabled: boolean;
+  mediaAccess: boolean;
   server: string;
 }
 export interface NativeVoiceState {
