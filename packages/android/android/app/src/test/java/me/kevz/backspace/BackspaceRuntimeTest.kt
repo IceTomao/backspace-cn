@@ -2,6 +2,8 @@ package me.kevz.backspace
 
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.media.MediaMetadata
 import android.os.Looper
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.*
@@ -116,6 +118,79 @@ class BackspaceRuntimeTest {
 
         val paused = MediaStatusPolicy.activity("Spotify", "Track", "Artist", null, true, 1234L)
         assertEquals("Artist · 已暂停", paused.getString("state"))
+    }
+    @Test fun mediaSessionClockContinuesAcrossTracksFromSamePlayer() {
+        val clock = MediaSessionClock()
+        val startedAt = clock.start("com.spotify.music", 1000L)
+        val nextTrackStartedAt = clock.start("com.spotify.music", 2000L)
+        val firstTrack = MediaStatusPolicy.activity("Spotify", "First track", "Artist", null, false, startedAt)
+        val nextTrack = MediaStatusPolicy.activity("Spotify", "Next track", "Artist", null, true, nextTrackStartedAt)
+
+        assertEquals(1000L, nextTrackStartedAt)
+        assertEquals("First track", firstTrack.getString("details"))
+        assertEquals("Next track", nextTrack.getString("details"))
+        assertEquals(1000L, nextTrack.getJSONObject("timestamps").getLong("start"))
+        assertEquals("Artist · 已暂停", nextTrack.getString("state"))
+    }
+    @Test fun mediaSessionClockRestartsWhenPlayerChangesOrSessionClears() {
+        val clock = MediaSessionClock()
+        clock.start("com.spotify.music", 1000L)
+        val switchedPlayerAt = clock.start("com.tencent.qqmusic", 2000L)
+        clock.reset()
+        val restartedAfterClear = clock.start("com.tencent.qqmusic", 3000L)
+
+        assertEquals(2000L, switchedPlayerAt)
+        assertEquals(3000L, restartedAfterClear)
+    }
+    @Test fun mediaMetadataCacheLoadsOnlyOnceForPlaybackStateUpdates() {
+        val cache = MediaSessionMetadataCache()
+        var loads = 0
+        val load = {
+            loads++
+            MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, "Track")
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, "Artist")
+                .build()
+        }
+
+        val first = cache.currentOrLoad(load)
+        val second = cache.currentOrLoad(load)
+
+        assertEquals(1, loads)
+        assertSame(first, second)
+        assertEquals("Track", second?.title)
+    }
+    @Test fun mediaMetadataCacheUpdatesTrackFieldsAndArtwork() {
+        val cache = MediaSessionMetadataCache()
+        val artwork = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        val updated = cache.update(
+            MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, "New track")
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, "New artist")
+                .putString(MediaMetadata.METADATA_KEY_ALBUM, "New album")
+                .putBitmap(MediaMetadata.METADATA_KEY_ART, artwork)
+                .build()
+        )
+
+        assertEquals("New track", updated?.title)
+        assertEquals("New artist", updated?.artist)
+        assertEquals("New album", updated?.album)
+        assertSame(artwork, updated?.artwork)
+        artwork.recycle()
+    }
+    @Test fun mediaMetadataCacheClearsAndReloadsAfterSessionChange() {
+        val cache = MediaSessionMetadataCache()
+        cache.update(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, "Old track").build())
+        cache.clear()
+        var loads = 0
+
+        val reloaded = cache.currentOrLoad {
+            loads++
+            MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, "New track").build()
+        }
+
+        assertEquals(1, loads)
+        assertEquals("New track", reloaded?.title)
     }
     @Test fun mediaSharingIsDisabledByDefault() {
         assertFalse(runtime.settings().getBoolean("mediaStatusEnabled"))

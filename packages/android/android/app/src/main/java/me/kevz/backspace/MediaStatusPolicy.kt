@@ -2,6 +2,24 @@ package me.kevz.backspace
 
 import org.json.JSONObject
 
+internal class MediaSessionClock {
+    private var playerPackage: String? = null
+    private var startedAt = 0L
+
+    fun start(packageName: String, now: Long): Long {
+        if (playerPackage != packageName || startedAt == 0L) {
+            playerPackage = packageName
+            startedAt = now
+        }
+        return startedAt
+    }
+
+    fun reset() {
+        playerPackage = null
+        startedAt = 0L
+    }
+}
+
 object MediaStatusPolicy {
     private val players = mapOf(
         "com.apple.android.music" to "Apple Music",

@@ -58,6 +58,7 @@ class BackspaceRuntime internal constructor(
         private set
     private var mediaStatusEnabled = prefs.getBoolean("mediaStatusEnabled", false)
     private var mediaSignature: String? = null
+    private val mediaSessionClock = MediaSessionClock()
     private var mediaActivity: JSONObject? = null
     private var mediaArtworkId: String? = null
     private var mediaArtworkUrl: String? = null
@@ -195,7 +196,7 @@ class BackspaceRuntime internal constructor(
             mediaArtworkUrl = null
             mediaArtworkPending = false
             mediaSignature = signature
-            mediaTrackStartedAt = System.currentTimeMillis()
+            mediaTrackStartedAt = mediaSessionClock.start(snapshot.packageName, System.currentTimeMillis())
         }
         if (snapshot.playing) expiredPausedSignature = null
         val next = MediaStatusPolicy.activity(
@@ -316,6 +317,7 @@ class BackspaceRuntime internal constructor(
         if (mediaActivity != null || mediaArtworkId != null) publishMediaActivity(null)
         mediaActivity = null
         mediaSignature = null
+        mediaSessionClock.reset()
         lastArtworkSignature = null
         mediaPausedAt = null
         mediaTrackStartedAt = 0L
