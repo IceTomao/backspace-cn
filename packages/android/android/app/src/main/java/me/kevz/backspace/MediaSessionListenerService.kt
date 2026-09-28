@@ -134,7 +134,7 @@ class MediaSessionListenerService : NotificationListenerService() {
         fun hasAccess(context: Context): Boolean {
             val enabled = Settings.Secure.getString(
                 context.contentResolver,
-                Settings.Secure.ENABLED_NOTIFICATION_LISTENERS
+                "enabled_notification_listeners"
             ) ?: return false
             val expected = ComponentName(context, MediaSessionListenerService::class.java)
             return enabled.split(':').any { ComponentName.unflattenFromString(it) == expected }
