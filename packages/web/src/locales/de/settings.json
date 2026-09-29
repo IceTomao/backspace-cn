@@ -283,7 +283,19 @@
       "imagesLabel": "Aktivitätsbilder teilen",
       "imagesDescription": "Lade komprimierte Spielsymbole und Albumcover auf deinen Backspace-Server hoch."
     },
-    "webPush": { "sectionTitle": "Benachrichtigungen", "label": "Webbenachrichtigungen aktivieren", "description": "Neue Nachrichten im Browser oder in der installierten App anzeigen." }
+    "webPush": {
+      "sectionTitle": "Benachrichtigungen",
+      "label": "Webbenachrichtigungen aktivieren",
+      "description": "Neue Nachrichten im Browser oder in der installierten App anzeigen.",
+      "errors": {
+        "unsupported": "Web Push benötigt eine sichere Verbindung und einen Browser mit Benachrichtigungsunterstützung.",
+        "permissionDenied": "Erlaube Benachrichtigungen für diese Website in den Browsereinstellungen.",
+        "notConfigured": "Web Push ist auf diesem Server nicht eingerichtet.",
+        "subscriptionFailed": "Der Browser konnte kein Push-Abonnement erstellen. Versuche es erneut oder prüfe die Website-Einstellungen.",
+        "registrationFailed": "Das Push-Abonnement konnte nicht beim Server registriert werden. Prüfe die Verbindung und versuche es erneut.",
+        "unknown": "Webbenachrichtigungen konnten nicht aktiviert werden. Versuche es erneut."
+      }
+    }
   },
   "connections": {
     "title": "Verbindungen"

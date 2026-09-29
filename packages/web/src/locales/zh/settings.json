@@ -283,7 +283,19 @@
       "imagesLabel": "分享活动封面和图标",
       "imagesDescription": "将压缩后的游戏图标和专辑封面上传到您的 Backspace 服务器。"
     },
-    "webPush": { "sectionTitle": "通知", "label": "启用网页通知", "description": "收到新消息时在网页或已安装的轻应用中提醒你。" }
+    "webPush": {
+      "sectionTitle": "通知",
+      "label": "启用网页通知",
+      "description": "收到新消息时在网页或已安装的轻应用中提醒你。",
+      "errors": {
+        "unsupported": "网页推送需要安全连接，并且浏览器支持通知功能。",
+        "permissionDenied": "请在浏览器的网站设置中允许此网站发送通知。",
+        "notConfigured": "此服务器尚未配置网页推送。",
+        "subscriptionFailed": "浏览器无法创建推送订阅，请重试或检查网站设置。",
+        "registrationFailed": "无法向服务器登记推送订阅，请检查网络后重试。",
+        "unknown": "无法启用网页通知，请重试。"
+      }
+    }
   },
   "connections": {
     "title": "连接件"

@@ -9,6 +9,20 @@ export interface NotificationOptions {
   userId?: string;
 }
 
+export type WebPushSetupErrorCode =
+  | 'unsupported'
+  | 'permissionDenied'
+  | 'notConfigured'
+  | 'subscriptionFailed'
+  | 'registrationFailed';
+
+export class WebPushSetupError extends Error {
+  constructor(readonly code: WebPushSetupErrorCode) {
+    super(code);
+    this.name = 'WebPushSetupError';
+  }
+}
+
 const clicks = new EventTarget();
 
 /** One subscription per mounted controller, including older desktop bridges. */
@@ -54,31 +68,76 @@ export function updateBadgeCount(count: number): void {
 }
 
 export async function enableWebPush(): Promise<boolean> {
-  if (isElectron() || isAndroid() || !window.isSecureContext || !('Notification' in window)) return false;
+  if (isElectron() || isAndroid() || !window.isSecureContext || !('Notification' in window) ||
+    !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new WebPushSetupError('unsupported');
+  }
   const permission = Notification.permission === 'granted'
     ? 'granted'
     : await Notification.requestPermission();
-  if (permission !== 'granted') return false;
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    try {
-      const config = await api.notifications.webPush();
-      if (config.enabled && config.publicKey) {
-        const registration = await navigator.serviceWorker.ready;
-        let subscription = await registration.pushManager.getSubscription();
-        if (!subscription) {
-          subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(config.publicKey) as unknown as ArrayBuffer,
-          });
-        }
-        await api.notifications.subscribeWebPush(subscription.toJSON());
-        window.dispatchEvent(new CustomEvent('backspace-web-push-changed', { detail: true }));
-      }
-    } catch {
-      // Permission succeeded; use foreground notifications when persistent
-      // Push is unavailable or the instance has no VAPID configuration.
-    }
+  if (permission !== 'granted') {
+    throw new WebPushSetupError('permissionDenied');
   }
+
+  let config: Awaited<ReturnType<typeof api.notifications.webPush>>;
+  try {
+    config = await api.notifications.webPush();
+  } catch {
+    throw new WebPushSetupError('registrationFailed');
+  }
+  if (!config.enabled || !config.publicKey) throw new WebPushSetupError('notConfigured');
+
+  let subscription: PushSubscription;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    subscription = await registration.pushManager.getSubscription() ??
+      await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.publicKey) as unknown as ArrayBuffer,
+      });
+  } catch {
+    throw new WebPushSetupError('subscriptionFailed');
+  }
+
+  try {
+    await api.notifications.subscribeWebPush(subscription.toJSON());
+  } catch {
+    throw new WebPushSetupError('registrationFailed');
+  }
+  window.dispatchEvent(new CustomEvent('backspace-web-push-changed', { detail: true }));
+  return true;
+}
+
+/** Re-register an existing browser subscription for the currently signed-in account. */
+export async function syncWebPushSubscription(): Promise<boolean> {
+  if (isElectron() || isAndroid() || !window.isSecureContext || !('Notification' in window) ||
+    Notification.permission !== 'granted' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return false;
+  }
+
+  let subscription: PushSubscription | null;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    subscription = await registration.pushManager.getSubscription();
+  } catch {
+    throw new WebPushSetupError('subscriptionFailed');
+  }
+  if (!subscription) return false;
+
+  let config: Awaited<ReturnType<typeof api.notifications.webPush>>;
+  try {
+    config = await api.notifications.webPush();
+  } catch {
+    throw new WebPushSetupError('registrationFailed');
+  }
+  if (!config.enabled || !config.publicKey) throw new WebPushSetupError('notConfigured');
+
+  try {
+    await api.notifications.subscribeWebPush(subscription.toJSON());
+  } catch {
+    throw new WebPushSetupError('registrationFailed');
+  }
+  window.dispatchEvent(new CustomEvent('backspace-web-push-changed', { detail: true }));
   return true;
 }
 

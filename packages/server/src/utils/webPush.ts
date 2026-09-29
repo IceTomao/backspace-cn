@@ -44,6 +44,7 @@ export function sendWebPushToUsers(userIds: string[], message: WebPushMessage): 
       .catch((error: unknown) => {
         const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error
           ? Number((error as { statusCode?: unknown }).statusCode) : 0;
+        console.warn(`[web-push] delivery failed for subscription ${subscription.id} (status ${statusCode || 'unknown'})`);
         if (statusCode === 404 || statusCode === 410) {
           db.delete(schema.pushSubscriptions).where(eq(schema.pushSubscriptions.id, subscription.id)).run();
         }

@@ -4,7 +4,13 @@ import { useAuthStore } from '../../../stores/authStore';
 import { useActivityStore } from '../../../stores/activityStore';
 import { api } from '../../../api/client';
 import { Toggle } from '../../ui/Toggle';
-import { disableWebPush, enableWebPush } from '../../../platform/notifications';
+import {
+  disableWebPush,
+  enableWebPush,
+  syncWebPushSubscription,
+  WebPushSetupError,
+  type WebPushSetupErrorCode,
+} from '../../../platform/notifications';
 import { androidCall, isAndroid, onAndroid, type AndroidPreferences } from '../../../platform/android';
 
 function AndroidNotificationSetting() {
@@ -57,6 +63,7 @@ export function PrivacyPanel() {
   const [activityPreferences, setActivityPreferences] = useState({ showGames: true, showMusic: true, showActivityImages: true });
   const [webPushEnabled, setWebPushEnabled] = useState(false);
   const [webPushBusy, setWebPushBusy] = useState(false);
+  const [webPushError, setWebPushError] = useState<WebPushSetupErrorCode | 'unknown' | null>(null);
   const hasDesktopPreferences = Boolean(window.backspace?.getActivityPreferences);
 
   useEffect(() => {
@@ -68,18 +75,41 @@ export function PrivacyPanel() {
   }, []);
 
   useEffect(() => {
-    setWebPushEnabled(typeof Notification !== 'undefined' && Notification.permission === 'granted');
-  }, []);
+    let cancelled = false;
+    setWebPushError(null);
+    if (!user?.id) {
+      setWebPushEnabled(false);
+      return;
+    }
+    void syncWebPushSubscription().then((enabled) => {
+      if (!cancelled) setWebPushEnabled(enabled);
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      setWebPushEnabled(false);
+      setWebPushError(error instanceof WebPushSetupError ? error.code : 'unknown');
+    });
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   const toggleWebPush = async (enabled: boolean) => {
+    const wasEnabled = webPushEnabled;
     setWebPushBusy(true);
+    setWebPushError(null);
     try {
       const result = enabled ? await enableWebPush() : await disableWebPush();
       setWebPushEnabled(enabled && result === true);
+    } catch (error) {
+      if (enabled) setWebPushEnabled(false);
+      else setWebPushEnabled(wasEnabled);
+      setWebPushError(error instanceof WebPushSetupError ? error.code : 'unknown');
     } finally {
       setWebPushBusy(false);
     }
   };
+
+  const webPushErrorText = webPushError
+    ? t(`settings:privacy.webPush.errors.${webPushError}`)
+    : null;
 
   const setActivityPreference = async (patch: { showGames?: boolean; showMusic?: boolean; showActivityImages?: boolean }) => {
     const previous = activityPreferences;
@@ -120,6 +150,7 @@ export function PrivacyPanel() {
             </div>
             <Toggle enabled={webPushEnabled} disabled={webPushBusy} onChange={(enabled) => void toggleWebPush(enabled)} />
           </div>
+          {webPushErrorText && <p role="alert" className="text-xs text-txt-danger mt-2">{webPushErrorText}</p>}
         </div>
       </div>}
       <div>

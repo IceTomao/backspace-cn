@@ -283,7 +283,19 @@
       "imagesLabel": "Share Activity Artwork",
       "imagesDescription": "Upload compressed game icons and album artwork to your Backspace server."
     },
-    "webPush": { "sectionTitle": "Notifications", "label": "Enable web notifications", "description": "Show alerts for new messages in the browser or installed app." }
+    "webPush": {
+      "sectionTitle": "Notifications",
+      "label": "Enable web notifications",
+      "description": "Show alerts for new messages in the browser or installed app.",
+      "errors": {
+        "unsupported": "Web Push requires a secure site and a browser that supports notifications.",
+        "permissionDenied": "Allow notifications for this site in your browser settings.",
+        "notConfigured": "Web Push is not configured on this server.",
+        "subscriptionFailed": "The browser could not create a push subscription. Try again or check the site settings.",
+        "registrationFailed": "The subscription could not be registered with the server. Check your connection and try again.",
+        "unknown": "Web notifications could not be enabled. Try again."
+      }
+    }
   },
   "connections": {
     "title": "Connections"

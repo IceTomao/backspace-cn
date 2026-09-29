@@ -11,6 +11,12 @@ import { useUIStore } from '../stores/uiStore';
 
 vi.mock('../audio/AudioManager', () => ({ AudioManager: { getInstance: () => ({}) } }));
 
+const syncWebPushSubscription = vi.hoisted(() => vi.fn());
+vi.mock('../platform/notifications', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../platform/notifications')>(),
+  syncWebPushSubscription,
+}));
+
 class BrowserNotification {
   static permission = 'granted';
   static instances: BrowserNotification[] = [];
@@ -36,6 +42,8 @@ beforeEach(() => {
   vi.spyOn(window, 'focus').mockImplementation(() => {});
   vi.spyOn(document, 'hasFocus').mockReturnValue(false);
   useAuthStore.setState({ user: { id: 'me' } as User });
+  syncWebPushSubscription.mockClear();
+  syncWebPushSubscription.mockResolvedValue(true);
   useSpaceStore.setState({
     channelToSpaceMap: new Map([['remote-chat', 'remote-space']]),
     channelOriginMap: new Map([['remote-chat', 'https://remote.example']]),
@@ -54,6 +62,14 @@ afterEach(() => {
 });
 
 describe('notification clicks', () => {
+  it('re-registers the browser subscription when the signed-in account changes', async () => {
+    mount();
+    expect(syncWebPushSubscription).toHaveBeenCalledOnce();
+
+    act(() => useAuthStore.setState({ user: { id: 'next-account' } as User }));
+    expect(syncWebPushSubscription).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ['dm', undefined, '/channels/@me/dm'],
     ['remote-chat', 'remote-space', '/channels/remote-space/remote-chat'],

@@ -5,7 +5,12 @@ import { useVoiceStore } from '../stores/voiceStore';
 import { useAuthStore } from '../stores/authStore';
 import { isElectron } from '../platform/platform';
 import { isAndroid, androidCall } from '../platform/android';
-import { onNotificationClick, sendNotification, updateBadgeCount } from '../platform/notifications';
+import {
+  onNotificationClick,
+  sendNotification,
+  syncWebPushSubscription,
+  updateBadgeCount,
+} from '../platform/notifications';
 import { useSpaceStore, getMyUserIdForOrigin } from '../stores/spaceStore';
 import { useUIStore } from '../stores/uiStore';
 import { useChannelNotificationStore } from '../stores/channelNotificationStore';
@@ -40,14 +45,24 @@ export function NotificationController() {
   useEffect(() => { if (isAndroid()) void androidCall('sync'); }, []);
   useEffect(() => { void useChannelNotificationStore.getState().load(); }, []);
   useEffect(() => {
-    if (isElectron() || isAndroid() || !('serviceWorker' in navigator)) return;
+    if (isElectron() || isAndroid() || !currentUser?.id) {
+      webPushActive.current = false;
+      return;
+    }
     const onPushChanged = (event: Event) => { webPushActive.current = Boolean((event as CustomEvent<boolean>).detail); };
     window.addEventListener('backspace-web-push-changed', onPushChanged);
-    void navigator.serviceWorker.ready.then(async (registration) => {
-      webPushActive.current = Boolean(await registration.pushManager.getSubscription());
-    }).catch(() => {});
-    return () => window.removeEventListener('backspace-web-push-changed', onPushChanged);
-  }, []);
+    let cancelled = false;
+    webPushActive.current = false;
+    void syncWebPushSubscription().then((enabled) => {
+      if (!cancelled) webPushActive.current = enabled;
+    }).catch(() => {
+      if (!cancelled) webPushActive.current = false;
+    });
+    return () => {
+      cancelled = true;
+      window.removeEventListener('backspace-web-push-changed', onPushChanged);
+    };
+  }, [currentUser?.id]);
 
   // Track window focus state
   useEffect(() => {
