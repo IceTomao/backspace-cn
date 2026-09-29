@@ -98,11 +98,29 @@ describe('enableWebPush', () => {
   });
 
   it('reports a service worker subscription failure', async () => {
-    subscribe.mockRejectedValue(new Error('subscription failed'));
+    const error = Object.assign(new Error('Push service rejected the request'), { name: 'NotAllowedError' });
+    subscribe.mockRejectedValue(error);
     await expect(enableWebPush()).rejects.toMatchObject({
       code: 'subscriptionFailed',
+      diagnostic: {
+        stage: 'subscribe',
+        errorName: 'NotAllowedError',
+        errorMessage: 'Push service rejected the request',
+      },
     });
     expect(mocks.subscribeWebPush).not.toHaveBeenCalled();
+  });
+
+  it('redacts URLs and long tokens from browser error details', async () => {
+    subscribe.mockRejectedValue(new Error(
+      'Failed at https://push.example/private with token abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH',
+    ));
+    await expect(enableWebPush()).rejects.toMatchObject({
+      diagnostic: {
+        stage: 'subscribe',
+        errorMessage: 'Failed at [URL] with token [redacted]',
+      },
+    });
   });
 
   it('reports a server registration failure instead of treating permission as success', async () => {

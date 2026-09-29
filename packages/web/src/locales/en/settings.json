@@ -294,6 +294,14 @@
         "subscriptionFailed": "The browser could not create a push subscription. Try again or check the site settings.",
         "registrationFailed": "The subscription could not be registered with the server. Check your connection and try again.",
         "unknown": "Web notifications could not be enabled. Try again."
+      },
+      "stages": {
+        "permissionRequest": "Requesting notification permission",
+        "serverConfig": "Loading server push configuration",
+        "serviceWorkerReady": "Waiting for the service worker",
+        "getSubscription": "Reading browser push subscription",
+        "subscribe": "Creating browser push subscription",
+        "serverRegistration": "Registering subscription with server"
       }
     }
   },

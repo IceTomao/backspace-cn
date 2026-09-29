@@ -16,11 +16,49 @@ export type WebPushSetupErrorCode =
   | 'subscriptionFailed'
   | 'registrationFailed';
 
+export type WebPushSetupStage =
+  | 'permissionRequest'
+  | 'serverConfig'
+  | 'serviceWorkerReady'
+  | 'getSubscription'
+  | 'subscribe'
+  | 'serverRegistration';
+
+export interface WebPushDiagnostic {
+  stage: WebPushSetupStage;
+  errorName: string;
+  errorMessage?: string;
+}
+
 export class WebPushSetupError extends Error {
-  constructor(readonly code: WebPushSetupErrorCode) {
+  constructor(
+    readonly code: WebPushSetupErrorCode,
+    readonly diagnostic?: WebPushDiagnostic,
+  ) {
     super(code);
     this.name = 'WebPushSetupError';
   }
+}
+
+function makeWebPushError(
+  code: WebPushSetupErrorCode,
+  stage: WebPushSetupStage,
+  cause: unknown,
+): WebPushSetupError {
+  const error = cause && typeof cause === 'object' ? cause as { name?: unknown; message?: unknown } : null;
+  const errorName = typeof error?.name === 'string' ? error.name.slice(0, 80) : 'Error';
+  const rawMessage = typeof error?.message === 'string'
+    ? error.message
+    : typeof cause === 'string' ? cause : '';
+  const errorMessage = rawMessage
+    .replace(/https?:\/\/\S+/gi, '[URL]')
+    .replace(/\b[A-Za-z0-9+/_=-]{40,}\b/g, '[redacted]')
+    .slice(0, 180);
+  return new WebPushSetupError(code, {
+    stage,
+    errorName,
+    ...(errorMessage ? { errorMessage } : {}),
+  });
 }
 
 const clicks = new EventTarget();
@@ -72,9 +110,14 @@ export async function enableWebPush(): Promise<boolean> {
     !('serviceWorker' in navigator) || !('PushManager' in window)) {
     throw new WebPushSetupError('unsupported');
   }
-  const permission = Notification.permission === 'granted'
-    ? 'granted'
-    : await Notification.requestPermission();
+  let permission: NotificationPermission;
+  try {
+    permission = Notification.permission === 'granted'
+      ? 'granted'
+      : await Notification.requestPermission();
+  } catch (error) {
+    throw makeWebPushError('permissionDenied', 'permissionRequest', error);
+  }
   if (permission !== 'granted') {
     throw new WebPushSetupError('permissionDenied');
   }
@@ -82,27 +125,39 @@ export async function enableWebPush(): Promise<boolean> {
   let config: Awaited<ReturnType<typeof api.notifications.webPush>>;
   try {
     config = await api.notifications.webPush();
-  } catch {
-    throw new WebPushSetupError('registrationFailed');
+  } catch (error) {
+    throw makeWebPushError('registrationFailed', 'serverConfig', error);
   }
   if (!config.enabled || !config.publicKey) throw new WebPushSetupError('notConfigured');
 
-  let subscription: PushSubscription;
+  let registration: ServiceWorkerRegistration;
   try {
-    const registration = await navigator.serviceWorker.ready;
-    subscription = await registration.pushManager.getSubscription() ??
-      await registration.pushManager.subscribe({
+    registration = await navigator.serviceWorker.ready;
+  } catch (error) {
+    throw makeWebPushError('subscriptionFailed', 'serviceWorkerReady', error);
+  }
+
+  let subscription: PushSubscription | null;
+  try {
+    subscription = await registration.pushManager.getSubscription();
+  } catch (error) {
+    throw makeWebPushError('subscriptionFailed', 'getSubscription', error);
+  }
+  if (!subscription) {
+    try {
+      subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(config.publicKey) as unknown as ArrayBuffer,
       });
-  } catch {
-    throw new WebPushSetupError('subscriptionFailed');
+    } catch (error) {
+      throw makeWebPushError('subscriptionFailed', 'subscribe', error);
+    }
   }
 
   try {
     await api.notifications.subscribeWebPush(subscription.toJSON());
-  } catch {
-    throw new WebPushSetupError('registrationFailed');
+  } catch (error) {
+    throw makeWebPushError('registrationFailed', 'serverRegistration', error);
   }
   window.dispatchEvent(new CustomEvent('backspace-web-push-changed', { detail: true }));
   return true;
@@ -115,27 +170,33 @@ export async function syncWebPushSubscription(): Promise<boolean> {
     return false;
   }
 
+  let registration: ServiceWorkerRegistration;
+  try {
+    registration = await navigator.serviceWorker.ready;
+  } catch (error) {
+    throw makeWebPushError('subscriptionFailed', 'serviceWorkerReady', error);
+  }
+
   let subscription: PushSubscription | null;
   try {
-    const registration = await navigator.serviceWorker.ready;
     subscription = await registration.pushManager.getSubscription();
-  } catch {
-    throw new WebPushSetupError('subscriptionFailed');
+  } catch (error) {
+    throw makeWebPushError('subscriptionFailed', 'getSubscription', error);
   }
   if (!subscription) return false;
 
   let config: Awaited<ReturnType<typeof api.notifications.webPush>>;
   try {
     config = await api.notifications.webPush();
-  } catch {
-    throw new WebPushSetupError('registrationFailed');
+  } catch (error) {
+    throw makeWebPushError('registrationFailed', 'serverConfig', error);
   }
   if (!config.enabled || !config.publicKey) throw new WebPushSetupError('notConfigured');
 
   try {
     await api.notifications.subscribeWebPush(subscription.toJSON());
-  } catch {
-    throw new WebPushSetupError('registrationFailed');
+  } catch (error) {
+    throw makeWebPushError('registrationFailed', 'serverRegistration', error);
   }
   window.dispatchEvent(new CustomEvent('backspace-web-push-changed', { detail: true }));
   return true;

@@ -64,6 +64,7 @@ export function PrivacyPanel() {
   const [webPushEnabled, setWebPushEnabled] = useState(false);
   const [webPushBusy, setWebPushBusy] = useState(false);
   const [webPushError, setWebPushError] = useState<WebPushSetupErrorCode | 'unknown' | null>(null);
+  const [webPushDiagnostic, setWebPushDiagnostic] = useState<WebPushSetupError['diagnostic']>();
   const hasDesktopPreferences = Boolean(window.backspace?.getActivityPreferences);
 
   useEffect(() => {
@@ -77,6 +78,7 @@ export function PrivacyPanel() {
   useEffect(() => {
     let cancelled = false;
     setWebPushError(null);
+    setWebPushDiagnostic(undefined);
     if (!user?.id) {
       setWebPushEnabled(false);
       return;
@@ -87,6 +89,7 @@ export function PrivacyPanel() {
       if (cancelled) return;
       setWebPushEnabled(false);
       setWebPushError(error instanceof WebPushSetupError ? error.code : 'unknown');
+      if (error instanceof WebPushSetupError) setWebPushDiagnostic(error.diagnostic);
     });
     return () => { cancelled = true; };
   }, [user?.id]);
@@ -95,6 +98,7 @@ export function PrivacyPanel() {
     const wasEnabled = webPushEnabled;
     setWebPushBusy(true);
     setWebPushError(null);
+    setWebPushDiagnostic(undefined);
     try {
       const result = enabled ? await enableWebPush() : await disableWebPush();
       setWebPushEnabled(enabled && result === true);
@@ -102,6 +106,7 @@ export function PrivacyPanel() {
       if (enabled) setWebPushEnabled(false);
       else setWebPushEnabled(wasEnabled);
       setWebPushError(error instanceof WebPushSetupError ? error.code : 'unknown');
+      if (error instanceof WebPushSetupError) setWebPushDiagnostic(error.diagnostic);
     } finally {
       setWebPushBusy(false);
     }
@@ -151,6 +156,12 @@ export function PrivacyPanel() {
             <Toggle enabled={webPushEnabled} disabled={webPushBusy} onChange={(enabled) => void toggleWebPush(enabled)} />
           </div>
           {webPushErrorText && <p role="alert" className="text-xs text-txt-danger mt-2">{webPushErrorText}</p>}
+          {webPushDiagnostic && (
+            <p className="text-xs text-txt-tertiary mt-1 break-words">
+              {t(`settings:privacy.webPush.stages.${webPushDiagnostic.stage}`)}: {webPushDiagnostic.errorName}
+              {webPushDiagnostic.errorMessage ? `: ${webPushDiagnostic.errorMessage}` : ''}
+            </p>
+          )}
         </div>
       </div>}
       <div>

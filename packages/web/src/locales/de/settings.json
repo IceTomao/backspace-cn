@@ -294,6 +294,14 @@
         "subscriptionFailed": "Der Browser konnte kein Push-Abonnement erstellen. Versuche es erneut oder prüfe die Website-Einstellungen.",
         "registrationFailed": "Das Push-Abonnement konnte nicht beim Server registriert werden. Prüfe die Verbindung und versuche es erneut.",
         "unknown": "Webbenachrichtigungen konnten nicht aktiviert werden. Versuche es erneut."
+      },
+      "stages": {
+        "permissionRequest": "Benachrichtigungsberechtigung anfordern",
+        "serverConfig": "Push-Konfiguration des Servers laden",
+        "serviceWorkerReady": "Auf den Service Worker warten",
+        "getSubscription": "Browser-Push-Abonnement lesen",
+        "subscribe": "Browser-Push-Abonnement erstellen",
+        "serverRegistration": "Abonnement beim Server registrieren"
       }
     }
   },

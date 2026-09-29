@@ -294,6 +294,14 @@
         "subscriptionFailed": "浏览器无法创建推送订阅，请重试或检查网站设置。",
         "registrationFailed": "无法向服务器登记推送订阅，请检查网络后重试。",
         "unknown": "无法启用网页通知，请重试。"
+      },
+      "stages": {
+        "permissionRequest": "请求通知权限",
+        "serverConfig": "读取服务器推送配置",
+        "serviceWorkerReady": "等待 Service Worker",
+        "getSubscription": "读取浏览器推送订阅",
+        "subscribe": "创建浏览器推送订阅",
+        "serverRegistration": "向服务器登记订阅"
       }
     }
   },
