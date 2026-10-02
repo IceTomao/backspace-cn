@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { androidCall, onAndroid, serverLocation, type AndroidPreferences } from '../../platform/android';
 import { switchAndroidServer } from '../../platform/appStorage';
+import { AndroidUpdateSection } from './AndroidAppUpdates';
 
 function errorText(error: unknown): string { return error instanceof Error ? error.message : '操作失败，请重试'; }
 
@@ -42,6 +43,7 @@ export function AndroidSettings({ serverOnly = false }: { serverOnly?: boolean }
     catch (e) { setError(errorText(e)); setBusy(false); }
   }
   return <section className="space-y-4 text-sm text-txt-primary">
+    <AndroidUpdateSection />
     {!serverOnly && settings && <>
       <fieldset disabled={busy} className="space-y-2">
         <legend className="font-semibold mb-2">{t('android.theme')}</legend>

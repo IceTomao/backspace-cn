@@ -125,6 +125,14 @@ class BackspaceNativePlugin : Plugin() {
                         JSONObject()
                     }
                     "preferences" -> { runtime.preferences(data); runtime.settings() }
+                    "appUpdateState" -> runtime.appUpdateSnapshot()
+                    "checkAppUpdate" -> runtime.checkAppUpdate(data.optBoolean("manual", true))
+                    "dismissAppUpdate" -> runtime.dismissAppUpdate()
+                    "downloadAppUpdate" -> {
+                        check(runtime.foreground) { "请打开应用后下载更新" }
+                        activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(runtime.appUpdateDownloadUrl())))
+                        JSONObject()
+                    }
                     "channelNotification" -> {
                         runtime.setChannelMuted(data.getString("channelId"), data.getBoolean("muted")); JSONObject()
                     }

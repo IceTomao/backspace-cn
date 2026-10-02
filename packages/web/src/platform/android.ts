@@ -2,6 +2,12 @@ import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor
 
 export const DEFAULT_ANDROID_SERVER = 'https://chat.kevz.me:2096';
 export type AndroidTheme = 'system' | 'light' | 'dark';
+export interface AndroidAppUpdateSnapshot {
+  currentVersion: string;
+  phase: 'idle' | 'checking' | 'available' | 'up-to-date' | 'unavailable' | 'failed' | 'unsupported';
+  version: string | null;
+  dismissedVersion: string | null;
+}
 export interface AndroidPreferences {
   theme: AndroidTheme;
   dark: boolean;

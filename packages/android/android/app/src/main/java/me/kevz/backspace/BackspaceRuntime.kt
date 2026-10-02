@@ -56,6 +56,27 @@ class BackspaceRuntime internal constructor(
     private val http = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS).followRedirects(false).build()
     private val prefs = context.getSharedPreferences("client", Context.MODE_PRIVATE)
+    private val appUpdates by lazy {
+        val installed = AndroidAppUpdates.installed(context)
+        val updateHttp = http.newBuilder().callTimeout(25, TimeUnit.SECONDS).build()
+        AndroidAppUpdates(installed.first, installed.second, context.packageName == "me.kevz.backspace",
+            context.getSharedPreferences("appUpdates", Context.MODE_PRIVATE), scope, {
+                updateHttp.newCall(Request.Builder().url(AndroidAppUpdates.RELEASES_URL)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .header("User-Agent", "Backspace-Android/${installed.first}").build()).execute().use { response ->
+                    check(response.isSuccessful) { "Update check failed" }
+                    JSONArray(response.body?.string() ?: error("Empty release response"))
+                }
+            }, { emitWeb("appUpdate", it) })
+    }
+    fun appUpdateSnapshot(): JSONObject = appUpdates.snapshot()
+    suspend fun checkAppUpdate(manual: Boolean): JSONObject {
+        check(foreground && webVisible) { "请在应用前台检查更新" }
+        return appUpdates.check(manual)
+    }
+    fun dismissAppUpdate(): JSONObject = appUpdates.dismiss()
+    fun appUpdateDownloadUrl(): String = appUpdates.downloadUrl()
     var server: String = runCatching { ClientPolicy.server(prefs.getString("server", ClientPolicy.DEFAULT_SERVER)!!) }
         .getOrDefault(ClientPolicy.DEFAULT_SERVER)
         private set
@@ -605,6 +626,7 @@ class BackspaceRuntime internal constructor(
         sockets.values.forEach { it.replay(cursors.optLong(it.origin, 0)); emitIncoming(it) }
         emitVoice(force = true)
         emitWeb("preferences", settings())
+        emitWeb("appUpdate", appUpdateSnapshot())
         pendingNotification?.let { emitWeb("notification", it) }
     }
     fun acknowledge(origin: String, value: Long) { sockets[origin]?.acknowledge(value) }

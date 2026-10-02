@@ -6,6 +6,7 @@ import { androidCall, onAndroid } from '../../platform/android';
 import { useUIStore } from '../../stores/uiStore';
 import { useAuthStore } from '../../stores/authStore';
 import { AndroidSettings } from './AndroidSettings';
+import { AndroidUpdatePrompt } from './AndroidAppUpdates';
 
 export function AndroidLifecycle() {
   const navigate = useNavigate();
@@ -23,7 +24,7 @@ export function AndroidLifecycle() {
     window.addEventListener('android-storage-error', storageError);
     return () => { back(); window.removeEventListener('android-storage-error', storageError); };
   }, [navigate]);
-  return null;
+  return <AndroidUpdatePrompt />;
 }
 
 export function AndroidRecovery() {

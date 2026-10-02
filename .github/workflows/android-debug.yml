@@ -17,6 +17,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -35,6 +37,8 @@ jobs:
       - run: pnpm --filter @backspace/shared build
       - run: pnpm --filter @backspace/web typecheck
       - run: pnpm --filter @backspace/web test
+      - run: node --test scripts/publish-android-release.test.mjs
+      - run: node scripts/check-i18n.mjs
       - run: pnpm --filter @backspace/android build
       - name: Test and assemble debug APK (pull requests only)
         if: github.event_name == 'pull_request'
@@ -60,6 +64,11 @@ jobs:
       - name: Verify release signing identity and APK
         if: github.event_name != 'pull_request'
         run: node scripts/verify-android-apk.mjs
+      - name: Publish Android update release
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/publish-android-release.mjs
       - name: Check debug packaged web entry
         if: github.event_name == 'pull_request'
         working-directory: packages/android/android

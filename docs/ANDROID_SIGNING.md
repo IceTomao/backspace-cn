@@ -8,6 +8,7 @@
 - GitHub 仓库 Secrets：`BACKSPACE_ANDROID_KEYSTORE_BASE64`、`BACKSPACE_ANDROID_STORE_PASSWORD`。两者来自本机同一份发行密钥。
 - PR 仅构建 debug APK，包名为 `me.kevz.backspace.debug`，可与正式版并存。
 - 构建产物包括 `app-release.apk`、签名验证结果及 SHA256SUMS；artifact 名为 `backspace-android-release-提交SHA`。
+- 从 1.3.22 起，master 和版本标签的构建还会发布独立 GitHub Android Release，供客户端检查和下载更新，详见 [安卓更新说明](ANDROID_UPDATES.md)。
 
 ## 本地密钥和备份
 
@@ -34,8 +35,8 @@ gh auth login
 
 ## 后续发布
 
-1. 修改功能后提交并推送到 master，或在 Actions 的 **Android APK** 中手动运行。
-2. 下载 `backspace-android-release-…` artifact，解压安装其中的 `app-release.apk`。
-3. 正式发布新版时运行 `node scripts/bump-version.mjs 新版本号`，保持所有包版本一致并递增 Android versionCode。
+1. 修改功能后运行 `node scripts/bump-version.mjs 新版本号`，保持所有包版本一致并递增 Android versionCode，再提交并推送 master。
+2. **Android APK** 自动构建并发布 `android-v新版本号` Release。可从发行页下载 APK，也可使用已安装客户端的检查更新入口；已发布版本的 APK 不被替换，之后的功能变更必须递增版本。
+3. 备用方式：下载 `backspace-android-release-…` artifact，解压安装其中的 `app-release.apk`。手动运行工作流可重新验证同版本构建。
 
 固定签名不能恢复已经丢失的旧签名私钥，也不代替真机验收。

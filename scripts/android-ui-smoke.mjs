@@ -14,6 +14,7 @@ const playwright = process.env.PLAYWRIGHT_MODULE_PATH
 const root = path.resolve(import.meta.dirname, '..');
 const web = path.join(root, 'packages/web/dist-android');
 const output = path.join(root, '.cache/android-checks');
+const appVersion = JSON.parse(await fs.readFile(path.join(root, 'packages/android/package.json'), 'utf8')).version;
 await fs.mkdir(output, { recursive: true });
 const mime = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
 const server = createServer(async (req, res) => {
@@ -45,12 +46,17 @@ try {
       });
       return route.abort();
     });
-    await page.addInitScript(() => {
+    await page.addInitScript(appVersion => {
       const listeners = new Map();
       const stored = {};
       const settings = {
         server: 'https://chat.kevz.me:2096', theme: 'system', dark: false, background: false,
         mediaStatusEnabled: false, mediaAccess: false,
+      };
+      const updates = { currentVersion: appVersion, phase: 'up-to-date', version: appVersion, dismissedVersion: null };
+      window.__update = () => {
+        updates.phase = 'available'; updates.version = '1.3.23';
+        for (const entry of listeners.values()) if (entry.event === 'appUpdate') entry.callback({ ...updates });
       };
       window.androidBridge = {};
       window.__theme = dark => {
@@ -74,11 +80,14 @@ try {
           const { action, data } = options;
           if (action === 'bootstrap') return { settings, storage: stored, insets: { top: 0, right: 0, bottom: 0, left: 0 } };
           if (action === 'preferences') return settings;
+          if (action === 'appUpdateState' || action === 'checkAppUpdate') return { ...updates };
+          if (action === 'downloadAppUpdate') { window.__downloadedUpdate = true; return {}; }
+          if (action === 'dismissAppUpdate') { updates.dismissedVersion = updates.version; return { ...updates }; }
           if (action === 'storage') { stored[data.key] = data.value; return {}; }
           return {};
         },
       };
-    });
+    }, appVersion);
     await page.goto(`${base}/login`);
     await page.getByRole('button', { name: '登录', exact: true }).waitFor();
     await page.getByText('服务器设置', { exact: true }).click();
@@ -103,6 +112,15 @@ try {
       await page.screenshot({ path: path.join(output, `login-${theme}-${width}.png`), fullPage: true });
       results.push({ width, theme, ...measurements });
     }
+    await page.getByRole('button', { name: '检查更新', exact: true }).click();
+    await page.getByText(`当前版本：${appVersion}`, { exact: true }).waitFor();
+    await page.evaluate(() => window.__update());
+    await page.getByRole('button', { name: '下载更新', exact: true }).first().click();
+    assert(await page.evaluate(() => window.__downloadedUpdate));
+    await page.getByRole('button', { name: '稍后提醒', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: '稍后提醒', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: '下载更新', exact: true }).count(), 1);
+    await page.screenshot({ path: path.join(output, `updates-dark-${width}.png`), fullPage: true });
     assert.deepEqual(errors, []);
     await page.close();
   }

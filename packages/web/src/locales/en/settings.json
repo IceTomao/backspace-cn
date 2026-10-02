@@ -1,5 +1,21 @@
 {
   "android": {
+    "updates": {
+      "title": "App updates",
+      "current": "Current version: {{version}}",
+      "idle": "Check for a newer Android app.",
+      "checking": "Checking for updates…",
+      "available": "Version {{version}} is available",
+      "up-to-date": "You are up to date.",
+      "unavailable": "No downloadable Android release was found. Try again later.",
+      "failed": "Update check failed. Check your connection and retry.",
+      "unsupported": "Get debug build updates from the build page.",
+      "check": "Check for updates",
+      "download": "Download update",
+      "later": "Remind me later",
+      "installNote": "Download the APK in your browser, then open it and follow the system installation prompts. Releases with the same signing key can update in place.",
+      "downloadFailed": "Could not open the update download. Try again later."
+    },
     "mediaExplanation": "This switch shares song, artist and artwork only. Also enable Share Activity Status in Privacy settings.",
     "mediaDisabled": "Music sharing is off.",
     "mediaOffline": "Disconnected. Music sharing resumes when online.",

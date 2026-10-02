@@ -1,5 +1,21 @@
 {
   "android": {
+    "updates": {
+      "title": "App-Updates",
+      "current": "Aktuelle Version: {{version}}",
+      "idle": "Nach einer neueren Android-App suchen.",
+      "checking": "Updates werden gesucht…",
+      "available": "Version {{version}} ist verfügbar",
+      "up-to-date": "Du verwendest die neueste Version.",
+      "unavailable": "Keine Android-Version zum Herunterladen gefunden. Versuche es später erneut.",
+      "failed": "Update-Prüfung fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.",
+      "unsupported": "Updates für Debug-Builds sind auf der Build-Seite verfügbar.",
+      "check": "Nach Updates suchen",
+      "download": "Update herunterladen",
+      "later": "Später erinnern",
+      "installNote": "Lade die APK im Browser herunter, öffne sie und folge den Installationshinweisen des Systems. Versionen mit demselben Signaturschlüssel können direkt aktualisiert werden.",
+      "downloadFailed": "Der Update-Download konnte nicht geöffnet werden. Versuche es später erneut."
+    },
     "mediaExplanation": "Dieser Schalter teilt nur Titel, Interpret und Cover. Aktiviere auch Aktivitäten teilen in den Datenschutzeinstellungen.",
     "mediaDisabled": "Musik teilen ist deaktiviert.",
     "mediaOffline": "Nicht verbunden. Musik wird erst wieder online geteilt.",
