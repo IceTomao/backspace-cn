@@ -73,12 +73,14 @@ copyFileSync(apk, path.join(output, `${name}.apk`));
 copyFileSync(path.join(root, 'docs/ANDROID_POWER_PROFILE_STREAMS.md'), path.join(output, 'README.md'));
 copyFileSync(path.join(root, 'docs/ANDROID_SIGNING.md'), path.join(output, 'ANDROID_SIGNING.md'));
 copyFileSync(path.join(root, 'docs/ANDROID_UPDATES.md'), path.join(output, 'ANDROID_UPDATES.md'));
+copyFileSync(path.join(root, 'docs/VIDEO_PLAYBACK.md'), path.join(output, 'VIDEO_PLAYBACK.md'));
+copyFileSync(path.join(root, 'docs/PORTAINER_DEPLOY.md'), path.join(output, 'PORTAINER_DEPLOY.md'));
 const sourceName = `${name}-source.zip`;
 execFileSync('tar.exe', ['-a', '-cf', path.join(output, sourceName), '-T', '-'], {
   cwd: root, input: files.sort().join('\n') + '\n', timeout: 180000,
 });
 writeFileSync(path.join(output, 'APK-VERIFICATION.txt'), `${signature}\n${badging}\n${permissions}\n`);
-const hashes = [`${name}.apk`, sourceName, 'README.md', 'ANDROID_SIGNING.md', 'ANDROID_UPDATES.md', 'APK-VERIFICATION.txt'].map(file =>
+const hashes = [`${name}.apk`, sourceName, 'README.md', 'ANDROID_SIGNING.md', 'ANDROID_UPDATES.md', 'VIDEO_PLAYBACK.md', 'PORTAINER_DEPLOY.md', 'APK-VERIFICATION.txt'].map(file =>
   `${createHash('sha256').update(readFileSync(path.join(output, file))).digest('hex')}  ${file}`);
 writeFileSync(path.join(output, 'SHA256SUMS.txt'), hashes.join('\n') + '\n');
 console.log(`Verified signed Android release: ${output}\n${hashes.join('\n')}`);

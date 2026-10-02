@@ -85,7 +85,7 @@ const EXT_MIMETYPES: Record<string, string> = {
   '.png': 'image/png', '.gif': 'image/gif', '.svg': 'image/svg+xml',
   '.avif': 'image/avif', '.tiff': 'image/tiff', '.bmp': 'image/bmp',
   '.ico': 'image/x-icon',
-  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+  '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
   '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
   '.flac': 'audio/flac', '.aac': 'audio/aac', '.opus': 'audio/opus',
   '.pdf': 'application/pdf',

@@ -243,6 +243,26 @@ class BackspaceRuntime internal constructor(
             "仅支持从已连接服务器保存附件"
         }
     }
+    internal var videoPlayback: VideoPlaybackSession? = null
+        private set
+    private val videoObservers = mutableSetOf<(VideoPlaybackSession?) -> Unit>()
+    internal fun openVideo(url: String, title: String, mimetype: String) {
+        check(foreground && webVisible) { "请打开应用后播放视频" }
+        val origin = VideoUrlPolicy.origin(url, sockets.keys + server)
+        require(mimetype.startsWith("video/") && mimetype.length < 100)
+        closeVideo()
+        videoPlayback = VideoPlaybackSession(url, title.take(160), mimetype, origin)
+    }
+    internal fun closeVideo(expected: VideoPlaybackSession? = videoPlayback) {
+        if (videoPlayback !== expected || expected == null) return
+        videoPlayback = null
+        videoObservers.toList().forEach { it(null) }
+    }
+    internal fun observeVideo(observer: (VideoPlaybackSession?) -> Unit): () -> Unit {
+        videoObservers.add(observer)
+        return { videoObservers.remove(observer) }
+    }
+    internal fun videoHttpClient(): OkHttpClient = http
     suspend fun download(value: String, destination: Uri) = withContext(Dispatchers.IO) {
         validateDownload(value)
         require(destination.scheme == "content")
@@ -498,6 +518,7 @@ class BackspaceRuntime internal constructor(
         val data = storage()
         if (value == null) data.remove(key) else data.put(key, value)
         if (key == "backspace_token" && value == null) {
+            closeVideo()
             background = false
             prefs.edit().putBoolean("background", false).commit()
             clearMediaActivity()
@@ -512,6 +533,7 @@ class BackspaceRuntime internal constructor(
     fun switchServer(value: String) {
         val normalized = ClientPolicy.server(value)
         check(prefs.edit().putString("server", normalized).putBoolean("background", false).commit())
+        closeVideo()
         background = false
         clearMediaActivity()
         hangup()
@@ -599,6 +621,7 @@ class BackspaceRuntime internal constructor(
         }
     }
     fun disconnect(origin: String) {
+        if (origin.isEmpty() || videoPlayback?.origin == origin) closeVideo()
         if (inCall && voiceOrigin == origin) hangup()
         sockets.remove(origin)?.let {
             if (it.ready && it.showActivity && mediaActivity != null) {

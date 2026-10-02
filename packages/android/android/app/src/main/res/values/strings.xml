@@ -17,4 +17,16 @@
     <string name="stream_reconnecting">正在重新连接直播…</string>
     <string name="stream_unavailable">暂时无法订阅此直播</string>
     <string name="stream_connecting">正在加载直播…</string>
+    <string name="video_loading">正在加载视频…</string>
+    <string name="video_ready">视频已就绪</string>
+    <string name="video_ended">视频播放结束</string>
+    <string name="video_network_error">视频网络加载失败，请重试或下载。</string>
+    <string name="video_decode_error">视频加载或解码失败，可重试或下载原文件。</string>
+    <string name="video_retry">重试</string>
+    <string name="video_download">下载</string>
+    <string name="video_mute">静音</string>
+    <string name="video_unmute">开启声音</string>
+    <string name="video_saving">正在保存视频…</string>
+    <string name="video_saved">视频已保存</string>
+    <string name="video_save_failed">视频保存失败，请重试。</string>
 </resources>

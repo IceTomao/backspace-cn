@@ -5,13 +5,16 @@ import { getDb, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
+import { Readable } from 'node:stream';
+import { attachmentMimeType } from '@backspace/shared/src/media.js';
+import { parseByteRange } from '../utils/httpRange.js';
 
 const EXT_MIMETYPES: Record<string, string> = {
   '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.png': 'image/png', '.gif': 'image/gif', '.svg': 'image/svg+xml',
   '.avif': 'image/avif', '.tiff': 'image/tiff', '.bmp': 'image/bmp',
   '.ico': 'image/x-icon',
-  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+  '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
   '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
   '.flac': 'audio/flac', '.aac': 'audio/aac', '.opus': 'audio/opus',
   '.pdf': 'application/pdf',
@@ -39,9 +42,9 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     const db = getDb();
     const attachment = db.select().from(schema.attachments).where(eq(schema.attachments.filename, safeName)).get();
     const originalName = attachment?.originalName ?? safeName;
-    const mimetype = attachment?.mimetype
+    const mimetype = attachmentMimeType(attachment?.mimetype
       ?? EXT_MIMETYPES[path.extname(safeName).toLowerCase()]
-      ?? 'application/octet-stream';
+      ?? 'application/octet-stream', originalName, safeName);
 
     // Set caching and security headers
     reply.header('Cache-Control', 'public, max-age=31536000, immutable');
@@ -59,12 +62,15 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     // Support Range requests for audio/video seeking
     const stat = fs.statSync(filepath);
     const fileSize = stat.size;
-    const rangeHeader = request.headers.range;
-
-    if (rangeHeader) {
-      const parts = rangeHeader.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0] ?? '0', 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    reply.header('Accept-Ranges', 'bytes');
+    // HEAD describes the complete representation without opening a file stream.
+    if (request.method === 'HEAD') return reply.header('Content-Length', fileSize).send(Readable.from([]));
+    const range = parseByteRange(request.headers.range, fileSize);
+    if (range === 'unsatisfiable') {
+      return reply.code(416).header('Content-Range', `bytes */${fileSize}`).header('Content-Length', 0).send();
+    }
+    if (range) {
+      const { start, end } = range;
       const chunkSize = end - start + 1;
 
       reply.header('Content-Range', `bytes ${start}-${end}/${fileSize}`);

@@ -243,7 +243,8 @@ async function spawnOnPort(port: number, opts: SpawnInstanceOptions): Promise<Sp
   }
   // From packages/server/test/helpers → packages/server is up two levels.
   const serverDir = path.resolve(__dirname, '../../');
-  const proc = spawn('pnpm', ['exec', 'tsx', 'src/index.ts'], {
+  // Match the package's start command; spawning pnpm's shell shim fails on Windows.
+  const proc = spawn(process.execPath, ['--import', 'tsx/esm', 'src/index.ts'], {
     cwd: serverDir,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],

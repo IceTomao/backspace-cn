@@ -126,6 +126,11 @@ class BackspaceNativePlugin : Plugin() {
                     }
                     "preferences" -> { runtime.preferences(data); runtime.settings() }
                     "appUpdateState" -> runtime.appUpdateSnapshot()
+                    "openVideo" -> {
+                        runtime.openVideo(data.getString("url"), data.getString("title"), data.getString("mimetype"))
+                        activity.startActivity(Intent(activity, VideoViewerActivity::class.java))
+                        JSONObject()
+                    }
                     "checkAppUpdate" -> runtime.checkAppUpdate(data.optBoolean("manual", true))
                     "dismissAppUpdate" -> runtime.dismissAppUpdate()
                     "downloadAppUpdate" -> {

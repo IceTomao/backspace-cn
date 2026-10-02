@@ -247,10 +247,8 @@ export interface Attachment {
   height?: number | null;
   duration?: number | null;
   /**
-   * Web-playability for video attachments. `false` = the codec can't be
-   * decoded in a browser <video> (e.g. HEVC .mov) so the client renders a
-   * download fallback; `true`/`null` = attempt inline playback (null is the
-   * optimistic unknown case, also covered by the client's onError fallback).
+   * Advisory web-playability from the origin server's codec probe. Clients
+   * may still try device decoders when false, then offer a download on failure.
    */
   playable?: boolean | null;
   federationStatus?: string | null;

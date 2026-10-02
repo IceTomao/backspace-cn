@@ -104,7 +104,15 @@
     "video": {
       "cannotPlayDownload": "Hier nicht abspielbar – herunterladen",
       "unsupportedFormat": "Nicht unterstütztes Videoformat",
-      "unsupportedBrowser": "Dein Browser unterstützt keine Videowiedergabe."
+      "unsupportedBrowser": "Dein Browser unterstützt keine Videowiedergabe.",
+      "play": "Video abspielen: {{name}}",
+      "compatibility": "Die Wiedergabe hängt von den unterstützten Codecs deines Geräts ab. Du kannst es versuchen.",
+      "loading": "Video wird geladen…",
+      "networkError": "Video konnte nicht über das Netzwerk geladen werden. Erneut versuchen oder herunterladen.",
+      "decodeError": "Video konnte nicht geladen oder dekodiert werden. Erneut versuchen oder die Originaldatei herunterladen.",
+      "openError": "Videoplayer konnte nicht geöffnet werden. Erneut versuchen oder herunterladen.",
+      "retry": "Erneut abspielen",
+      "download": "Video herunterladen"
     },
     "audio": {
       "unsupportedBrowser": "Dein Browser unterstützt keine Audiowiedergabe."

@@ -1,3 +1,4 @@
+import { attachmentMimeType } from '@backspace/shared/src/media';
 import type { MessageWithUser } from '@backspace/shared';
 import { File, Image as ImageIcon, Link2, Music2, Paperclip, Video } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -70,7 +71,7 @@ export function getReplyPreviewData(message: MessageWithUser): ReplyPreviewData 
 
   const firstAttachment = attachments[0];
   if (firstAttachment) {
-    const kind = attachmentKind(firstAttachment.mimetype);
+    const kind = attachmentKind(attachmentMimeType(firstAttachment.mimetype, firstAttachment.originalName, firstAttachment.filename));
     return {
       kind,
       text: kind === 'file' ? firstAttachment.originalName : undefined,

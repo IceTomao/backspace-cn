@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bootTwoInstances, type TwoInstanceHarness } from './helpers/twoInstanceHarness.js';
@@ -61,13 +61,14 @@ describe('CORS posture', () => {
     // localStorage and are attached explicitly. If that ever stops being true,
     // the whole posture in docs/systems/web-security.md has to be revisited,
     // so fail loudly rather than let it drift.
-    const { execSync } = await import('node:child_process');
-    const hits = execSync(
-      `grep -rniE "setcookie|@fastify/cookie|req(uest)?\\.cookies|['\\"]set-cookie['\\"]" ${SERVER_SRC} || true`,
-      { encoding: 'utf8' },
-    )
-      .split('\n')
-      .filter(Boolean);
+    // Scan in Node so the security assertion also runs on Windows.
+    const hits: string[] = [];
+    for (const relative of await readdir(SERVER_SRC, { recursive: true })) {
+      const file = path.join(SERVER_SRC, relative);
+      if ((await stat(file)).isFile() && /setcookie|@fastify\/cookie|req(uest)?\.cookies|['"]set-cookie['"]/i.test(await readFile(file, 'utf8'))) {
+        hits.push(relative);
+      }
+    }
     expect(hits).toEqual([]);
   });
 

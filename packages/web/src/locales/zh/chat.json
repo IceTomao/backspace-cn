@@ -104,7 +104,15 @@
     "video": {
       "cannotPlayDownload": "无法在此处播放—下载",
       "unsupportedFormat": "不受支持的视频格式",
-      "unsupportedBrowser": "您的浏览器不支持视频播放。"
+      "unsupportedBrowser": "您的浏览器不支持视频播放。",
+      "play": "播放视频：{{name}}",
+      "compatibility": "此视频可能需要设备支持相应编码，可尝试播放。",
+      "loading": "正在加载视频…",
+      "networkError": "视频网络加载失败，请重试或下载。",
+      "decodeError": "视频加载或解码失败，可重试或下载原文件。",
+      "openError": "无法打开视频播放页，请重试或下载。",
+      "retry": "重试播放",
+      "download": "下载视频"
     },
     "audio": {
       "unsupportedBrowser": "您的浏览器不支持音频播放。"

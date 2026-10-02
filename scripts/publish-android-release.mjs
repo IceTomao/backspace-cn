@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -41,7 +41,9 @@ async function main() {
   const hash = createHash('sha256').update(readFileSync(apk)).digest('hex');
   writeFileSync(`${apk}.sha256`, `${hash}  ${apkName}\n`);
   const notes = path.join(output, 'ANDROID-RELEASE-NOTES.md');
-  writeFileSync(notes, `Backspace Android ${version}\n\n固定签名的安卓客户端。下载 APK 后按安卓系统提示安装；使用同一发行签名的旧版可以覆盖更新。\n\n本版本包含安卓省电、独立个人信息页、直播观看及客户端检查更新功能。\n`);
+  const releaseNotes = path.join(root, 'docs/releases', `android-${version}.md`);
+  writeFileSync(notes, existsSync(releaseNotes) ? readFileSync(releaseNotes, 'utf8') :
+    `Backspace Android ${version}\n\n固定签名的安卓客户端。下载 APK 后按安卓系统提示安装；使用同一发行签名的旧版可以覆盖更新。\n`);
   const readRelease = () => findAndroidRelease(tag, async page => {
     const response = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`, {
       headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },

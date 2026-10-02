@@ -161,11 +161,11 @@ Processing occurs inline during upload, before the response is sent. All process
    - The finish hook calls `classifyVideoPlayable(mimetype, codec)` and stores the result in `attachments.playable` (tri-state, see below).
    - The browser `<video>` element can't decode every uploaded format. The dominant failure case is a macOS screen recording — a `video/quicktime` (.mov) container holding an **HEVC (H.265)** stream — which Chromium, Firefox and stock Electron can't decode. The file uploads fine and a server-side ffmpeg poster is generated, but inline playback silently fails (stuck at 0:00 with no error).
    - `attachments.playable` is a deliberate tri-state:
-     - `0` / `false` — codec is confidently undecodable in mainstream browsers (HEVC, ProRes, WMV, MPEG-1/2, etc.). The client renders a download fallback card directly, no flash of a dead player.
+     - `0` / `false` — codec is confidently undecodable in mainstream browsers (HEVC, ProRes, WMV, MPEG-1/2, etc.). This is advisory: clients offer playback and use their device decoder before showing an error and download.
      - `1` / `true` — web-standard codec (H.264/AVC, VP8/VP9, AV1, Theora) in a web container (`video/mp4`, `video/webm`, `video/ogg`). Plays inline.
      - `NULL` — unknown / optimistic. Codec couldn't be probed (ffmpeg absent or probe failed), or it's a web-safe codec in a container with inconsistent cross-browser support (H.264 in .mov). The client attempts inline playback and degrades via the `<video>` `onError` handler.
-   - `false` is never widened beyond codecs known to fail everywhere, so an instance without ffmpeg keeps prior behaviour (attempt playback) rather than regressing every video to "unplayable".
-   - **The verdict is computed Chromium-first and is not authoritative per-client.** Web-playability of HEVC is browser-dependent — WebKit (Safari/iOS) decodes it via the OS while Chromium/Firefox/Electron don't. The client therefore treats `playable === false` as "needs a capability check": it pre-renders the fallback only when the current browser also can't decode the format (`BROWSER_SUPPORTS_HEVC` in `AttachmentRenderer.tsx`). See §9 Attachment Rendering.
+   - `false` is restricted to codecs with limited browser portability, so an instance without ffmpeg keeps prior behaviour (attempt playback) rather than regressing every video to "unplayable".
+   - **The verdict is advisory, not authoritative per-device.** Clients always offer a playback attempt, including for HEVC. Actual failure presents retry and original-file download; Android uses an independent Media3 playback Activity.
 
 ### Audio Processing
 
@@ -545,7 +545,7 @@ URL resolution for attachment/thumbnail:
 | MIME category | Rendering |
 |---------------|-----------|
 | `image/*` | `<img>` with click-to-preview, lazy loading, aspect ratio from width/height, max 400x300px, uses thumbnail if available |
-| `video/*` | `VideoAttachment` sub-component. Playable (`playable !== false`): `<video src>` with native controls, poster from thumbnail, preload `none` (with dimensions) or `metadata` (without), max 400px wide / 300px tall, with an `onError` handler that falls back to the download card. Unplayable (`playable === false`, e.g. HEVC .mov): renders the download card directly — poster (if any) under a "Can't play here — download" overlay, plus filename, duration, size and a one-tap download. **Browser-aware:** the `playable === false` verdict is computed Chromium-first, so the client only pre-fails when *this* browser also can't decode the format. WebKit (Safari/iOS) decodes HEVC via the OS, so a Safari user still gets inline playback (gated on `BROWSER_SUPPORTS_HEVC`, a one-time `canPlayType` probe for `hvc1`/`hev1`); the `onError` handler remains the safety net. Never a silently broken player. |
+| `video/*` | `VideoAttachment`: click-to-load with native controls and `playsInline` on the web; private Media3 Activity on Android. The `playable` flag is advisory. Errors offer retry and download. One chat video plays at a time; hiding the page releases the player and preserves position. Generic/missing MIME types fall back to MP4/M4V/WebM/MOV filename detection, including historical attachments. See `docs/VIDEO_PLAYBACK.md`. |
 | `audio/*` | Audio card with icon, filename, size, `<audio>` with native controls, preload `metadata`, max 420px wide |
 | Other | Download link card with file icon, filename (link-styled), size |
 

@@ -7,11 +7,11 @@
  * Chromium, Firefox and stock Electron cannot decode. The file uploads fine,
  * a server-side ffmpeg poster is generated, but inline playback silently fails
  * (stuck at 0:00 with no error). We persist this classification per attachment
- * so the client can render a download fallback instead of a dead player.
+ * as an advisory hint; the client tries its own decoder before offering a download.
  *
  * The result is a deliberate tri-state:
- *   - `false` — confidently undecodable in mainstream browsers (e.g. HEVC).
- *               The client renders the fallback card directly, no flash.
+ *   - `false` — not reliably portable across browsers (e.g. HEVC).
+ *               Playback is still offered on devices that may support it.
  *   - `true`  — confidently decodable (web codec in a web container).
  *   - `null`  — unknown / optimistic. The codec couldn't be probed (ffmpeg
  *               absent or probe failed), or it's a web-safe codec in a
@@ -19,12 +19,12 @@
  *               in .mov). The client attempts playback and degrades to the
  *               fallback via the `<video>` `onError` handler.
  *
- * We never widen `false` beyond codecs we are certain fail everywhere, so an
+ * We restrict `false` to known compatibility risks, so an
  * instance without ffmpeg (codec always undefined) keeps today's behaviour
  * (attempt playback) rather than regressing every video to "unplayable".
  */
 
-/** ffprobe `codec_name` (or mp4/mov box tag) values that no mainstream browser decodes. */
+/** ffprobe codec names with limited browser portability; some devices can decode them. */
 const UNPLAYABLE_VIDEO_CODECS = new Set([
   // HEVC / H.265 — codec_name is `hevc`; box tags are `hvc1` / `hev1`.
   'hevc', 'hvc1', 'hev1', 'h265',

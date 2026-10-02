@@ -104,7 +104,15 @@
     "video": {
       "cannotPlayDownload": "Can't play here — download",
       "unsupportedFormat": "Unsupported video format",
-      "unsupportedBrowser": "Your browser does not support video playback."
+      "unsupportedBrowser": "Your browser does not support video playback.",
+      "play": "Play video: {{name}}",
+      "compatibility": "Playback depends on your device’s codec support. You can try playing this video.",
+      "loading": "Loading video…",
+      "networkError": "Video could not load over the network. Retry or download it.",
+      "decodeError": "Video could not load or decode. Retry or download the original file.",
+      "openError": "Could not open the video player. Retry or download it.",
+      "retry": "Retry playback",
+      "download": "Download video"
     },
     "audio": {
       "unsupportedBrowser": "Your browser does not support audio playback."
