@@ -58,6 +58,7 @@
     "noSpaces": "没有共同社区"
   },
   "profile": {
+    "loadFailed": "个人信息加载失败，请返回后重试。",
     "tabs": {
       "about": "关于",
       "mutualFriends": "共同好友",

@@ -46,8 +46,14 @@ android {
         }
     }
     buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
         release {
-            signingConfig signingConfigs.release
+            if (System.getenv('BACKSPACE_ANDROID_KEYSTORE')) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

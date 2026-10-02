@@ -53,11 +53,7 @@ export function useAndroidVoice() {
         }).catch(() => useUIStore.getState().addToast('无法调整通话音频', 'warning'));
       }
     });
-    const resume = () => {
-      if (!document.hidden) void androidCall('sync');
-    };
-    document.addEventListener('visibilitychange', resume);
-    return () => { stopped = true; remove(); unsubscribe(); document.removeEventListener('visibilitychange', resume); };
+    return () => { stopped = true; remove(); unsubscribe(); };
   }, []);
   const connect = useCallback(async (channelId: string, isDm = false) => {
     const state = useVoiceStore.getState();

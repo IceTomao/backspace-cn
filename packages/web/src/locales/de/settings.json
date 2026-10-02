@@ -1,5 +1,9 @@
 {
   "android": {
+    "mediaExplanation": "Dieser Schalter teilt nur Titel, Interpret und Cover. Aktiviere auch Aktivitäten teilen in den Datenschutzeinstellungen.",
+    "mediaDisabled": "Musik teilen ist deaktiviert.",
+    "mediaOffline": "Nicht verbunden. Musik wird erst wieder online geteilt.",
+    "mediaActivityDisabled": "Aktivitäten teilen ist deaktiviert. Aktiviere es in den Datenschutzeinstellungen.",
     "theme": "Design", "system": "System", "light": "Hell", "dark": "Dunkel",
     "background": "Im Hintergrund online bleiben", "server": "Server", "switch": "Server wechseln",
     "notifications": "Benachrichtigungen", "messageNotifications": "Nachrichtenbenachrichtigungen", "messageNotificationsDescription": "Nachrichten empfangen, wenn die App im Hintergrund online bleibt. Aktiviert auch die Hintergrundverbindung.", "notificationPermission": "Systembenachrichtigungen sind deaktiviert. Bitte erlaube Benachrichtigungen und versuche es erneut.",

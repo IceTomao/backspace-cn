@@ -32,9 +32,7 @@ afterEach(() => {
 it('does not show enabled based only on browser notification permission', async () => {
   render(<PrivacyPanel />);
 
-  const toggle = screen.getByRole('switch', {
-    name: i18n.t('settings:privacy.webPush.label'),
-  });
+  const toggle = screen.getByText(i18n.t('settings:privacy.webPush.label')).closest('.flex')!.querySelector('[role="switch"]')!;
   await waitFor(() => expect(syncWebPushSubscription).toHaveBeenCalledOnce());
   expect(toggle).toHaveAttribute('aria-checked', 'false');
 });

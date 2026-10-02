@@ -1,9 +1,10 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useUIStore } from '../../stores/uiStore';
+import type { User } from '@backspace/shared';
 
 interface MobileScreenStackProps {
   rootScreen: React.ReactNode;
-  screenMap: Record<string, (params?: Record<string, string>) => React.ReactNode>;
+  screenMap: Record<string, (params?: Record<string, string>, profileUser?: User) => React.ReactNode>;
 }
 
 export function MobileScreenStack({ rootScreen, screenMap }: MobileScreenStackProps) {
@@ -79,7 +80,7 @@ export function MobileScreenStack({ rootScreen, screenMap }: MobileScreenStackPr
 
         return (
           <div key={`${entry.screen}-${index}`} className={className} style={style}>
-            {renderer(entry.params)}
+            {renderer(entry.params, entry.profileUser)}
           </div>
         );
       })}

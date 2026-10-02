@@ -2,7 +2,7 @@ import type { Activity } from '@backspace/shared';
 import { getPrimaryActivity } from '@backspace/shared/src/activities.js';
 import type { TFunction } from 'i18next';
 import { Gamepad2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useActivityClock } from '../../hooks/useActivityClock';
 import { useTranslation } from 'react-i18next';
 
 interface ActivityCardProps {
@@ -18,17 +18,6 @@ function formatElapsed(startMs: number, now: number, t: TFunction<'common'>): st
     ? t('time.hoursMinutesShort', { hours, minutes: minutes % 60 })
     : t('time.minutesShort', { minutes });
   return t('time.elapsed', { duration });
-}
-
-function useActivityClock(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
 }
 
 /** Returns the accent border color class for an activity type */

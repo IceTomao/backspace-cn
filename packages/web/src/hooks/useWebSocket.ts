@@ -75,16 +75,48 @@ const connections = new Map<string, ConnectionState>();
 const nativeConnected = new Set<string>();
 let nativeListeners: (() => void)[] = [];
 const nativeSequences = new Map<string, number>();
+const nativeRecovering = new Set<string>();
+const connectionListeners = new Set<(connected: boolean) => void>();
+const pendingAcks = new Map<string, number>();
+let ackFrame: number | null = null;
+function flushNativeAcks(): void {
+  if (ackFrame !== null) cancelAnimationFrame(ackFrame);
+  ackFrame = null;
+  const cursors = Object.fromEntries(pendingAcks);
+  pendingAcks.clear();
+  if (Object.keys(cursors).length) void androidCall('ackEvents', { cursors }).catch(() => {});
+}
+function syncNativeVisibility(visible = !document.hidden): void {
+  if (!visible) flushNativeAcks();
+  void androidCall('webVisibility', { visible, cursors: Object.fromEntries(nativeSequences) }).catch(() => {});
+}
 function attachNativeTransport(): void {
   if (nativeListeners.length) return;
   nativeListeners = [
     onAndroid<{ origin: string; event: ServerEvent; sequence: number }>('socketEvent', ({ origin, event, sequence }) => {
-      if (sequence <= (nativeSequences.get(origin) ?? 0)) return;
-      nativeSequences.set(origin, sequence);
-      try { handleEvent(origin, event); } catch { useUIStore.getState().addToast('消息同步失败，请重新打开应用', 'warning'); }
+      const cursor = nativeSequences.get(origin) ?? 0;
+      if (sequence <= cursor) return;
+      if (event.type !== 'ready' && sequence !== cursor + 1) {
+        void androidCall('sync', { cursors: Object.fromEntries(nativeSequences) }).catch(() => {});
+        return;
+      }
+      try {
+        handleEvent(origin, event);
+        if (event.type === 'ready') nativeRecovering.delete(origin);
+        nativeSequences.set(origin, sequence);
+        pendingAcks.set(origin, sequence);
+        if (ackFrame === null) ackFrame = requestAnimationFrame(flushNativeAcks);
+      } catch {
+        if (!nativeRecovering.has(origin)) {
+          nativeRecovering.add(origin);
+          void androidCall('resync', { origin }).catch(() => {});
+        }
+        useUIStore.getState().addToast('消息同步失败，请重新打开应用', 'warning');
+      }
     }),
     onAndroid<{ origin: string; connected: boolean }>('socketStatus', ({ origin, connected }) => {
       if (connected) nativeConnected.add(origin); else nativeConnected.delete(origin);
+      if (!origin) connectionListeners.forEach(listener => listener(connected));
       if (origin) void import('../stores/instanceStore').then(({ useInstanceStore }) =>
         useInstanceStore.getState().setInstanceStatus(origin, connected ? 'connected' : 'disconnected'));
     }),
@@ -96,7 +128,9 @@ function attachNativeTransport(): void {
       if (event) handleEvent(origin, event);
       else if (useVoiceStore.getState().callOrigin === origin) useVoiceStore.getState().setIncomingCall(null);
     }),
+    onAndroid<{ visible: boolean }>('webVisibility', ({ visible }) => syncNativeVisibility(visible && !document.hidden)),
   ];
+  syncNativeVisibility();
 }
 
 // Track whether the home connection has been initialized via the React hook
@@ -1495,6 +1529,10 @@ function disconnectFromOrigin(origin: string): void {
     void androidCall('disconnect', { origin }).catch(() => {});
     connections.delete(origin);
     nativeConnected.delete(origin);
+    nativeSequences.delete(origin);
+    nativeRecovering.delete(origin);
+    pendingAcks.delete(origin);
+    if (!origin) connectionListeners.forEach(listener => listener(false));
     return;
   }
   const conn = connections.get(origin);
@@ -1594,6 +1632,21 @@ export function useWebSocket() {
   }, [token]);
 
   useEffect(() => {
+    if (isAndroid()) {
+      connectionListeners.add(setIsConnected);
+      setIsConnected(getHomeWsConnected());
+      const visibility = () => syncNativeVisibility();
+      document.addEventListener('visibilitychange', visibility);
+      return () => {
+        flushNativeAcks();
+        connectionListeners.delete(setIsConnected);
+        document.removeEventListener('visibilitychange', visibility);
+        nativeListeners.forEach(remove => remove());
+        nativeListeners = [];
+        void androidCall('webVisibility', { visible: false }).catch(() => {});
+        homeInitialized = false;
+      };
+    }
     const checkStatus = setInterval(() => {
       setIsConnected(getHomeWsConnected());
     }, 500);

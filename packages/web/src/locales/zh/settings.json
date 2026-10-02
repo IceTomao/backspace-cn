@@ -1,5 +1,9 @@
 {
   "android": {
+    "mediaExplanation": "此开关只分享歌曲、歌手和封面；还需在隐私设置中开启“分享活动状态”总开关。",
+    "mediaDisabled": "音乐分享已关闭。",
+    "mediaOffline": "当前未连接服务器，恢复在线后才能分享音乐。",
+    "mediaActivityDisabled": "“分享活动状态”总开关已关闭，请在隐私设置中开启。",
     "theme": "主题", "system": "跟随系统", "light": "浅色", "dark": "深色",
     "background": "后台在线", "server": "服务器", "switch": "切换服务器",
     "notifications": "通知", "messageNotifications": "接收消息通知", "messageNotificationsDescription": "应用在后台在线时接收新消息提醒。开启后会同时启用后台在线。", "notificationPermission": "系统通知权限未开启，请允许通知后重试。",

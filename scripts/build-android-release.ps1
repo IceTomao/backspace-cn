@@ -1,4 +1,4 @@
-param([switch]$UpdateLocks)
+param([switch]$UpdateLocks, [switch]$InitializeSigning)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $private = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'BackspaceAndroidSigning'))
@@ -16,6 +16,12 @@ $key = Join-Path $private 'backspace-release.p12'
 $credentials = Join-Path $private 'signing.json'
 if ((Test-Path -LiteralPath $key) -and !(Test-Path -LiteralPath $credentials)) {
     throw 'Existing signing key has no password file. Restore the private backup; do not replace the key.'
+}
+if (!(Test-Path -LiteralPath $key) -and (Test-Path -LiteralPath $credentials)) {
+    throw 'Signing password exists but key is missing. Restore the private backup; do not replace the key.'
+}
+if (!(Test-Path -LiteralPath $key) -and !$InitializeSigning) {
+    throw 'No fixed signing key found. Restore your backup, or use -InitializeSigning once for the first release.'
 }
 if (!(Test-Path -LiteralPath $credentials)) {
     $bytes = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
@@ -36,6 +42,20 @@ try {
             '-noprompt'
         )
     }
+    $certificate = Join-Path $private 'signing-certificate.der'
+    Invoke-Checked (Join-Path $env:JAVA_HOME 'bin\keytool.exe') @(
+        '-exportcert', '-keystore', $key, '-storepass:env', 'BACKSPACE_ANDROID_STORE_PASSWORD',
+        '-alias', 'backspace', '-file', $certificate
+    )
+    $fingerprint = (Get-FileHash -Algorithm SHA256 -LiteralPath $certificate).Hash.ToLowerInvariant()
+    $pinnedCertificate = Join-Path $root 'packages/android/signing-certificate.sha256'
+    if (Test-Path -LiteralPath $pinnedCertificate) {
+        if ((Get-Content -Raw -LiteralPath $pinnedCertificate).Trim().ToLowerInvariant() -ne $fingerprint) {
+            throw 'Signing key differs from the fixed release certificate. Restore the matching key.'
+        }
+    } else {
+        $fingerprint | Set-Content -LiteralPath $pinnedCertificate -Encoding ascii
+    }
     @'
 # Private Android Signing Backup
 Keep backspace-release.p12 and signing.json together in a private offline backup.
@@ -53,6 +73,7 @@ This directory is restricted to this Windows user and SYSTEM.
         $arguments = @('-p', 'packages/android/android', ':app:testDebugUnitTest', ':app:assembleRelease', '--console=plain')
         if ($UpdateLocks) { $arguments += '--write-locks' }
         Invoke-Checked (Join-Path $root 'packages/android/android/gradlew.bat') $arguments
+        Invoke-Checked 'node.exe' @('scripts/verify-android-apk.mjs')
     } finally { Pop-Location }
 } finally {
     Remove-Item Env:\BACKSPACE_ANDROID_STORE_PASSWORD -ErrorAction SilentlyContinue

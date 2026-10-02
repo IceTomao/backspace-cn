@@ -24,6 +24,7 @@ import org.robolectric.annotation.Config
 class BackspaceRuntimeTest {
     private lateinit var context: Context
     private lateinit var runtime: BackspaceRuntime
+    private lateinit var dispatcher: TestDispatcher
     private val created = mutableListOf<FakeSocket>()
     private val records = mutableMapOf<String, String>()
     private var failWrite = false
@@ -38,7 +39,8 @@ class BackspaceRuntimeTest {
         FakeSocket(request, listener).also { created.add(it) }
     }
     @Before fun setup() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        dispatcher = UnconfinedTestDispatcher()
+        Dispatchers.setMain(dispatcher)
         context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("client", 0).edit().clear().commit()
         runtime = BackspaceRuntime(context, vault, factory)
@@ -222,6 +224,103 @@ class BackspaceRuntimeTest {
         created[0].event("""{"type":"error","message":"Token has been revoked"}""")
         assertTrue(created[0].closed)
         assertTrue(runCatching { runtime.validateDownload("https://peer.example/api/uploads/a.png") }.isFailure)
+    }
+    @Test fun backgroundQueuesEventsAndResumeOnlyReplaysUnconsumedEvents() {
+        val events = mutableListOf<Long>()
+        runtime.emit = { name, value -> if (name == "socketEvent") events.add(value.getLong("sequence")) }
+        runtime.setForeground(true)
+        runtime.setBackground(true)
+        runtime.connect("", "session")
+        created[0].ready()
+        runtime.acknowledge("", 1)
+        runtime.setForeground(false)
+        created[0].event("""{"type":"presence_update","userId":"other","status":"offline"}""")
+        assertEquals(listOf(1L), events)
+        runtime.setForeground(true)
+        runtime.setWebVisible(true, JSONObject().put("", 1))
+        assertEquals(listOf(1L, 2L), events)
+        runtime.acknowledge("", 2)
+        runtime.sync(JSONObject().put("", 2))
+        assertEquals(listOf(1L, 2L), events)
+        assertEquals(1, created.size)
+    }
+    @Test fun acknowledgedTrafficDoesNotOverflowButColdWebViewResynchronizes() {
+        runtime.setForeground(true)
+        runtime.connect("", "session")
+        created[0].ready()
+        repeat(600) {
+            created[0].event("""{"type":"presence_update","userId":"other","status":"online"}""")
+            runtime.acknowledge("", it + 2L)
+        }
+        runtime.sync(JSONObject().put("", 601))
+        assertEquals(1, created.size)
+        runtime.sync()
+        assertEquals(2, created.size)
+        runtime.sync()
+        assertEquals(2, created.size)
+    }
+    @Test fun lostBackgroundEventsTriggerOneFullResynchronization() {
+        runtime.setForeground(true)
+        runtime.setBackground(true)
+        runtime.connect("", "session")
+        created[0].ready()
+        runtime.setWebVisible(false)
+        repeat(513) { created[0].event("""{"type":"presence_update","userId":"other","status":"online"}""") }
+        runtime.setWebVisible(true, JSONObject().put("", 1))
+        assertEquals(2, created.size)
+        runtime.sync(JSONObject().put("", 1))
+        assertEquals(2, created.size)
+    }
+    @Test fun heartbeatWaitsSixtySecondsAndAllowsThirtySecondsForPong() {
+        runtime.setForeground(true)
+        runtime.connect("", "session")
+        created[0].ready()
+        dispatcher.scheduler.advanceTimeBy(59_999)
+        dispatcher.scheduler.runCurrent()
+        assertFalse(created[0].sent.any { it.contains("\"ping\"") })
+        dispatcher.scheduler.advanceTimeBy(1)
+        dispatcher.scheduler.runCurrent()
+        assertEquals(1, created[0].sent.count { it.contains("\"ping\"") })
+        dispatcher.scheduler.advanceTimeBy(29_999)
+        dispatcher.scheduler.runCurrent()
+        assertFalse(created[0].closed)
+        dispatcher.scheduler.advanceTimeBy(1)
+        dispatcher.scheduler.runCurrent()
+        assertTrue(created[0].closed)
+    }
+    @Test fun pongKeepsConnectionAndOfflineStopsAttempts() {
+        runtime.setForeground(true)
+        runtime.connect("", "session")
+        created[0].ready()
+        dispatcher.scheduler.advanceTimeBy(60_000)
+        dispatcher.scheduler.runCurrent()
+        created[0].event("""{"type":"pong"}""")
+        dispatcher.scheduler.advanceTimeBy(30_000)
+        dispatcher.scheduler.runCurrent()
+        assertFalse(created[0].closed)
+        runtime.setNetworkAvailable(false)
+        dispatcher.scheduler.advanceTimeBy(180_000)
+        dispatcher.scheduler.runCurrent()
+        assertEquals(1, created.size)
+        runtime.setNetworkAvailable(true)
+        assertEquals(2, created.size)
+    }
+    @Test fun nativeViewerKeepsAppForegroundWhileWebViewIsHidden() {
+        var webEvents = 0
+        runtime.emit = { name, _ -> if (name == "socketEvent") webEvents++ }
+        runtime.activityStarted()
+        runtime.connect("", "session")
+        created[0].ready()
+        runtime.activityStarted()
+        runtime.notifyWebVisibility(false)
+        runtime.activityStopped()
+        assertTrue(runtime.foreground)
+        assertFalse(created[0].closed)
+        created[0].event("""{"type":"presence_update","userId":"other","status":"offline"}""")
+        assertEquals(1, webEvents)
+        runtime.activityStopped()
+        assertFalse(runtime.foreground)
+        assertTrue(created[0].closed)
     }
     inner class FakeSocket(private val req: Request, private val listener: WebSocketListener) : WebSocket {
         val sent = mutableListOf<String>()

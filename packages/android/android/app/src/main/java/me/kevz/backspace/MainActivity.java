@@ -63,12 +63,17 @@ public class MainActivity extends BridgeActivity {
         ViewCompat.requestApplyInsets(bridge.getWebView());
         BackspaceRuntime.get(this).preferences(new JSONObject());
     }
+    @Override public void onStart() {
+        super.onStart();
+        BackspaceRuntime.get(this).activityStarted();
+    }
     @Override public void onResume() {
         super.onResume();
-        BackspaceRuntime.get(this).setForeground(true);
+        BackspaceRuntime.get(this).notifyWebVisibility(true);
     }
     @Override public void onStop() {
-        BackspaceRuntime.get(this).setForeground(false);
+        BackspaceRuntime.get(this).notifyWebVisibility(false);
+        BackspaceRuntime.get(this).activityStopped();
         super.onStop();
     }
     @Override public void onDestroy() {

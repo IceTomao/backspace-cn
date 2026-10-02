@@ -5,7 +5,10 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, readd
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
-const name = 'Backspace-CN-1.0.0-android';
+const version = JSON.parse(readFileSync(path.join(root, 'packages/android/package.json'), 'utf8')).version;
+const [major, minor, patch] = version.split('.').map(Number);
+const versionCode = major * 1000000 + minor * 1000 + patch;
+const name = `Backspace-CN-${version}-android`;
 const output = path.join(root, 'installers', name);
 const apk = path.join(root, 'packages/android/android/app/build/outputs/apk/release/app-release.apk');
 const sdk = process.env.ANDROID_HOME || path.join(process.env.LOCALAPPDATA, 'Android/Sdk');
@@ -15,7 +18,7 @@ const signature = execFileSync(path.join(process.env.JAVA_HOME, 'bin/java.exe'),
   ['-jar', path.join(tools, 'lib/apksigner.jar'), 'verify', '--verbose', '--print-certs', apk], { encoding: 'utf8' });
 assert(signature.includes('Verified using v2 scheme (APK Signature Scheme v2): true'), 'APK v2 signature is required');
 const badging = execFileSync(path.join(tools, 'aapt.exe'), ['dump', 'badging', apk], { encoding: 'utf8' });
-assert(badging.includes("package: name='me.kevz.backspace' versionCode='1' versionName='1.0.0'"));
+assert(badging.includes(`package: name='me.kevz.backspace' versionCode='${versionCode}' versionName='${version}'`));
 assert(badging.includes("sdkVersion:'31'") && badging.includes("targetSdkVersion:'36'"));
 assert(badging.includes("'arm64-v8a'") && badging.includes("'armeabi-v7a'"), 'Both ARM ABIs are required');
 const permissions = execFileSync(path.join(tools, 'aapt.exe'), ['dump', 'permissions', apk], { encoding: 'utf8' });
@@ -67,13 +70,14 @@ for (const file of files) {
 }
 mkdirSync(output, { recursive: true });
 copyFileSync(apk, path.join(output, `${name}.apk`));
-copyFileSync(path.join(root, 'docs/ANDROID_CN_DELIVERY.md'), path.join(output, 'README.md'));
-const sourceName = 'Backspace-CN-1.0.0-android-source.zip';
+copyFileSync(path.join(root, 'docs/ANDROID_POWER_PROFILE_STREAMS.md'), path.join(output, 'README.md'));
+copyFileSync(path.join(root, 'docs/ANDROID_SIGNING.md'), path.join(output, 'ANDROID_SIGNING.md'));
+const sourceName = `${name}-source.zip`;
 execFileSync('tar.exe', ['-a', '-cf', path.join(output, sourceName), '-T', '-'], {
   cwd: root, input: files.sort().join('\n') + '\n', timeout: 180000,
 });
 writeFileSync(path.join(output, 'APK-VERIFICATION.txt'), `${signature}\n${badging}\n${permissions}\n`);
-const hashes = [`${name}.apk`, sourceName, 'README.md', 'APK-VERIFICATION.txt'].map(file =>
+const hashes = [`${name}.apk`, sourceName, 'README.md', 'ANDROID_SIGNING.md', 'APK-VERIFICATION.txt'].map(file =>
   `${createHash('sha256').update(readFileSync(path.join(output, file))).digest('hex')}  ${file}`);
 writeFileSync(path.join(output, 'SHA256SUMS.txt'), hashes.join('\n') + '\n');
 console.log(`Verified signed Android release: ${output}\n${hashes.join('\n')}`);

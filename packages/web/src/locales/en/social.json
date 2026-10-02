@@ -58,6 +58,7 @@
     "noSpaces": "No mutual spaces"
   },
   "profile": {
+    "loadFailed": "Could not load this profile. Go back and try again.",
     "tabs": {
       "about": "About",
       "mutualFriends": "Mutual Friends",

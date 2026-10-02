@@ -3,7 +3,7 @@ import { serverLocation } from '../../platform/android';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useUIStore } from '../../stores/uiStore';
-import { useSpaceStore, getMyUserIdForOrigin } from '../../stores/spaceStore';
+import { useSpaceStore, getMyUserIdForOrigin, resolveUserOrigin } from '../../stores/spaceStore';
 import type { TaggedSpace } from '../../stores/spaceStore';
 import { useChatStore } from '../../stores/chatStore';
 import { useVoiceStore } from '../../stores/voiceStore';
@@ -639,7 +639,8 @@ export function MobileSpacesScreen() {
                   key={userId}
                   data-context-menu={`voice-user-${userId}`}
                   className="px-3 py-1 rounded-lg hover:bg-interactive-hover transition-colors"
-                  onClick={() => openModal('userProfile', { userId: member?.user.homeUserId ?? userId })}
+                  onClick={() => openModal('userProfile', { userId: member?.user.id ?? userId,
+                    user: member?.user, origin: member ? resolveUserOrigin(member.user) : undefined })}
                   onContextMenu={(e) => handleVoiceUserContextMenu(e, userId, channel.id)}
                 >
                   <VoiceUserRow

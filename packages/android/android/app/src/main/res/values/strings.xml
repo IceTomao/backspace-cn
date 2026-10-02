@@ -1,9 +1,20 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Backspace</string>
-    <string name="title_activity_main">Backspace</string>
-    <string name="package_name">me.kevz.backspace</string>
-    <string name="custom_url_scheme">me.kevz.backspace</string>
+    <string name="app_name" translatable="false">Backspace</string>
+    <string name="title_activity_main" translatable="false">Backspace</string>
+    <string name="package_name" translatable="false">me.kevz.backspace</string>
+    <string name="custom_url_scheme" translatable="false">me.kevz.backspace</string>
     <string name="media_listener_label">Backspace 媒体状态</string>
     <string name="media_listener_description">仅在启用媒体状态分享时读取支持的音乐应用的歌曲信息和封面。</string>
+    <string name="stream_back">返回</string>
+    <string name="stream_sound_off">关闭直播声音</string>
+    <string name="stream_sound_on">开启直播声音</string>
+    <string name="stream_unmute">取消麦克风静音</string>
+    <string name="stream_mute">麦克风静音</string>
+    <string name="stream_playing">正在观看直播</string>
+    <string name="stream_ended">直播已结束</string>
+    <string name="stream_paused">直播已暂停</string>
+    <string name="stream_reconnecting">正在重新连接直播…</string>
+    <string name="stream_unavailable">暂时无法订阅此直播</string>
+    <string name="stream_connecting">正在加载直播…</string>
 </resources>

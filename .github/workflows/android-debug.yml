@@ -1,4 +1,4 @@
-name: Android debug APK
+name: Android APK
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-debug-${{ github.ref }}
+  group: android-apk-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -36,13 +36,46 @@ jobs:
       - run: pnpm --filter @backspace/web typecheck
       - run: pnpm --filter @backspace/web test
       - run: pnpm --filter @backspace/android build
-      - name: Test and assemble APK
+      - name: Test and assemble debug APK (pull requests only)
+        if: github.event_name == 'pull_request'
         working-directory: packages/android/android
         run: bash ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon
-      - name: Check packaged web entry
+      - name: Build signed release APK
+        if: github.event_name != 'pull_request'
+        working-directory: packages/android/android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.BACKSPACE_ANDROID_KEYSTORE_BASE64 }}
+          BACKSPACE_ANDROID_STORE_PASSWORD: ${{ secrets.BACKSPACE_ANDROID_STORE_PASSWORD }}
+          BACKSPACE_ANDROID_KEYSTORE: ${{ runner.temp }}/backspace-release.p12
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$BACKSPACE_ANDROID_STORE_PASSWORD" ]; then
+            echo 'Configure BACKSPACE_ANDROID_KEYSTORE_BASE64 and BACKSPACE_ANDROID_STORE_PASSWORD in repository Actions secrets.' >&2
+            exit 1
+          fi
+          umask 077
+          trap 'rm -f "$BACKSPACE_ANDROID_KEYSTORE"' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$BACKSPACE_ANDROID_KEYSTORE"
+          bash ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease --no-daemon
+      - name: Verify release signing identity and APK
+        if: github.event_name != 'pull_request'
+        run: node scripts/verify-android-apk.mjs
+      - name: Check debug packaged web entry
+        if: github.event_name == 'pull_request'
         working-directory: packages/android/android
         run: unzip -l app/build/outputs/apk/debug/app-debug.apk | grep 'assets/public/index.html'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name != 'pull_request'
+        with:
+          name: backspace-android-release-${{ github.sha }}
+          path: |
+            packages/android/android/app/build/outputs/apk/release/app-release.apk
+            packages/android/android/app/build/outputs/apk/release/APK-VERIFICATION.txt
+            packages/android/android/app/build/outputs/apk/release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name == 'pull_request'
         with:
           name: backspace-android-debug-${{ github.sha }}
           path: packages/android/android/app/build/outputs/apk/debug/app-debug.apk

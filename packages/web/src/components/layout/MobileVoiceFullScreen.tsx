@@ -15,6 +15,7 @@ import {
 import { VoiceGrid } from '../voice/VoiceGrid';
 import { deriveGridTiles } from '../../hooks/useLiveKit';
 import { isAndroid } from '../../platform/android';
+import { AndroidStreamList } from '../android/AndroidStreamList';
 import { requestMicPermission } from '../../utils/voice';
 
 /**
@@ -247,10 +248,10 @@ export function MobileVoiceFullScreen() {
     };
   }, []);
 
-  if (!currentVoiceChannelId) {
-    popMobileScreen();
-    return null;
-  }
+  useEffect(() => {
+    if (!currentVoiceChannelId && useUIStore.getState().mobileStack.at(-1)?.screen === 'voice-full') popMobileScreen();
+  }, [currentVoiceChannelId, popMobileScreen]);
+  if (!currentVoiceChannelId) return null;
 
   const isDmCall = currentVoiceChannelId.startsWith('dm-');
   let channelName = t('voice:status.voiceCall');
@@ -399,6 +400,7 @@ export function MobileVoiceFullScreen() {
           screen-share tiles, mute overlays, context menus. Identical
           rendering pipeline to desktop. */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {isAndroid() && <AndroidStreamList />}
         <VoiceGrid participants={participants} />
       </div>
 

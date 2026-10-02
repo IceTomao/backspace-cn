@@ -1,43 +1,47 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { useUIStore } from '../../stores/uiStore';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AndroidLifecycle } from './AndroidLifecycle';
+import { useUIStore } from '../../stores/uiStore';
 
-let backHandler: (() => void) | undefined;
-
-vi.mock('../../platform/android', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../platform/android')>(),
-  onAndroid: vi.fn((_event: string, callback: () => void) => {
-    backHandler = callback;
-    return () => { backHandler = undefined; };
-  }),
+const native = vi.hoisted(() => ({ back: undefined as (() => void) | undefined }));
+vi.mock('../../platform/android', async (original) => ({
+  ...await original<typeof import('../../platform/android')>(),
+  onAndroid: (event: string, callback: () => void) => {
+    if (event === 'back') native.back = callback;
+    return () => { native.back = undefined; };
+  },
 }));
-
-beforeEach(() => {
-  useUIStore.setState({ activeModal: null, imagePreviewUrl: null, mobileSearchOpen: false, mobileStack: [] });
-});
-
+beforeEach(() => useUIStore.setState({ activeModal: null, imagePreviewUrl: null, mobileSearchOpen: false, mobileStack: [] }));
 afterEach(() => {
-  useUIStore.setState({ activeModal: null, imagePreviewUrl: null, mobileSearchOpen: false, mobileStack: [] });
+  cleanup();
+  useUIStore.setState({ activeModal: null, imagePreviewUrl: null, mobileStack: [], mobileSearchOpen: false });
+  vi.restoreAllMocks();
 });
-
-it('closes image preview and search before navigating the mobile stack', () => {
-  const historyBack = vi.spyOn(history, 'back').mockImplementation(() => {});
+it('closes image preview and search before navigating the chat stack', () => {
+  const back = vi.spyOn(history, 'back').mockImplementation(() => {});
   render(<MemoryRouter><AndroidLifecycle /></MemoryRouter>);
-  useUIStore.setState({ mobileStack: [{ screen: 'channel-chat', params: { channelId: 'one' } }] });
-
+  act(() => useUIStore.setState({ mobileStack: [{ screen: 'channel-chat', params: { channelId: 'one' } }] }));
   act(() => useUIStore.getState().openImagePreview('/image.png'));
-  act(() => backHandler?.());
+  act(() => native.back?.());
   expect(useUIStore.getState().activeModal).toBeNull();
-  expect(historyBack).not.toHaveBeenCalled();
-
+  expect(back).not.toHaveBeenCalled();
   act(() => useUIStore.getState().setMobileSearchOpen(true));
-  act(() => backHandler?.());
+  act(() => native.back?.());
   expect(useUIStore.getState().mobileSearchOpen).toBe(false);
-  expect(historyBack).not.toHaveBeenCalled();
-
-  act(() => backHandler?.());
-  expect(historyBack).toHaveBeenCalledOnce();
-  historyBack.mockRestore();
+  expect(back).not.toHaveBeenCalled();
+  act(() => native.back?.());
+  expect(back).toHaveBeenCalledOnce();
+});
+it('exits only the top profile when the covered chat still has search open', () => {
+  useUIStore.setState({ activeModal: null, mobileSearchOpen: true, mobileStack: [
+    { screen: 'channel-chat', params: { channelId: 'channel' } },
+    { screen: 'user-profile', params: { userId: 'alice' } },
+  ] });
+  const back = vi.spyOn(history, 'back').mockImplementation(() => {});
+  render(<MemoryRouter><AndroidLifecycle /></MemoryRouter>);
+  act(() => native.back?.());
+  expect(back).toHaveBeenCalledOnce();
+  expect(useUIStore.getState().mobileSearchOpen).toBe(true);
+  expect(useUIStore.getState().mobileStack).toHaveLength(2);
 });

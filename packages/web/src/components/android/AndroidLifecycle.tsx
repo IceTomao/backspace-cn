@@ -13,6 +13,7 @@ export function AndroidLifecycle() {
     const back = onAndroid('back', () => {
       const ui = useUIStore.getState();
       if (ui.activeModal === 'imagePreview') ui.closeImagePreview();
+      else if (ui.mobileStack.at(-1)?.screen === 'user-profile') ui.popMobileScreen();
       else if (ui.mobileSearchOpen) ui.setMobileSearchOpen(false);
       else if (ui.mobileStack.length) history.back();
       else if (window.location.pathname !== '/channels/@me' && !window.location.pathname.startsWith('/login')) navigate('/channels/@me');

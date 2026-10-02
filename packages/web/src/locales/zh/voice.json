@@ -1,4 +1,10 @@
 {
+  "androidStream": {
+    "title": "频道直播",
+    "watch": "观看 {{name}} 的直播",
+    "paused": "{{name}} 的直播已暂停",
+    "failed": "无法打开直播，请重试。"
+  },
   "chatPanel": {
     "title": "聊天",
     "close": "關閉聊天"

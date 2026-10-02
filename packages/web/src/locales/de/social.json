@@ -58,6 +58,7 @@
     "noSpaces": "Keine gemeinsamen Spaces"
   },
   "profile": {
+    "loadFailed": "Profil konnte nicht geladen werden. Gehe zurück und versuche es erneut.",
     "tabs": {
       "about": "Info",
       "mutualFriends": "Gemeinsame Freunde",

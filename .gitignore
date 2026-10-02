@@ -16,6 +16,7 @@ packages/android/android/app/src/main/assets/capacitor.plugins.json
 *.jks
 *.keystore
 signing.properties
+signing.json
 packages/web/dist/
 packages/server/dist/
 packages/shared/dist/

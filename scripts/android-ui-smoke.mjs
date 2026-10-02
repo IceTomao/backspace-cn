@@ -72,7 +72,7 @@ try {
         async nativePromise(_plugin, method, options) {
           if (method === 'removeListener') { listeners.delete(options.callbackId); return {}; }
           const { action, data } = options;
-          if (action === 'bootstrap') return { settings, storage: stored };
+          if (action === 'bootstrap') return { settings, storage: stored, insets: { top: 0, right: 0, bottom: 0, left: 0 } };
           if (action === 'preferences') return settings;
           if (action === 'storage') { stored[data.key] = data.value; return {}; }
           return {};

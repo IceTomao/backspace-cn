@@ -1,4 +1,10 @@
 {
+  "androidStream": {
+    "title": "Channel streams",
+    "watch": "Watch {{name}}",
+    "paused": "{{name}} paused the stream",
+    "failed": "Could not open the stream. Try again."
+  },
   "chatPanel": {
     "title": "Chat",
     "close": "Close Chat"

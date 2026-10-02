@@ -8,6 +8,9 @@ import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.util.Base64
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -17,6 +20,7 @@ import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.RemoteAudioTrack
+import io.livekit.android.room.track.RemoteVideoTrack
 import io.livekit.android.room.track.RemoteTrackPublication
 import io.livekit.android.room.track.Track
 import kotlinx.coroutines.*
@@ -28,8 +32,13 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 private const val MEDIA_ACTIVITY_MIN_INTERVAL_MS = 3_200L
+internal const val SOCKET_HEARTBEAT_MS = 60_000L
+internal const val SOCKET_PONG_TIMEOUT_MS = 30_000L
+internal fun reconnectDelay(attempt: Int, jitter: Double = Random.nextDouble()): Long =
+    ((1000L shl attempt.coerceIn(0, 5)).coerceAtMost(30_000) * (0.8 + 0.2 * jitter.coerceIn(0.0, 1.0))).toLong()
 
 class BackspaceRuntime internal constructor(
     private val context: Context,
@@ -52,6 +61,49 @@ class BackspaceRuntime internal constructor(
         private set
     var foreground = false
         private set
+    private var startedActivities = 0
+    private var webVisible = true
+    private var lastWebVisibilityCursors: String? = null
+    private var networkAvailable = true
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var lastVoiceSnapshot: String? = null
+    private var lastWebVoiceSnapshot: String? = null
+    fun activityStarted() { startedActivities++; setForeground(true) }
+    fun activityStopped() { startedActivities = (startedActivities - 1).coerceAtLeast(0); if (startedActivities == 0) setForeground(false) }
+    fun setWebVisible(value: Boolean, cursors: JSONObject = JSONObject()) {
+        webVisible = value
+        if (!value) lastWebVisibilityCursors = null
+        if (value && foreground && lastWebVisibilityCursors != cursors.toString()) {
+            lastWebVisibilityCursors = cursors.toString()
+            sync(cursors)
+        }
+    }
+    fun notifyWebVisibility(value: Boolean) {
+        webVisible = value
+        if (!value) lastWebVisibilityCursors = null
+        emit?.invoke("webVisibility", JSONObject().put("visible", value))
+    }
+    private fun canEmitWeb() = foreground && webVisible
+    private fun emitWeb(name: String, value: JSONObject) { if (canEmitWeb()) emit?.invoke(name, value) }
+    internal fun setNetworkAvailable(value: Boolean) {
+        if (networkAvailable == value) return
+        networkAvailable = value
+        if (!value) sockets.values.forEach { it.pause() } else reconcileConnections()
+    }
+    private fun observeNetwork() {
+        if (networkCallback != null || socketFactory != null) return
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        val network = manager.activeNetwork
+        networkAvailable = manager.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { handler.post { setNetworkAvailable(true) } }
+            override fun onLost(network: Network) { handler.post {
+                setNetworkAvailable(manager.getNetworkCapabilities(manager.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true)
+            } }
+        }
+        manager.registerDefaultNetworkCallback(callback)
+        networkCallback = callback
+    }
     var background = prefs.getBoolean("background", false)
         private set
     var messageNotifications = prefs.getBoolean("messageNotifications", true)
@@ -80,6 +132,54 @@ class BackspaceRuntime internal constructor(
     }
     private val sockets = mutableMapOf<String, SocketSession>()
     private var room: Room? = null
+    var watchingIdentity: String? = null
+        private set
+    private var viewerVisible = false
+    private var streamSoundEnabled = true
+    private var announcedWatcher: String? = null
+    fun selectStream(identity: String) {
+        require(foreground && !voiceIsDm && room != null) { "请先加入语音频道" }
+        require(room!!.remoteParticipants.values.any { it.identity?.value == identity && it.trackPublications.values.any { p -> p.source == Track.Source.SCREEN_SHARE } }) { "直播已结束" }
+        stopWatching()
+        watchingIdentity = identity
+        streamSoundEnabled = true
+        emitVoice()
+    }
+    fun setViewerVisible(value: Boolean) {
+        viewerVisible = value
+        syncSubscriptions()
+        announceWatching()
+        emitVoice()
+    }
+    fun setStreamSound(enabled: Boolean) { streamSoundEnabled = enabled; syncSubscriptions(); emitVoice() }
+    fun stopWatching(identity: String? = watchingIdentity) {
+        if (identity != watchingIdentity) return
+        viewerVisible = false
+        announceWatching()
+        watchingIdentity = null
+        syncSubscriptions()
+        emitVoice()
+    }
+    private fun announceWatching() {
+        val target = watchingIdentity.takeIf { viewerVisible && foreground && voiceStatus == "connected" && streamPublication()?.muted == false }
+        if (announcedWatcher == target) return
+        val current = room ?: return
+        val old = announcedWatcher
+        announcedWatcher = target
+        scope.launch {
+            runCatching {
+                old?.let { current.localParticipant.publishData(JSONObject().put("type", "stream_watch").put("target", it.substringBefore(':')).put("watching", false).toString().toByteArray(Charsets.UTF_8)) }
+                target?.let { current.localParticipant.publishData(JSONObject().put("type", "stream_watch").put("target", it.substringBefore(':')).put("watching", true).toString().toByteArray(Charsets.UTF_8)) }
+            }
+        }
+    }
+    private fun streamPublication(): RemoteTrackPublication? = room?.remoteParticipants?.values
+        ?.firstOrNull { it.identity?.value == watchingIdentity }?.trackPublications?.values
+        ?.firstOrNull { it.source == Track.Source.SCREEN_SHARE } as? RemoteTrackPublication
+    fun streamVideoTrack(): RemoteVideoTrack? = if (viewerVisible && foreground) streamPublication()?.takeIf { it.isDesired && !it.muted }?.track as? RemoteVideoTrack else null
+    fun initializeVideoRenderer(renderer: livekit.org.webrtc.SurfaceViewRenderer) {
+        (room ?: error("语音连接已结束")).initVideoRenderer(renderer)
+    }
     private var roomEvents: Job? = null
     private var voiceGeneration = 0
     private var voiceOrigin = ""
@@ -89,7 +189,6 @@ class BackspaceRuntime internal constructor(
     private var federatedCallId: String? = null
     private var ringing = false
     private var ringTimeout: Job? = null
-    private var sequence = 0L
     private var serviceStopping = false
     private var switchingVoice = false
     private var callSignalling = false
@@ -145,6 +244,8 @@ class BackspaceRuntime internal constructor(
             .put("notificationsAllowed", context.getSystemService(NotificationManager::class.java).areNotificationsEnabled())
             .put("mediaStatusEnabled", mediaStatusEnabled)
             .put("mediaAccess", MediaSessionListenerService.hasAccess(context))
+            .put("mediaOnline", sockets.values.any { it.ready })
+            .put("mediaActivityAllowed", sockets.values.any { it.ready && it.showActivity })
     }
     fun setMediaStatusEnabled(value: Boolean) {
         if (value && !MediaSessionListenerService.hasAccess(context)) {
@@ -425,14 +526,15 @@ class BackspaceRuntime internal constructor(
         emit?.invoke("preferences", settings())
     }
     fun setForeground(value: Boolean) {
+        if (foreground == value) return
         foreground = value
+        if (!value) { viewerVisible = false; syncSubscriptions(); announceWatching() }
         if (value) {
             updateService()
-            emit?.invoke("preferences", settings())
+            emitWeb("preferences", settings())
             emitVoice()
         }
         reconcileConnections()
-        refreshMediaCapture()
     }
     fun setChannelMuted(channelId: String, muted: Boolean) {
         require(channelId.isNotBlank() && channelId.length <= 256)
@@ -462,12 +564,12 @@ class BackspaceRuntime internal constructor(
         }
     }
     fun connect(origin: String, token: String) {
+        observeNetwork()
         val key = if (origin.isBlank()) "" else ClientPolicy.server(origin)
         require(token.length in 1..16384)
         val current = sockets[key]
         if (current?.token == token) {
             if (ClientPolicy.shouldConnect(foreground, background, inCall)) current.open()
-            current.replay()
             return
         }
         disconnect(key)
@@ -498,11 +600,15 @@ class BackspaceRuntime internal constructor(
             emitIncoming(session)
         }
     }
-    fun sync() {
-        sockets.values.forEach { it.replay(); emitIncoming(it) }
-        emitVoice()
-        pendingNotification?.let { emit?.invoke("notification", it) }
+    fun sync(cursors: JSONObject = JSONObject()) {
+        if (!canEmitWeb()) return
+        sockets.values.forEach { it.replay(cursors.optLong(it.origin, 0)); emitIncoming(it) }
+        emitVoice(force = true)
+        emitWeb("preferences", settings())
+        pendingNotification?.let { emitWeb("notification", it) }
     }
+    fun acknowledge(origin: String, value: Long) { sockets[origin]?.acknowledge(value) }
+    fun resynchronize(origin: String) { sockets[origin]?.resynchronize() }
     fun notificationOpened(data: JSONObject) {
         pendingNotification = data
         emit?.invoke("notification", data)
@@ -530,35 +636,38 @@ class BackspaceRuntime internal constructor(
         var activityUpdateJob: Job? = null
         var snapshot: JSONObject? = null
         var snapshotSequence = 0L
+        private var latestSequence = 0L
+        private var removedSequence = 0L
         val restrictions = mutableMapOf<String, JSONObject>()
         var incoming: JSONObject? = null
         var incomingTimeout: Job? = null
         val backlog = ArrayDeque<Pair<Long, JSONObject>>()
         private var reconnect: Job? = null
         private var heartbeat: Job? = null
+        private var stableConnection: Job? = null
+        private var pong: CompletableDeferred<Unit>? = null
         private var attempts = 0
         private var epoch = 0
-        private var lastPong = System.currentTimeMillis()
         var overflow = false
         fun open() {
-            if (socket != null || reconnect?.isActive == true) return
+            if (!networkAvailable || socket != null || reconnect?.isActive == true) return
             val generation = ++epoch
             val url = (origin.ifEmpty { server }).replaceFirst("https://", "wss://") + "/ws"
             socket = (socketFactory ?: http).newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                 override fun onOpen(ws: WebSocket, response: Response) { handler.post {
                     if (epoch != generation) { ws.close(1000, null); return@post }
-                    attempts = 0
-                    lastPong = System.currentTimeMillis()
                     ws.send(JSONObject().put("type", "auth").put("token", token).put("client", "mobile").toString())
                     heartbeat?.cancel()
                     heartbeat = scope.launch {
                         while (isActive) {
-                            delay(15000)
-                            if (System.currentTimeMillis() - lastPong > 45000) {
+                            delay(SOCKET_HEARTBEAT_MS)
+                            val response = CompletableDeferred<Unit>()
+                            pong = response
+                            if (!ws.send("""{"type":"ping"}""") || withTimeoutOrNull(SOCKET_PONG_TIMEOUT_MS) { response.await(); true } != true) {
                                 ws.cancel()
                                 break
                             }
-                            ws.send("""{"type":"ping"}""")
+                            pong = null
                         }
                     }
                 } }
@@ -566,7 +675,7 @@ class BackspaceRuntime internal constructor(
                     if (epoch != generation || text.length > 12_000_000) return@post
                     try {
                         val event = JSONObject(text)
-                        if (event.optString("type") == "pong") { lastPong = System.currentTimeMillis(); return@post }
+                        if (event.optString("type") == "pong") { pong?.complete(Unit); return@post }
                         if (!ready && event.optString("type") == "error" && event.optString("message") in
                             setOf("Invalid token", "Token has been revoked", "This account has been deleted")) {
                             pause()
@@ -575,7 +684,7 @@ class BackspaceRuntime internal constructor(
                             emit?.invoke("sessionExpired", JSONObject().put("origin", origin))
                             return@post
                         }
-                        val eventSequence = ++sequence
+                        val eventSequence = ++latestSequence
                         if (event.optString("type") == "ready") {
                             ready = true
                             val user = event.getJSONObject("user")
@@ -587,9 +696,13 @@ class BackspaceRuntime internal constructor(
                             lastActivityUpdateAt = 0L
                             snapshot = event
                             snapshotSequence = eventSequence
+                            removedSequence = 0L
                             backlog.clear()
                             overflow = false
-                            emit?.invoke("socketStatus", JSONObject().put("origin", origin).put("connected", true))
+                            stableConnection?.cancel()
+                            stableConnection = scope.launch { delay(60_000); if (epoch == generation && ready) attempts = 0 }
+                            emitWeb("socketStatus", JSONObject().put("origin", origin).put("connected", true))
+                            emitWeb("preferences", settings())
                             if (background) refreshMutedChannels(this@SocketSession)
                             refreshMediaCapture()
                             if (showActivity && mediaActivity != null) publishMediaActivity(mediaActivity)
@@ -610,9 +723,10 @@ class BackspaceRuntime internal constructor(
                                         clearMediaActivity()
                                     }
                                     refreshMediaCapture()
+                                    emitWeb("preferences", settings())
                                 }
                             }
-                            if (backlog.size >= 512) { backlog.removeFirst(); overflow = true }
+                            if (backlog.size >= 512) { removedSequence = backlog.removeFirst().first; overflow = true }
                             backlog.addLast(eventSequence to event)
                         }
                         handleNativeEvent(this@SocketSession, event)
@@ -630,14 +744,17 @@ class BackspaceRuntime internal constructor(
             clearPendingMediaActivity(this)
             refreshMediaCapture()
             heartbeat?.cancel()
-            emit?.invoke("socketStatus", JSONObject().put("origin", origin).put("connected", false))
+            stableConnection?.cancel()
+            pong = null
+            emitWeb("socketStatus", JSONObject().put("origin", origin).put("connected", false))
+            emitWeb("preferences", settings())
             if (code in setOf(4001, 4003, 4004)) {
                 if (inCall && voiceOrigin == origin) hangup()
                 emit?.invoke("sessionExpired", JSONObject().put("origin", origin))
                 return
             }
             if (sockets[origin] === this && ClientPolicy.shouldConnect(foreground, background, inCall)) {
-                val wait = (1000L shl attempts.coerceAtMost(5)).coerceAtMost(30000)
+                val wait = reconnectDelay(attempts)
                 attempts++
                 reconnect = scope.launch { delay(wait); reconnect = null; open() }
             }
@@ -646,24 +763,37 @@ class BackspaceRuntime internal constructor(
             epoch++
             reconnect?.cancel(); reconnect = null
             heartbeat?.cancel(); heartbeat = null
+            stableConnection?.cancel(); stableConnection = null
+            pong = null
             clearPendingMediaActivity(this)
             socket?.close(1000, null); socket = null
             ready = false
-            emit?.invoke("socketStatus", JSONObject().put("origin", origin).put("connected", false))
+            emitWeb("socketStatus", JSONObject().put("origin", origin).put("connected", false))
             refreshMediaCapture()
         }
-        fun replay() {
-            if (overflow) {
-                pause()
-                if (ClientPolicy.shouldConnect(foreground, background, inCall)) open()
+        fun acknowledge(value: Long) {
+            if (value < snapshotSequence || value > latestSequence) return
+            while (backlog.isNotEmpty() && backlog.first().first <= value) removedSequence = maxOf(removedSequence, backlog.removeFirst().first)
+        }
+        fun replay(cursor: Long) {
+            if (!canEmitWeb()) return
+            if (cursor < removedSequence) {
+                resynchronize()
                 return
             }
-            snapshot?.let { emitEvent(snapshotSequence, it) }
-            backlog.forEach { (id, event) -> emitEvent(id, event) }
-            emit?.invoke("socketStatus", JSONObject().put("origin", origin).put("connected", ready))
+            snapshot?.takeIf { snapshotSequence > cursor }?.let { emitEvent(snapshotSequence, it) }
+            backlog.filter { it.first > cursor }.forEach { (id, event) -> emitEvent(id, event) }
+            emitWeb("socketStatus", JSONObject().put("origin", origin).put("connected", ready))
+        }
+        fun resynchronize() {
+            pause()
+            snapshot = null
+            backlog.clear()
+            removedSequence = 0
+            if (ClientPolicy.shouldConnect(foreground, background, inCall)) open()
         }
         private fun emitEvent(id: Long, event: JSONObject) {
-            emit?.invoke("socketEvent", JSONObject().put("origin", origin).put("sequence", id).put("event", event))
+            emitWeb("socketEvent", JSONObject().put("origin", origin).put("sequence", id).put("event", event))
         }
     }
 
@@ -767,7 +897,7 @@ class BackspaceRuntime internal constructor(
         }
     }
     private fun emitIncoming(session: SocketSession) {
-        emit?.invoke("incoming", JSONObject().put("origin", session.origin).put("event", session.incoming ?: JSONObject.NULL))
+        emitWeb("incoming", JSONObject().put("origin", session.origin).put("event", session.incoming ?: JSONObject.NULL))
     }
     private fun loadRestrictions(session: SocketSession) {
         val state = session.restrictions["$voiceSpace:${session.userId}"]
@@ -884,6 +1014,7 @@ class BackspaceRuntime internal constructor(
                         else -> {}
                     }
                     syncSubscriptions()
+                    announceWatching()
                     emitVoice()
                 }
             }
@@ -904,6 +1035,8 @@ class BackspaceRuntime internal constructor(
         }
     }
     fun hangup(signal: Boolean = true) {
+        stopWatching()
+        announcedWatcher = null
         val oldChannel = voiceChannel
         if (signal && oldChannel != null) runCatching {
             send(voiceOrigin, if (voiceIsDm) JSONObject().put("type", "dm_call_end").put("dmChannelId", oldChannel)
@@ -961,16 +1094,21 @@ class BackspaceRuntime internal constructor(
             .put("isDeafened", deafened || forcedDeafen).put("isCameraOn", false).put("isScreenSharing", false)) }
     }
     private fun syncSubscriptions() {
+        val streamAvailable = streamPublication() != null
         room?.remoteParticipants?.values?.forEach { participant ->
             participant.trackPublications.values.forEach { publication ->
                 if (publication is RemoteTrackPublication) {
-                    val audio = publication.source == Track.Source.MICROPHONE
-                    if (publication.subscribed != audio) publication.setSubscribed(audio)
+                    val identity = participant.identity?.value ?: ""
+                    val subscribe = StreamSubscriptionPolicy.subscribe(publication.source, identity, watchingIdentity,
+                        viewerVisible && foreground && streamAvailable,
+                        streamSoundEnabled && streamPublication()?.muted == false)
+                    if (publication.isDesired != subscribe) publication.setSubscribed(subscribe)
                     val userId = participant.identity?.value?.substringBefore(":") ?: ""
                     val volume = audioOptions.optJSONObject("volumes")?.optDouble(userId, 100.0) ?: 100.0
                     val localMute = audioOptions.optJSONObject("mutes")?.optBoolean(userId) ?: false
-                    (publication.track as? RemoteAudioTrack)?.setVolume(if (deafened || forcedDeafen || localMute) 0.0
-                        else (audioOptions.optDouble("outputVolume", 100.0) * volume / 10000.0).coerceIn(0.0, 4.0))
+                    (publication.track as? RemoteAudioTrack)?.setVolume(StreamSubscriptionPolicy.volume(
+                        audioOptions.optDouble("outputVolume", 100.0), volume,
+                        deafened || forcedDeafen || (publication.source == Track.Source.SCREEN_SHARE_AUDIO && (!subscribe || !streamSoundEnabled)), localMute))
                 }
             }
         }
@@ -983,11 +1121,20 @@ class BackspaceRuntime internal constructor(
     }
     fun voiceSnapshot(): JSONObject {
         val participants = JSONArray()
+        val streams = JSONArray()
         room?.let { current ->
             (listOf(current.localParticipant) + current.remoteParticipants.values).forEach {
                 participants.put(JSONObject().put("identity", it.identity?.value ?: "")
                     .put("name", it.name ?: "").put("local", it === current.localParticipant)
                     .put("muted", !it.isMicrophoneEnabled).put("speaking", it.isSpeaking))
+            }
+            current.remoteParticipants.values.forEach { participant ->
+                participant.trackPublications.values.filter { it.source == Track.Source.SCREEN_SHARE }.forEach { publication ->
+                    streams.put(JSONObject().put("identity", participant.identity?.value ?: "").put("name", participant.name ?: "")
+                        .put("videoSid", publication.sid)
+                        .put("audioSid", participant.trackPublications.values.firstOrNull { it.source == Track.Source.SCREEN_SHARE_AUDIO }?.sid ?: JSONObject.NULL)
+                        .put("muted", publication.muted))
+                }
             }
         }
         val devices = JSONArray()
@@ -998,6 +1145,38 @@ class BackspaceRuntime internal constructor(
             .put("isDm", voiceIsDm).put("status", voiceStatus).put("muted", muted).put("deafened", deafened)
             .put("error", voiceError ?: JSONObject.NULL).put("participants", participants).put("devices", devices)
             .put("deviceId", room?.audioSwitchHandler?.selectedAudioDevice?.name ?: JSONObject.NULL)
+            .put("streams", streams).put("watchingIdentity", watchingIdentity ?: JSONObject.NULL)
+            .put("streamSoundEnabled", streamSoundEnabled)
+            .put("watchStatus", when {
+                watchingIdentity == null -> "stopped"
+                voiceStatus != "connected" -> voiceStatus
+                !viewerVisible || !foreground -> "paused"
+                streamPublication() == null -> "ended"
+                streamPublication()?.subscriptionAllowed == false -> "unavailable"
+                streamPublication()?.muted == true -> "paused"
+                streamVideoTrack() == null -> "connecting"
+                else -> "playing"
+            })
     }
-    private fun emitVoice() { emit?.invoke("voice", voiceSnapshot()) }
+    private var lastObservedVideoTrack: RemoteVideoTrack? = null
+    private fun emitVoice(force: Boolean = false) {
+        val snapshot = voiceSnapshot()
+        val serialized = snapshot.toString()
+        val videoTrack = streamVideoTrack()
+        if (force || serialized != lastVoiceSnapshot || videoTrack !== lastObservedVideoTrack) {
+            lastVoiceSnapshot = serialized
+            lastObservedVideoTrack = videoTrack
+            voiceObservers.toList().forEach { it(snapshot) }
+        }
+        if (canEmitWeb() && (force || serialized != lastWebVoiceSnapshot)) {
+            lastWebVoiceSnapshot = serialized
+            emitWeb("voice", snapshot)
+        }
+    }
+    private val voiceObservers = mutableSetOf<(JSONObject) -> Unit>()
+    fun observeVoice(observer: (JSONObject) -> Unit): () -> Unit {
+        voiceObservers.add(observer)
+        observer(voiceSnapshot())
+        return { voiceObservers.remove(observer) }
+    }
 }

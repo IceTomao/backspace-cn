@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useUIStore } from '../stores/uiStore';
 import { useMobileRouteSync } from './useMobileRouteSync';
 
@@ -16,8 +16,12 @@ describe('mobile route reconstruction', () => {
       wrapper: strict ? StrictMode : undefined,
     });
     expect(useUIStore.getState().mobileStack).toEqual([chat, settings]);
+    const back = vi.spyOn(history, 'back').mockImplementation(() => {});
     act(() => useUIStore.getState().popMobileScreen());
+    expect(back).toHaveBeenCalledOnce();
+    act(() => useUIStore.getState().restoreMobileHistory({ backspaceMobileStack: [chat] }));
     expect(useUIStore.getState().mobileStack).toEqual([chat]);
+    back.mockRestore();
   });
   it('does not duplicate an existing route under settings', () => {
     useUIStore.setState({ mobileStack: [chat, settings] });

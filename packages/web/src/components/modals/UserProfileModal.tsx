@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFormatters } from '../../i18n/formatters';
 import { describeError } from '../../i18n/errors';
@@ -53,11 +53,16 @@ function getFriendshipStatus(
   return { state: 'none' };
 }
 
-export function UserProfileModal() {
+export function UserProfileModal({ mobile = false, userId: pageUserId, origin: pageOrigin, initialUser }: {
+  mobile?: boolean; userId?: string; origin?: string; initialUser?: User;
+} = {}) {
   const { t } = useTranslation(['social', 'common']);
   const activeModal = useUIStore((s) => s.activeModal);
   const modalData = useUIStore((s) => s.modalData);
-  const closeModal = useUIStore((s) => s.closeModal);
+  const closeDesktopModal = useUIStore((s) => s.closeModal);
+  const popMobileScreen = useUIStore((s) => s.popMobileScreen);
+  const isMobile = useUIStore((s) => s.isMobile);
+  const closeModal = mobile ? popMobileScreen : closeDesktopModal;
   const addToast = useUIStore((s) => s.addToast);
   const navigate = useNavigate();
   const f = useFormatters();
@@ -77,11 +82,13 @@ export function UserProfileModal() {
   const [mutualSpaces, setMutualSpaces] = useState<MutualSpace[]>([]);
   const [loadingMutuals, setLoadingMutuals] = useState(false);
   const [friendActionLoading, setFriendActionLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const requestGeneration = useRef(0);
 
-  const isOpen = activeModal === 'userProfile';
-  const userId = modalData?.userId as string | undefined;
-  const passedUser = modalData?.user as User | undefined;
-  const passedOrigin = (modalData?.origin as string | undefined) ?? '';
+  const isOpen = mobile || (!isMobile && activeModal === 'userProfile');
+  const userId = mobile ? pageUserId : modalData?.userId as string | undefined;
+  const passedUser = mobile ? initialUser : modalData?.user as User | undefined;
+  const passedOrigin = (mobile ? pageOrigin : modalData?.origin as string | undefined) ?? '';
 
   // Determine friendship status (federation-safe canonical matching)
   const friendship: FriendshipStatus = user
@@ -89,32 +96,42 @@ export function UserProfileModal() {
     : { state: 'none' };
 
   const loadUser = useCallback(async (id: string, origin: string) => {
+    const generation = requestGeneration.current;
     try {
       const targetApi = getApiForOrigin(origin);
       const u = await targetApi.users.get(id);
+      if (generation !== requestGeneration.current) return;
       setUser(u);
       useSpaceStore.getState().upsertUserView(u, origin);
     } catch {
-      // User not found
+      if (generation === requestGeneration.current) setLoadFailed(true);
     }
   }, []);
 
   const loadMutuals = useCallback(async (id: string, targetUser?: User) => {
+    const generation = requestGeneration.current;
     setLoadingMutuals(true);
     try {
       const data = await loadFederatedMutuals(id, targetUser?.homeUserId);
+      if (generation !== requestGeneration.current) return;
       setMutualFriends(data.mutualFriends);
       setMutualSpaces(data.mutualSpaces);
     } catch {
+      if (generation !== requestGeneration.current) return;
       setMutualFriends([]);
       setMutualSpaces([]);
     } finally {
-      setLoadingMutuals(false);
+      if (generation === requestGeneration.current) setLoadingMutuals(false);
     }
   }, []);
 
   useEffect(() => {
     if (isOpen && userId) {
+      requestGeneration.current++;
+      setLoadFailed(false);
+      setUser(null);
+      setMutualFriends([]);
+      setMutualSpaces([]);
       setActiveTab('about');
       const origin = passedOrigin || (passedUser ? resolveUserOrigin(passedUser) : '');
       setUserOrigin(origin);
@@ -126,6 +143,7 @@ export function UserProfileModal() {
       }
       loadMutuals(userId, passedUser);
     }
+    return () => { requestGeneration.current++; };
   }, [isOpen, userId, passedUser, passedOrigin, loadUser, loadMutuals]);
 
   // Reset on close
@@ -140,15 +158,29 @@ export function UserProfileModal() {
 
   // Escape to close
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || mobile) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeModal();
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [isOpen, closeModal]);
+  }, [isOpen, closeModal, mobile, userId]);
 
-  if (!isOpen || !user) return null;
+  if (!isOpen) return null;
+  if (!user) return mobile ? <div className="flex flex-col h-full bg-surface-base text-txt-primary">
+    <button className="p-4 text-left" onClick={closeModal}>{t('common:actions.back')}</button>
+    <p role={loadFailed ? 'alert' : 'status'} className="p-5">{t(loadFailed ? 'social:profile.loadFailed' : 'common:states.loading')}</p>
+  </div> : null;
+
+  const goTo = (path: string) => {
+    if (!mobile) { closeModal(); navigate(path); return; }
+    const stack = useUIStore.getState().mobileStack;
+    let count = 0;
+    for (let i = stack.length - 1; i >= 0 && stack[i]?.screen === 'user-profile'; i--) count++;
+    if (!count) { navigate(path); return; }
+    window.addEventListener('popstate', () => navigate(path), { once: true });
+    history.go(-count);
+  };
 
   const { baseName, domain } = parseFederatedUsername(user.username);
   const displayName = user.displayName ?? baseName;
@@ -170,8 +202,7 @@ export function UserProfileModal() {
       const existing = useSpaceStore.getState().findExistingDmForUser(user);
       if (existing) {
         useUIStore.getState().setShowDms(true);
-        closeModal();
-        navigate(`/channels/@me/${existing.dm.id}`);
+        goTo(`/channels/@me/${existing.dm.id}`);
         return;
       }
       const channel = await api.dm.create({
@@ -181,8 +212,7 @@ export function UserProfileModal() {
       });
       addDmChannel(channel);
       useUIStore.getState().setShowDms(true);
-      closeModal();
-      navigate(`/channels/@me/${channel.id}`);
+      goTo(`/channels/@me/${channel.id}`);
     } catch (err) {
       console.error('Failed to create DM channel:', err);
     }
@@ -233,17 +263,12 @@ export function UserProfileModal() {
 
   const handleViewFriend = (friend: TaggedMutualFriend) => {
     const friendOrigin = friend._instanceOrigin || resolveUserOrigin(friend);
-    setUserOrigin(friendOrigin);
-    setUser(friend);
-    loadMutuals(friend.id, friend);
-    setActiveTab('about');
     // Update modal data so re-opening preserves context
     useUIStore.getState().openModal('userProfile', { userId: friend.id, user: friend, origin: friendOrigin });
   };
 
   const handleGoToSpace = (spaceId: string) => {
-    closeModal();
-    navigate(`/channels/${spaceId}`);
+    goTo(`/channels/${spaceId}`);
   };
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
@@ -253,9 +278,9 @@ export function UserProfileModal() {
   ];
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center animate-fade-in">
-      <div className="absolute inset-0 bg-black/50" onClick={closeModal} />
-      <div className="relative max-w-lg w-full mx-4 max-h-[calc(calc(100*var(--app-vh))-2rem)] flex flex-col glass-modal rounded-lg animate-slide-up overflow-hidden">
+    <div className={mobile ? 'flex flex-col h-full min-h-0 bg-surface-base' : 'fixed inset-0 z-[200] flex items-center justify-center animate-fade-in'}>
+      {!mobile && <div className="absolute inset-0 bg-black/50" onClick={closeModal} />}
+      <div className={mobile ? 'relative flex flex-col h-full min-h-0 overflow-hidden' : 'relative max-w-lg w-full mx-4 max-h-[calc(calc(100*var(--app-vh))-2rem)] flex flex-col glass-modal rounded-lg animate-slide-up overflow-hidden'}>
         {/* Banner */}
         <div
           className="h-[100px] flex-shrink-0 relative"
@@ -267,6 +292,7 @@ export function UserProfileModal() {
           {/* Close button */}
           <button
             onClick={closeModal}
+            aria-label={t('common:actions.back')}
             className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 flex items-center justify-center transition-colors"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="white">

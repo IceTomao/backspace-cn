@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useActivityClock } from '../../hooks/useActivityClock';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { Gamepad2 } from 'lucide-react';
@@ -6,17 +6,6 @@ import type { Activity, User } from '@backspace/shared';
 import { useActivityStore } from '../../stores/activityStore';
 
 const EMPTY_ACTIVITIES: Activity[] = [];
-
-function useActivityClock(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
-}
 
 function formatElapsed(start: number, now: number, t: TFunction<'common'>): string {
   const minutes = Math.floor(Math.max(0, now - start) / 60_000);

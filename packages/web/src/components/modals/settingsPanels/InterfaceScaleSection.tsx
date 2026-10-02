@@ -14,6 +14,8 @@ export function InterfaceScaleSection() {
     if (ui.isMobile !== wasMobile) {
       if (ui.isMobile) {
         ui.closeModal();
+        const route = window.location.pathname.match(/^\/channels\/([^/]+)\/([^/]+)$/);
+        if (route) useUIStore.setState({ mobileStack: [{ screen: 'channel-chat', params: { spaceId: route[1]!, channelId: route[2]! } }] });
         ui.pushMobileScreen('settings-appearance');
       } else {
         ui.openModal('userSettings', { tab: 'appearance' });

@@ -25,6 +25,7 @@ import { MobileGroupDmInfo } from './MobileGroupDmInfo';
 import { FriendsPage } from '../chat/FriendsPage';
 import { ExplorePage } from '../chat/ExplorePage';
 import { UserProfileModal } from '../modals/UserProfileModal';
+import type { User } from '@backspace/shared';
 import { GeneralPanel } from '../modals/instanceSettingsPanels/GeneralPanel';
 import { UpdatesPanel } from '../modals/instanceSettingsPanels/UpdatesPanel';
 import { TelemetryPanel } from '../modals/instanceSettingsPanels/TelemetryPanel';
@@ -53,7 +54,7 @@ function MobileFederationPanelWrapper() {
   );
 }
 
-const screenMap: Record<string, (params?: Record<string, string>) => React.ReactNode> = {
+const screenMap: Record<string, (params?: Record<string, string>, profileUser?: User) => React.ReactNode> = {
   'channel-chat': (params) => <MobileChatScreen params={params} />,
   'friends': () => <FriendsPage mobile />,
   'settings': () => <MobileSettingsScreen />,
@@ -112,14 +113,7 @@ const screenMap: Record<string, (params?: Record<string, string>) => React.React
   'group-dm-info': (params) => <MobileGroupDmInfo params={params} />,
   'voice-full': () => <MobileVoiceFullScreen />,
   'explore': () => <ExplorePage />,
-  'user-profile': (params) => {
-    // Open the user profile modal with the userId from params
-    if (params?.userId) {
-      // Set modalData so UserProfileModal can read it
-      useUIStore.getState().openModal('userProfile', { userId: params.userId });
-    }
-    return <UserProfileModal />;
-  },
+  'user-profile': (params, user) => <UserProfileModal mobile userId={params?.userId} origin={params?.origin} initialUser={user} />,
 };
 
 export function MobileShell() {
@@ -143,13 +137,16 @@ export function MobileShell() {
 
   // Sync browser back button with mobile stack
   useEffect(() => {
-    const handlePopState = () => {
-      if (useUIStore.getState().mobileStack.length > 0) {
-        popMobileScreen();
-      }
+    const handlePopState = (event: PopStateEvent) => useUIStore.getState().restoreMobileHistory(event.state);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && useUIStore.getState().mobileStack.at(-1)?.screen === 'user-profile') popMobileScreen();
     };
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [popMobileScreen]);
 
   const rootScreens: Record<string, React.ReactNode> = {

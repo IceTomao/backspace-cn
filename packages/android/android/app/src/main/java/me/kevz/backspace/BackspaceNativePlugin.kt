@@ -29,6 +29,7 @@ class BackspaceNativePlugin : Plugin() {
         runtime.emit = relay
     }
     override fun handleOnDestroy() {
+        runtime.setWebVisible(false)
         if (runtime.emit === relay) runtime.emit = null
         relay = null
     }
@@ -114,6 +115,7 @@ class BackspaceNativePlugin : Plugin() {
                 val data: JSONObject = call.getObject("data") ?: JSObject()
                 val result = when (call.getString("action")) {
                     "bootstrap" -> {
+                        runtime.setWebVisible(false)
                         val stored = runtime.storage()
                         runtime.restoreAudioIntent(stored)
                         JSONObject().put("settings", runtime.settings()).put("storage", stored).put("insets", runtime.insets())
@@ -135,7 +137,13 @@ class BackspaceNativePlugin : Plugin() {
                     "connect" -> { runtime.connect(data.optString("origin"), data.getString("token")); JSONObject() }
                     "disconnect" -> { runtime.disconnect(data.optString("origin")); JSONObject() }
                     "send" -> { runtime.send(data.optString("origin"), data.getJSONObject("event")); JSONObject() }
-                    "sync" -> { runtime.sync(); JSONObject() }
+                    "sync" -> { runtime.sync(data.optJSONObject("cursors") ?: JSONObject()); JSONObject() }
+                    "resync" -> { runtime.resynchronize(data.optString("origin")); JSONObject() }
+                    "webVisibility" -> { runtime.setWebVisible(data.optBoolean("visible"), data.optJSONObject("cursors") ?: JSONObject()); JSONObject() }
+                    "ackEvents" -> {
+                        data.optJSONObject("cursors")?.let { cursors -> cursors.keys().forEach { runtime.acknowledge(it, cursors.getLong(it)) } }
+                        JSONObject()
+                    }
                     "voice" -> runtime.voiceSnapshot()
                     "prepareVoice", "bluetooth" -> JSONObject()
                     "joinVoice" -> { runtime.joinVoice(data); runtime.voiceSnapshot() }
@@ -144,6 +152,14 @@ class BackspaceNativePlugin : Plugin() {
                     "hangup" -> { runtime.hangup(); runtime.voiceSnapshot() }
                     "audio" -> { runtime.audio(data); JSONObject() }
                     "device" -> { runtime.selectDevice(data.getString("id")); runtime.voiceSnapshot() }
+                    "watchStream" -> {
+                        val identity = data.getString("identity")
+                        runtime.selectStream(identity)
+                        try { activity.startActivity(Intent(activity, StreamViewerActivity::class.java).putExtra("identity", identity)) }
+                        catch (error: Exception) { runtime.stopWatching(identity); throw error }
+                        JSONObject()
+                    }
+                    "stopWatchingStream" -> { runtime.stopWatching(); JSONObject() }
                     "ackNotification" -> { runtime.ackNotification(); JSONObject() }
                     "minimize" -> { activity.moveTaskToBack(true); JSONObject() }
                     else -> error("不支持的客户端操作")

@@ -62,7 +62,11 @@ export function AndroidSettings({ serverOnly = false }: { serverOnly?: boolean }
           <input type="checkbox" disabled={busy || !settings.mediaAccess} checked={settings.mediaStatusEnabled}
             onChange={e => void setMediaStatusEnabled(e.target.checked)} />
         </label>
-        <p className="text-xs text-txt-tertiary">{t(settings.mediaAccess ? 'android.mediaAccessGranted' : 'android.mediaAccessRequired')}</p>
+        <p className="text-xs text-txt-tertiary">{t('android.mediaExplanation')}</p>
+        <p role="status" className="text-xs text-txt-tertiary">{t(!settings.mediaAccess ? 'android.mediaAccessRequired'
+          : !settings.mediaStatusEnabled ? 'android.mediaDisabled'
+          : !settings.mediaOnline ? 'android.mediaOffline'
+          : !settings.mediaActivityAllowed ? 'android.mediaActivityDisabled' : 'android.mediaAccessGranted')}</p>
         {!settings.mediaAccess && <button type="button" className="text-accent-primary underline disabled:opacity-50"
           disabled={busy} onClick={() => void openMediaAccessSettings()}>{t('android.grantMediaAccess')}</button>}
       </div>

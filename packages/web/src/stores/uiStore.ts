@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { User } from '@backspace/shared';
 import type { AnchorRect, Placement } from '../hooks/useFloatingPosition';
+import { resolveUserOrigin } from './spaceStore';
 
 type ModalType =
   | 'createSpace'
@@ -24,6 +25,7 @@ type ModalType =
 interface MobileStackEntry {
   screen: string;
   params?: Record<string, string>;
+  profileUser?: User;
 }
 
 export interface ToastAction {
@@ -87,6 +89,7 @@ interface UIState {
   setMobileTab: (tab: 'spaces' | 'dms' | 'you') => void;
   pushMobileScreen: (screen: string, params?: Record<string, string>) => void;
   popMobileScreen: () => void;
+  restoreMobileHistory: (state: unknown) => void;
 
   // Federation approval-count badge (surfaced by MobileInstancePanel; kept fresh
   // by the FederationPanel via `onApprovalCountChange` whenever an admin
@@ -116,7 +119,22 @@ export const useUIStore = create<UIState>()(
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       toggleMemberList: () => set((state) => ({ memberListOpen: !state.memberListOpen })),
 
-      openModal: (modal, data = {}) => set({ activeModal: modal, modalData: data }),
+      openModal: (modal, data = {}) => {
+        if (modal === 'userProfile' && get().isMobile) {
+          const user = data.user as User | undefined;
+          const userId = (data.userId as string | undefined) ?? user?.id;
+          if (!userId) return;
+          const entry: MobileStackEntry = { screen: 'user-profile',
+            params: { userId, origin: (data.origin as string | undefined) ?? (user ? resolveUserOrigin(user) : '') },
+            profileUser: user };
+          const stack = [...get().mobileStack, entry];
+          history.replaceState({ ...history.state, backspaceMobileStack: get().mobileStack }, '');
+          history.pushState({ ...history.state, idx: (history.state?.idx ?? 0) + 1, backspaceMobileStack: stack }, '');
+          set({ mobileStack: stack, activeModal: null, modalData: {} });
+          return;
+        }
+        set({ activeModal: modal, modalData: data });
+      },
       closeModal: () => set({ activeModal: null, modalData: {} }),
 
       setIsMobile: (isMobile) => {
@@ -139,11 +157,7 @@ export const useUIStore = create<UIState>()(
 
       openUserProfile: (user, anchor, placement = 'right') => {
         if (get().isMobile) {
-          // On mobile, push a full-screen user profile instead of a positioned popout
-          set((state) => ({
-            mobileStack: [...state.mobileStack, { screen: 'user-profile', params: { userId: user.id } }],
-          }));
-          history.pushState({ mobileScreen: 'user-profile' }, '');
+          get().openModal('userProfile', { userId: user.id, user, origin: resolveUserOrigin(user) });
         } else {
           set({ userProfilePopout: { user, anchor, placement } });
         }
@@ -188,19 +202,20 @@ export const useUIStore = create<UIState>()(
       setMobileTab: (tab) => set({ mobileScreen: tab, mobileStack: [] }),
 
       pushMobileScreen: (screen, params) => {
-        set((state) => ({
-          mobileStack: [...state.mobileStack, { screen, params }],
-        }));
-        // Sync with browser history so hardware back button works
-        history.pushState({ mobileScreen: screen }, '');
+        const stack = [...get().mobileStack, { screen, params }];
+        history.replaceState({ ...history.state, backspaceMobileStack: get().mobileStack }, '');
+        history.pushState({ ...history.state, idx: (history.state?.idx ?? 0) + 1, backspaceMobileStack: stack }, '');
+        set({ mobileStack: stack });
       },
 
       popMobileScreen: () => {
         const state = get();
         if (state.mobileStack.length === 0) return;
-        set({ mobileStack: state.mobileStack.slice(0, -1) });
-        // Note: do NOT call history.back() here if triggered by popstate event.
-        // The MobileShell popstate handler manages this — see Task 5.
+        history.back();
+      },
+      restoreMobileHistory: (state) => {
+        const stack = (state as { backspaceMobileStack?: MobileStackEntry[] } | null)?.backspaceMobileStack;
+        set({ mobileStack: Array.isArray(stack) ? stack : [] });
       },
 
       federationApprovalCount: 0,

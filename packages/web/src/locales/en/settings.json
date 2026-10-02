@@ -1,5 +1,9 @@
 {
   "android": {
+    "mediaExplanation": "This switch shares song, artist and artwork only. Also enable Share Activity Status in Privacy settings.",
+    "mediaDisabled": "Music sharing is off.",
+    "mediaOffline": "Disconnected. Music sharing resumes when online.",
+    "mediaActivityDisabled": "Share Activity Status is off. Enable it in Privacy settings.",
     "theme": "Theme", "system": "Follow system", "light": "Light", "dark": "Dark",
     "background": "Stay online in background", "server": "Server", "switch": "Switch server",
     "notifications": "Notifications", "messageNotifications": "Message notifications", "messageNotificationsDescription": "Receive messages while the app stays online in the background. Enabling this also enables background connection.", "notificationPermission": "System notification permission is off. Allow notifications and try again.",

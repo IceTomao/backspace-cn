@@ -53,6 +53,7 @@ function installServiceWorker() {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.stubGlobal('isSecureContext', true);
   vi.stubGlobal('PushManager', class PushManager {});
   requestPermission = vi.fn().mockResolvedValue('granted');
@@ -61,7 +62,7 @@ beforeEach(() => {
     static requestPermission = requestPermission;
   });
   installServiceWorker();
-  mocks.webPush.mockResolvedValue({ enabled: true, publicKey: 'server-public-key' });
+  mocks.webPush.mockResolvedValue({ enabled: true, publicKey: 'AQID' });
   mocks.subscribeWebPush.mockResolvedValue({ ok: true });
 });
 

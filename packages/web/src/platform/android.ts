@@ -10,6 +10,8 @@ export interface AndroidPreferences {
   notificationsAllowed: boolean;
   mediaStatusEnabled: boolean;
   mediaAccess: boolean;
+  mediaOnline?: boolean;
+  mediaActivityAllowed?: boolean;
   server: string;
 }
 export interface NativeVoiceState {
@@ -24,6 +26,9 @@ export interface NativeVoiceState {
   participants: { identity: string; name: string; local: boolean; muted: boolean; speaking: boolean }[];
   devices: { id: string; name: string }[];
   deviceId: string | null;
+  streams?: { identity: string; name: string; videoSid: string; audioSid?: string | null; muted: boolean }[];
+  watchingIdentity?: string | null;
+  streamSoundEnabled?: boolean;
 }
 interface NativeBridge {
   execute(options: { action: string; data: Record<string, unknown> }): Promise<unknown>;
