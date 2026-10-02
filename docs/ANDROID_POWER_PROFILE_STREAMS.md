@@ -1,6 +1,6 @@
 # 安卓后台、资料页与直播观看变更
 
-日期：2026-10-02。源码版本：1.3.20，包名 `me.kevz.backspace`。
+日期：2026-10-02。源码版本：1.3.21，包名 `me.kevz.backspace`。
 
 ## 行为
 
@@ -23,7 +23,7 @@
 
 按维护者授权，已生成并固定发行密钥，配置 GitHub Actions Secrets；本地签名 release 已构建并验证。之前自动构建使用临时 debug 签名，切换时可能需要最后卸载一次。后续本地和 CI 复用同一密钥。密钥备份及发布步骤见 [固定签名说明](ANDROID_SIGNING.md)。构建机使用独立的 Java 21 和 Android SDK 工具目录，没有修改系统默认 Java。
 
-签名构建产物：`packages/android/android/app/build/outputs/apk/release/app-release.apk`。已验证固定证书、包名 `me.kevz.backspace`、版本 `1.3.20`（1003020）、ARM64/ARMv7，未包含摄像头或屏幕录制权限。直播相关自动测试覆盖运行时和订阅/音量策略；真实 Room 重连、解码和渲染器释放仍须下述真机验收。
+签名构建产物：`packages/android/android/app/build/outputs/apk/release/app-release.apk`。发行构建校验固定证书、包名 `me.kevz.backspace`、版本 `1.3.21`（1003021）、ARM64/ARMv7，未包含摄像头或屏幕录制权限。直播相关自动测试覆盖运行时和订阅/音量策略；真实 Room 重连、解码和渲染器释放仍须下述真机验收。
 
 设备连接列表为空，以下项目尚未验收：
 
