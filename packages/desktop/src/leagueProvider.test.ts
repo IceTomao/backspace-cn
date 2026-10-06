@@ -20,6 +20,10 @@ describe('League activity fallback', () => {
       type: 'playing',
       name: 'League of Legends',
       timestamps: { start: 1760000000123 },
+      assets: {
+        largeImage: 'https://cdn.communitydragon.org/latest/profile-icon/29',
+        largeText: 'League of Legends',
+      },
     });
   });
 
