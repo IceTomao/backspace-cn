@@ -105,6 +105,23 @@ function DesktopPopover({
     return () => cancelAnimationFrame(frame);
   }, [activeTab, updatePosition]);
 
+  useEffect(() => {
+    const floating = floatingRef.current;
+    if (!floating) return;
+
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updatePosition);
+    });
+    observer.observe(floating);
+
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [updatePosition]);
+
   // Click outside to close
   useEffect(() => {
     const handler = (e: MouseEvent) => {
