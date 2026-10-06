@@ -26,13 +26,13 @@
   "dependencies": {
     "dbus-next": "0.10.2",
     "electron-updater": "^6.8.9",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",
     "@electron/rebuild": "^4.2.0",
-    "electron": "^43.7.0",
+    "electron": "^43.7.7",
     "electron-builder": "^26.15.3",
     "esbuild": "0.28.2",
     "lucide": "0.468.0",
