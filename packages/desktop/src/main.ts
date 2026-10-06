@@ -588,7 +588,18 @@ function makeUnreadBadgeIcon(count: number): Electron.NativeImage {
   const label = count > 99 ? '99+' : String(count);
   const width = label.length > 2 ? 34 : 28;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="32" viewBox="0 0 ${width} 32"><rect x="1" y="1" width="${width - 2}" height="30" rx="15" fill="#ef4444" stroke="#fff" stroke-width="2"/><text x="${width / 2}" y="21" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" fill="#fff">${label}</text></svg>`;
-  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+  return rasterizeBadgeSvg(svg);
+}
+
+function rasterizeBadgeSvg(svg: string): Electron.NativeImage {
+  try {
+    const rendered = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+    if (rendered.isEmpty()) return nativeImage.createEmpty();
+    const png = rendered.toPNG();
+    return png.length > 0 ? nativeImage.createFromBuffer(png) : nativeImage.createEmpty();
+  } catch {
+    return nativeImage.createEmpty();
+  }
 }
 
 function makeTrayBadgeIcon(count: number): Electron.NativeImage {
@@ -604,7 +615,7 @@ function makeTrayBadgeIcon(count: number): Electron.NativeImage {
   const badgeX = width - badgeWidth;
   const basePng = base.resize({ width, height }).toPNG().toString('base64');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="data:image/png;base64,${basePng}" width="${width}" height="${height}"/><rect x="${badgeX}" y="0" width="${badgeWidth}" height="${badgeHeight}" rx="${badgeHeight / 2}" fill="#ef4444" stroke="#fff" stroke-width="1"/><text x="${badgeX + badgeWidth / 2}" y="${badgeHeight * 0.73}" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="${label.length > 2 ? 6 : 7}" font-weight="700" fill="#fff">${label}</text></svg>`;
-  const badge = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+  const badge = rasterizeBadgeSvg(svg);
   return badge.isEmpty() ? base : badge;
 }
 

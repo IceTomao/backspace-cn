@@ -101,7 +101,7 @@ export function requestNotificationPermission(): Promise<boolean> {
 
 export function updateBadgeCount(count: number): void {
   if (isElectron()) {
-    window.backspace!.setBadgeCount(count);
+    window.backspace?.setBadgeCount?.(count);
   }
 }
 

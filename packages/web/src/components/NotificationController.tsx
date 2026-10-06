@@ -137,6 +137,7 @@ export function NotificationController() {
 
   // Badge count (Electron only)
   useEffect(() => {
+    updateBadgeCount(useChatStore.getState().unreadChannels.size);
     const unsubscribe = useChatStore.subscribe((state) => {
       updateBadgeCount(state.unreadChannels.size);
     });
