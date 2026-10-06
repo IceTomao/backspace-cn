@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "games": [
     { "id": "cs2", "name": "Counter-Strike 2", "processes": ["cs2.exe", "cs2"] },
     { "id": "dota2", "name": "Dota 2", "processes": ["dota2.exe", "dota2"] },
@@ -34,7 +34,7 @@
     { "id": "balatro", "name": "Balatro", "processes": ["Balatro.exe", "Balatro"] },
     { "id": "lethal-company", "name": "Lethal Company", "processes": ["Lethal Company.exe"] },
     { "id": "palworld", "name": "Palworld", "processes": ["Palworld-Win64-Shipping.exe"] },
-    { "id": "elden-ring", "name": "Elden Ring", "processes": ["eldenring.exe", "start_protected_game.exe"] },
+    { "id": "elden-ring", "name": "Elden Ring", "processes": ["eldenring.exe"] },
     { "id": "cyberpunk", "name": "Cyberpunk 2077", "processes": ["Cyberpunk2077.exe"] },
     { "id": "bg3", "name": "Baldur's Gate 3", "processes": ["bg3.exe", "bg3_dx11.exe"] },
     { "id": "rdr2", "name": "Red Dead Redemption 2", "processes": ["RDR2.exe"] },
@@ -226,6 +226,7 @@
     { "id": "no-rest-for-the-wicked", "name": "No Rest for the Wicked", "processes": ["NoRestForTheWicked-Win64-Shipping.exe"] },
     { "id": "once-human", "name": "Once Human", "processes": ["OnceHuman.exe"] },
     { "id": "neverness-to-everness", "name": "异环", "processes": ["NTE-Win64-Shipping.exe", "NTEGame.exe"] },
+    { "id": "vermintide-2", "name": "Warhammer: Vermintide 2", "processes": ["vermintide2.exe", "vermintide2_dx12.exe"], "platformIds": { "steam": "552500" } },
     { "id": "throne-and-liberty", "name": "Throne and Liberty", "processes": ["TLClient.exe"] },
     { "id": "deadlock", "name": "Deadlock", "processes": ["project8.exe", "deadlock"] },
     { "id": "marvel-rivals", "name": "Marvel Rivals", "processes": ["MarvelRivals-Win64-Shipping.exe"] },

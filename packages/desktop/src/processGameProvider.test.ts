@@ -104,11 +104,37 @@ describe('ProcessGameProvider', () => {
       id: 're2', name: 'Resident Evil 2', processes: ['re2.exe'], type: 'playing', platformIds: { steam: '883710' },
     }];
     provider.installedGames = [{
-      id: 'steam:883710', name: 'Resident Evil 2', installDir: 'D:\\Steam\\RE2', platform: 'steam', iconPath: 'D:\\Steam\\re2.ico',
+      id: 'steam:883710', name: 'RESIDENT EVIL 2 / Biohazard RE:2', installDir: 'D:\\Steam\\RE2', platform: 'steam', iconPath: 'D:\\Steam\\re2.ico',
     }];
     const candidates = provider.candidates({ processes: [{
       pid: 1, name: 're2.exe', path: 'D:\\Steam\\RE2\\re2.exe', startedAt: 10, hasWindow: true,
     }] });
     expect(candidates[0]?.iconPath).toBe('D:\\Steam\\re2.ico');
+    expect(candidates[0]?.name).toBe('RESIDENT EVIL 2 / Biohazard RE:2');
+  });
+
+  it('does not classify a generic protected-game launcher as Elden Ring', () => {
+    const provider = new ProcessGameProvider() as any;
+    provider.entries = [{
+      id: 'elden-ring', name: 'Elden Ring', processes: ['eldenring.exe'], type: 'playing',
+    }];
+    provider.installedGames = [];
+
+    provider.applySnapshot({ processes: [{ pid: 1, name: 'start_protected_game.exe', hasWindow: true }] });
+
+    expect(provider.getActivities()).toEqual([]);
+  });
+
+  it('recognizes Vermintide 2 by its actual game process', () => {
+    const provider = new ProcessGameProvider() as any;
+    provider.entries = [{
+      id: 'vermintide-2', name: 'Warhammer: Vermintide 2',
+      processes: ['vermintide2.exe', 'vermintide2_dx12.exe'], type: 'playing',
+    }];
+    provider.installedGames = [];
+
+    provider.applySnapshot({ processes: [{ pid: 1, name: 'vermintide2.exe', hasWindow: true }] });
+
+    expect(provider.getActivities()[0]).toMatchObject({ name: 'Warhammer: Vermintide 2' });
   });
 });

@@ -134,7 +134,7 @@ not representative of Linux behaviour).
 |---------|---------------|------|
 | `backspace` | `build: .` | The application server. Binds `./data:/app/data` (DB + uploads + backups), reads `.env`, sets `DB_PATH=/app/data/backspace.db` and `UPLOAD_DIR=/app/data/uploads`. `restart: unless-stopped`. |
 | `caddy` | `caddy:2.11.1-alpine` | Reverse proxy with automatic HTTPS. Owns ports 80/443. `depends_on: backspace` with `condition: service_healthy`. |
-| `livekit` | `livekit/livekit-server:v1.9.11` | Voice/video SFU. `network_mode: host`. Activated only when `COMPOSE_PROFILES=voice`. |
+| `livekit` | `livekit/livekit-server:v1.13.7` | Voice/video SFU. `network_mode: host`. Activated only when `COMPOSE_PROFILES=voice`. |
 
 **Health-gated startup.** The `backspace` service declares a healthcheck that polls `/api/health` (a route registered in `packages/server/src/index.ts`) every 30 s with a 30 s `start_period`. Caddy does not start proxying until the app reports healthy, so a deploy never routes traffic to a half-initialized server. The same healthcheck is duplicated in the `Dockerfile` `HEALTHCHECK` directive so the container reports health even when run outside Compose.
 
@@ -393,7 +393,7 @@ The third-party images are **pinned to explicit tags** in `docker-compose.yml`, 
 | Service | Pinned image |
 |---------|--------------|
 | `caddy` | `caddy:2.11.1-alpine` |
-| `livekit` | `livekit/livekit-server:v1.9.11` |
+| `livekit` | `livekit/livekit-server:v1.13.7` |
 
 Pinning makes deploys reproducible — a rebuild pulls the exact same proxy/SFU version every time, so an upstream release can't silently change behavior under you.
 

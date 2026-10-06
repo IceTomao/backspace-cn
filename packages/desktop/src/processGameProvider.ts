@@ -21,7 +21,7 @@ const VALID_TYPES = new Set<DesktopActivity['type']>(['playing', 'listening', 'w
 const POLL_INTERVAL_MS = 3_000;
 const CATALOG_REFRESH_MS = 10 * 60_000;
 const REMOTE_URL = 'https://raw.githubusercontent.com/IceTomao/backspace-cn/master/packages/desktop/resources/games.json';
-const NON_GAME_PROCESS = /(?:launcher|crash(?:pad|report)?|unins|uninstall|setup|easyanticheat|battleye|redist|redistributable|helper|dedicated.?server)/i;
+const NON_GAME_PROCESS = /(?:launcher|crash(?:pad|report)?|unins|uninstall|setup|easyanticheat|battleye|redist|redistributable|helper|dedicated.?server|start_protected_game)/i;
 
 export function parseGameEntry(input: unknown): GameEntry | null {
   if (!input || typeof input !== 'object') return null;
@@ -194,7 +194,7 @@ export class ProcessGameProvider implements ActivityProvider {
             || matches.some((running) => running.path && isPathInside(running.path, game.installDir));
         });
         candidates.push({
-          identity: `dictionary:${entry.id}`, name: entry.name, type: entry.type ?? 'playing',
+          identity: `dictionary:${entry.id}`, name: installed?.name ?? entry.name, type: entry.type ?? 'playing',
           processes: matches, iconUrl: entry.iconUrl, iconPath: installed?.iconPath,
         });
       }
@@ -208,7 +208,7 @@ export class ProcessGameProvider implements ActivityProvider {
       const platformId = game.id.split(':').slice(1).join(':');
       const dictionary = this.entries.find((entry) => entry.platformIds?.[game.platform] === platformId);
       candidates.push({
-        identity, name: dictionary?.name ?? game.name, type: dictionary?.type ?? 'playing',
+        identity, name: game.name, type: dictionary?.type ?? 'playing',
         processes: matches, iconUrl: dictionary?.iconUrl, iconPath: game.iconPath,
       });
     }

@@ -78,7 +78,7 @@ services:
   # ── LiveKit voice/video server ────────────────────────────
   # Activated by COMPOSE_PROFILES=voice in .env
   livekit:
-    image: livekit/livekit-server:v1.9.11
+    image: livekit/livekit-server:v1.13.7
     container_name: livekit
     restart: unless-stopped
     network_mode: host

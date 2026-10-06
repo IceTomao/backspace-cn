@@ -578,6 +578,10 @@ function createTray(): void {
       mainWindow?.focus();
     }
   });
+
+  // The renderer can publish the unread count before the tray exists.
+  // Apply the pending state once the base icon has been loaded.
+  if (unreadBadgeCount > 0) updateUnreadBadge(unreadBadgeCount);
 }
 
 function makeUnreadBadgeIcon(count: number): Electron.NativeImage {
@@ -587,6 +591,23 @@ function makeUnreadBadgeIcon(count: number): Electron.NativeImage {
   return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
 }
 
+function makeTrayBadgeIcon(count: number): Electron.NativeImage {
+  const base = baseTrayIcon ?? loadTrayIcon();
+  if (base.isEmpty()) return base;
+
+  const size = base.getSize();
+  const width = Math.max(16, size.width);
+  const height = Math.max(16, size.height);
+  const label = count > 99 ? '99+' : String(count);
+  const badgeWidth = label.length > 2 ? Math.max(14, Math.round(width * 0.9)) : Math.max(11, Math.round(width * 0.72));
+  const badgeHeight = Math.max(10, Math.round(height * 0.72));
+  const badgeX = width - badgeWidth;
+  const basePng = base.resize({ width, height }).toPNG().toString('base64');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="data:image/png;base64,${basePng}" width="${width}" height="${height}"/><rect x="${badgeX}" y="0" width="${badgeWidth}" height="${badgeHeight}" rx="${badgeHeight / 2}" fill="#ef4444" stroke="#fff" stroke-width="1"/><text x="${badgeX + badgeWidth / 2}" y="${badgeHeight * 0.73}" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="${label.length > 2 ? 6 : 7}" font-weight="700" fill="#fff">${label}</text></svg>`;
+  const badge = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+  return badge.isEmpty() ? base : badge;
+}
+
 function updateUnreadBadge(count: number): void {
   unreadBadgeCount = Math.max(0, Math.min(9999, Math.floor(Number.isFinite(count) ? count : 0)));
   if (app.setBadgeCount) app.setBadgeCount(unreadBadgeCount);
@@ -594,7 +615,10 @@ function updateUnreadBadge(count: number): void {
     const overlay = unreadBadgeCount > 0 ? makeUnreadBadgeIcon(unreadBadgeCount) : null;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setOverlayIcon(overlay, unreadBadgeCount > 0 ? `未读消息：${unreadBadgeCount}` : '');
     if (tray && !tray.isDestroyed()) {
-      tray.setImage(unreadBadgeCount > 0 ? makeUnreadBadgeIcon(unreadBadgeCount) : (baseTrayIcon ?? loadTrayIcon()));
+      // Never replace the application icon with a badge-only image. Older
+      // Windows builds also reject SVG tray images, so makeTrayBadgeIcon
+      // falls back to the original icon when composition is unavailable.
+      tray.setImage(unreadBadgeCount > 0 ? makeTrayBadgeIcon(unreadBadgeCount) : (baseTrayIcon ?? loadTrayIcon()));
       tray.setToolTip(unreadBadgeCount > 0 ? `Backspace（未读消息：${unreadBadgeCount}）` : 'Backspace');
     }
   }
