@@ -9,6 +9,7 @@ import type { CallFanoutFailure } from '../../../utils/federationOutbox.js';
 import type { DmRoomMeta, FederatedCallEntry } from '../../../ws/handler.js';
 import type { DmCallUndeliverableFailure, FederationRelayEvent, ServerEvent } from '@backspace/shared';
 import { extractDomain, resolveLocalUser, resolveOrCreateReplicatedUser, verifyAttribution } from '../identity.js';
+import { dmChannelMembers, mayRelayInto, memberWithIdentity } from '../dmChannels.js';
 
 export function processDmCallStartEvent(
   event: FederationRelayEvent,
@@ -447,8 +448,14 @@ export function processDmTypingStartEvent(
     return;
   }
 
+  const members = dmChannelMembers(channel.id, db);
+  if (!memberWithIdentity(members, event.typing) || !mayRelayInto(members, event.typing, sourceInstance)) {
+    accepted.push(event.messageId);
+    return;
+  }
+
   // Resolve the typing user (read-only — don't create stubs for ephemeral events)
-  const typingUser = resolveLocalUser(event.typing.homeUserId, db);
+  const typingUser = resolveLocalUser(event.typing.homeUserId, db, event.typing.homeInstance);
   if (!typingUser) {
     // User stub doesn't exist — discard silently
     accepted.push(event.messageId);
@@ -508,8 +515,14 @@ export function processDmTypingStopEvent(
     return;
   }
 
+  const members = dmChannelMembers(channel.id, db);
+  if (!memberWithIdentity(members, event.typing) || !mayRelayInto(members, event.typing, sourceInstance)) {
+    accepted.push(event.messageId);
+    return;
+  }
+
   // Resolve the typing user (read-only)
-  const typingUser = resolveLocalUser(event.typing.homeUserId, db);
+  const typingUser = resolveLocalUser(event.typing.homeUserId, db, event.typing.homeInstance);
   if (!typingUser) {
     accepted.push(event.messageId);
     return;

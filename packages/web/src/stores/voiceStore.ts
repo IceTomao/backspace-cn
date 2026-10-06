@@ -78,6 +78,8 @@ interface VoiceState {
   setSoundEffectVolume: (volume: number) => void;
   messageSoundAllChannels: boolean;          // false (default) = DM + mention only; true = every channel
   setMessageSoundAllChannels: (allChannels: boolean) => void;
+  pipEnabled: boolean;
+  setPipEnabled: (enabled: boolean) => void;
   streamAttenuationEnabled: boolean;        // global toggle, default true
   streamAttenuationStrength: number;        // 0-100, default 50
   setStreamVolume: (userId: string, volume: number) => void;
@@ -227,6 +229,8 @@ export const useVoiceStore = create<VoiceState>()(
       setSoundEffectVolume: (volume) => set({ soundEffectVolume: volume }),
       messageSoundAllChannels: false,
       setMessageSoundAllChannels: (allChannels) => set({ messageSoundAllChannels: allChannels }),
+      pipEnabled: true,
+      setPipEnabled: (enabled) => set({ pipEnabled: enabled }),
 
       // Stream widget state
       streamVolumes: new Map(),
@@ -764,7 +768,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: 'backspace-voice-settings',
-      version: 14,
+      version: 15,
       migrate: (persistedState: any, version: number) => {
         if (version === 0) {
           persistedState.streamAttenuationEnabled = false;
@@ -854,6 +858,7 @@ export const useVoiceStore = create<VoiceState>()(
         rnnoiseEnabled: state.rnnoiseEnabled,
         soundEffectVolume: state.soundEffectVolume,
         messageSoundAllChannels: state.messageSoundAllChannels,
+        pipEnabled: state.pipEnabled,
         streamAttenuationEnabled: state.streamAttenuationEnabled,
         streamAttenuationStrength: state.streamAttenuationStrength,
         // Per-user preferences (Map → plain object for JSON)

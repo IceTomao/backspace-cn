@@ -130,6 +130,7 @@ export function PictureInPicture() {
   const currentChannelId = useChatStore((s) => s.currentChannelId);
   const voiceFullscreen = useUIStore((s) => s.voiceFullscreen);
   const pipCollapsed = useUIStore((s) => s.pipCollapsed);
+  const pipEnabled = useVoiceStore((s) => s.pipEnabled);
   const setPipCollapsed = useUIStore((s) => s.setPipCollapsed);
   const channelToSpaceMap = useSpaceStore((s) => s.channelToSpaceMap);
   const channels = useSpaceStore((s) => s.channels);
@@ -158,7 +159,7 @@ export function PictureInPicture() {
   const isInServerVoice = currentVoiceChannelId !== null && currentChannelId !== currentVoiceChannelId;
   const isInDmCall = activeDmCall !== null && currentChannelId !== activeDmCall.dmChannelId;
   const wouldShow = (isInServerVoice || isInDmCall) && !voiceFullscreen;
-  const shouldShow = wouldShow && !pipCollapsed;
+  const shouldShow = wouldShow && !pipCollapsed && pipEnabled;
 
   // Reset pipCollapsed when wouldShow transitions false → true
   // (user navigated away from voice channel view → PiP reappears)

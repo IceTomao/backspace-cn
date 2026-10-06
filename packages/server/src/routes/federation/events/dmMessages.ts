@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { getDb, schema } from '../../../db/index.js';
 import { computeFederatedId } from '../../../utils/federationOutbox.js';
+import { normalizeOriginForCompare } from '../../../utils/federationAuth.js';
 import { deleteAttachmentFiles } from '../../../utils/fileCleanup.js';
 import { sanitizeUser } from '../../../utils/sanitize.js';
 import { generateSnowflake } from '../../../utils/snowflake.js';
@@ -8,7 +9,7 @@ import { connectionManager } from '../../../ws/handler.js';
 import { getDmMessageWithUser } from '../../dm.js';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import type { FederationRelayEvent } from '@backspace/shared';
-import { buildDmChannelPayload, buildDmMessagePayload, findOrCreateDmChannel, isUrlFromPeer, resolveLocalDmMessage } from '../dmChannels.js';
+import { buildDmChannelPayload, buildDmMessagePayload, dmChannelMembers, findOrCreateDmChannel, isUrlFromPeer, mayRelayInto, resolveLocalDmMessage } from '../dmChannels.js';
 import { extractDomain, resolveLocalUser, resolveOrCreateReplicatedUser, verifyAttribution } from '../identity.js';
 import { hydrateReplicatedUserProfile } from '../profile.js';
 
@@ -37,6 +38,23 @@ export async function processCreateEvent(
     return;
   }
 
+  // Existing group conversations may only accept a relay from a participant's
+  // home instance, authored by a participant. Check before resolving profiles
+  // or creating replicated stubs so rejected events have no identity side effects.
+  if (event.federatedId) {
+    const existingChannel = db.select({ id: schema.dmChannels.id })
+      .from(schema.dmChannels)
+      .where(and(eq(schema.dmChannels.federatedId, event.federatedId), isNull(schema.dmChannels.deletedAt)))
+      .get();
+    if (existingChannel && !mayRelayInto(dmChannelMembers(existingChannel.id, db), event.message, sourceInstance)) {
+      rejected.push({ messageId: event.messageId, reason: 'invalid_target' });
+      return;
+    }
+  } else if (event.participants.length !== 2) {
+    rejected.push({ messageId: event.messageId, reason: 'invalid_participants' });
+    return;
+  }
+
   // Dedup: check for existing message with same source
   const existingMsg = db
     .select()
@@ -60,6 +78,7 @@ export async function processCreateEvent(
   const resolvedParticipants: Array<{
     localUser: typeof schema.users.$inferSelect;
     homeUserId: string;
+    homeInstance: string;
   }> = [];
 
   for (const p of event.participants) {
@@ -70,7 +89,7 @@ export async function processCreateEvent(
     if (p.profile) {
       localUser = await hydrateReplicatedUserProfile(localUser, p.profile, db);
     }
-    resolvedParticipants.push({ localUser, homeUserId: p.homeUserId });
+    resolvedParticipants.push({ localUser, homeUserId: p.homeUserId, homeInstance: p.homeInstance });
   }
 
   if (resolvedParticipants.length < 2) {
@@ -80,12 +99,14 @@ export async function processCreateEvent(
 
   // Find the author among the resolved participants
   const authorEntry = resolvedParticipants.find(
-    p => p.homeUserId === event.message!.homeUserId,
+    p => p.homeUserId === event.message!.homeUserId &&
+      normalizeOriginForCompare(p.homeInstance) === normalizeOriginForCompare(event.message!.homeInstance),
   );
   if (!authorEntry) {
     rejected.push({ messageId: event.messageId, reason: 'author_not_found' });
     return;
   }
+
   const authorUser = authorEntry.localUser;
 
   // Resolve local DM channel: group DMs carry a federatedId and the channel
@@ -120,6 +141,12 @@ export async function processCreateEvent(
       [resolvedParticipants[0]!.localUser.id, resolvedParticipants[1]!.localUser.id],
       db,
     );
+  }
+
+  const members = dmChannelMembers(localDmChannelId, db);
+  if (!mayRelayInto(members, event.message, sourceInstance)) {
+    rejected.push({ messageId: event.messageId, reason: 'invalid_target' });
+    return;
   }
 
   // Insert the message
@@ -451,8 +478,14 @@ export function processReactionAddEvent(
     return;
   }
 
+  const conversationMembers = dmChannelMembers(localMsg.dmChannelId, db);
+  if (!mayRelayInto(conversationMembers, event.reaction, sourceInstance)) {
+    rejected.push({ messageId: event.messageId, reason: 'invalid_target' });
+    return;
+  }
+
   // Resolve the reacting user
-  const reactingUser = resolveLocalUser(event.reaction.homeUserId, db);
+  const reactingUser = resolveLocalUser(event.reaction.homeUserId, db, event.reaction.homeInstance);
   if (!reactingUser) {
     rejected.push({ messageId: event.messageId, reason: 'user_not_found' });
     return;
@@ -540,8 +573,14 @@ export function processReactionRemoveEvent(
     return;
   }
 
+  const conversationMembers = dmChannelMembers(localMsg.dmChannelId, db);
+  if (!mayRelayInto(conversationMembers, event.reaction, sourceInstance)) {
+    rejected.push({ messageId: event.messageId, reason: 'invalid_target' });
+    return;
+  }
+
   // Resolve the reacting user
-  const reactingUser = resolveLocalUser(event.reaction.homeUserId, db);
+  const reactingUser = resolveLocalUser(event.reaction.homeUserId, db, event.reaction.homeInstance);
   if (!reactingUser) {
     rejected.push({ messageId: event.messageId, reason: 'user_not_found' });
     return;

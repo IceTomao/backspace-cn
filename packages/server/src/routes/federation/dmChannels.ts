@@ -1,5 +1,5 @@
 import { getDb, schema } from '../../db/index.js';
-import { getOurOrigin } from '../../utils/federationAuth.js';
+import { getOurOrigin, normalizeOriginForCompare } from '../../utils/federationAuth.js';
 import { sanitizeUser } from '../../utils/sanitize.js';
 import { generateSnowflake } from '../../utils/snowflake.js';
 import { connectionManager } from '../../ws/handler.js';
@@ -220,4 +220,54 @@ export function resolveLocalDmMessage(
       ),
     )
     .get();
+}
+
+export interface DmMemberIdentity {
+  id: string;
+  homeUserId: string | null;
+  homeInstance: string | null;
+}
+
+export function dmChannelMembers(channelId: string, db: ReturnType<typeof getDb>): DmMemberIdentity[] {
+  return db.select({
+    id: schema.users.id,
+    homeUserId: schema.users.homeUserId,
+    homeInstance: schema.users.homeInstance,
+  })
+    .from(schema.dmMembers)
+    .innerJoin(schema.users, eq(schema.dmMembers.userId, schema.users.id))
+    .where(eq(schema.dmMembers.dmChannelId, channelId))
+    .all();
+}
+
+export function memberWithIdentity(
+  members: readonly DmMemberIdentity[],
+  identity: { homeUserId: string; homeInstance: string },
+): DmMemberIdentity | undefined {
+  const origin = normalizeOriginForCompare(identity.homeInstance);
+  if (!origin) return undefined;
+  return members.find((member) =>
+    (member.homeUserId || member.id) === identity.homeUserId &&
+    normalizeOriginForCompare(member.homeInstance || getOurOrigin()) === origin,
+  );
+}
+
+export function isRelayTarget(members: readonly DmMemberIdentity[], sourceInstance: string): boolean {
+  const source = normalizeOriginForCompare(sourceInstance);
+  return Boolean(source && members.some((member) =>
+    normalizeOriginForCompare(member.homeInstance || getOurOrigin()) === source,
+  ));
+}
+
+export function mayRelayInto(
+  members: readonly DmMemberIdentity[],
+  actor: { homeUserId: string; homeInstance: string },
+  sourceInstance: string,
+): boolean {
+  const actorOrigin = normalizeOriginForCompare(actor.homeInstance);
+  const ourOrigin = normalizeOriginForCompare(getOurOrigin());
+  return Boolean(
+    memberWithIdentity(members, actor) &&
+    (isRelayTarget(members, sourceInstance) || (actorOrigin && actorOrigin === ourOrigin)),
+  );
 }

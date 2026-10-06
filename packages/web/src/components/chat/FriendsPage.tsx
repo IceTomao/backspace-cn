@@ -20,6 +20,7 @@ import { getAvatarGradient } from '../../utils/gradients';
 import { api } from '../../api/client';
 import { Mascot } from '../ui/Mascot';
 import { useActivityStore } from '../../stores/activityStore';
+import { EmojiText } from '../ui/EmojiText';
 import { ActivityCard, hasRichActivity, getActivityAccentClass } from '../ui/ActivityCard';
 import { getPrimaryActivity } from '@backspace/shared/src/activities.js';
 import { parseFederatedUsername, isFederationGlobeApplicable } from '../../utils/identity';
@@ -830,7 +831,7 @@ function UserDiscoverCard({
         </button>
 
         {user.bio && (
-          <p className="text-[12px] text-txt-secondary line-clamp-2 mt-1.5 flex-1">{user.bio}</p>
+          <p className="text-[12px] text-txt-secondary line-clamp-2 mt-1.5 flex-1"><EmojiText>{user.bio}</EmojiText></p>
         )}
         {!user.bio && <div className="flex-1" />}
 

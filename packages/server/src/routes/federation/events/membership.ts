@@ -8,6 +8,7 @@ import { connectionManager } from '../../../ws/handler.js';
 import { GROUP_DM_NAME_MAX_LENGTH, GROUP_DM_NAME_MIN_LENGTH } from '@backspace/shared/src/constants.js';
 import { and, eq, inArray, or } from 'drizzle-orm';
 import type { DmChannel, DmMessageWithUser, FederationRelayEvent } from '@backspace/shared';
+import { dmChannelMembers, mayRelayInto, memberWithIdentity } from '../dmChannels.js';
 import { extractDomain, resolveLocalUser, resolveOrCreateReplicatedUser, verifyAttribution } from '../identity.js';
 import { downloadProfileAsset, processProfileUpdateEvent } from '../profile.js';
 
@@ -130,6 +131,15 @@ export async function processMemberAddEvent(
   if (!channel) {
     rejected.push({ messageId: event.messageId, reason: 'channel_not_found' });
     return;
+  }
+
+  if (!bootstrapped) {
+    const members = dmChannelMembers(channel.id, db);
+    const adder = event.membership.addedBy ? memberWithIdentity(members, event.membership.addedBy) : undefined;
+    if (!channel.ownerId || !adder || !mayRelayInto(members, event.membership.addedBy!, sourceInstance)) {
+      rejected.push({ messageId: event.messageId, reason: 'unauthorized_source' });
+      return;
+    }
   }
 
   // Authority note: any HMAC-verified peer can relay member_add events.
@@ -352,8 +362,15 @@ export function processMemberRemoveEvent(
     return;
   }
 
-  const localUser = resolveLocalUser(event.membership.user.homeUserId, db);
+  const localUser = resolveLocalUser(event.membership.user.homeUserId, db, event.membership.user.homeInstance);
   if (!localUser) {
+    accepted.push(event.messageId);
+    return;
+  }
+
+  const members = dmChannelMembers(channel.id, db);
+  const targetMember = memberWithIdentity(members, event.membership.user);
+  if (!targetMember || (event.membership.reason === 'leave' && !mayRelayInto(members, event.membership.user, sourceInstance))) {
     accepted.push(event.messageId);
     return;
   }
@@ -539,7 +556,7 @@ export function processOwnershipTransferEvent(
   });
 
   const prevOwnerLocal = event.ownership.previousOwner
-    ? resolveLocalUser(event.ownership.previousOwner.homeUserId, db)
+    ? resolveLocalUser(event.ownership.previousOwner.homeUserId, db, event.ownership.previousOwner.homeInstance)
     : null;
   const ownerSysMsgId = generateSnowflake();
   const ownerSysCreatedAt = Date.now();

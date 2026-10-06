@@ -9,6 +9,7 @@ import { Avatar } from '../ui/Avatar';
 import { useCanonicalUserView } from '../../utils/userViewLookup';
 import { useUIStore } from '../../stores/uiStore';
 import { ArrowLeft, Search } from 'lucide-react';
+import { renderEmojiShortcodes } from '../../utils/emojiShortcodes';
 import type { MessageWithUser, DmMessageWithUser, User } from '@backspace/shared';
 
 type AnyMessage = MessageWithUser | DmMessageWithUser;
@@ -42,7 +43,7 @@ function highlightMatch(text: string, query: string): React.ReactNode {
   return parts.map((part, i) =>
     part.toLowerCase() === query.toLowerCase()
       ? <mark key={i} className="bg-accent-primary/30 text-txt-primary rounded-sm px-0.5">{part}</mark>
-      : part
+      : renderEmojiShortcodes(part)
   );
 }
 

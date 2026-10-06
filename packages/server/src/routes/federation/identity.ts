@@ -165,13 +165,13 @@ export function verifyAttribution(
 
 
 /**
- * Resolve a home user ID to a local user.
- * Matches users where home_user_id = homeUserId, or where
- * the user's own id equals homeUserId and they have no home_instance set (local user).
+ * Resolve a federated identity to a local user. When the origin is provided,
+ * both fields are required to match because homeUserId is only instance-unique.
  */
 export function resolveLocalUser(
   homeUserId: string,
   db: ReturnType<typeof getDb>,
+  homeInstance?: string,
 ): typeof schema.users.$inferSelect | undefined {
   const candidates = db
     .select()
@@ -186,6 +186,22 @@ export function resolveLocalUser(
       ),
     )
     .all();
+
+  if (homeInstance) {
+    const wantedOrigin = normalizeOriginForCompare(homeInstance);
+    if (!wantedOrigin) return undefined;
+    const matches = candidates.filter((user) => {
+      const userOrigin = normalizeOriginForCompare(user.homeInstance || getOurOrigin());
+      return userOrigin === wantedOrigin;
+    });
+    if (matches.length === 0) return undefined;
+    if (wantedOrigin === normalizeOriginForCompare(getOurOrigin())) {
+      const nativeMatch = matches.find((user) => user.id === homeUserId && !user.homeInstance);
+      if (nativeMatch) return nativeMatch;
+    }
+    if (matches.length === 1) return matches[0];
+    return matches.find((user) => user.homeUserId === homeUserId) ?? matches[0];
+  }
 
   // Prefer non-deleted active users; if multiple, prefer the one with homeUserId set
   // (replicated user) over a local user match
@@ -213,7 +229,7 @@ export function findFederatedUser(
   hints?: { username?: string | null },
 ): typeof schema.users.$inferSelect | undefined {
   // Tier 1: fast path — existing resolveLocalUser logic
-  const fastMatch = resolveLocalUser(homeUserId, db);
+  const fastMatch = resolveLocalUser(homeUserId, db, homeInstance);
   if (fastMatch) return fastMatch;
 
   // Tier 2: domain + username hint match

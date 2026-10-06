@@ -1,5 +1,6 @@
 import { useActivityClock } from '../../hooks/useActivityClock';
 import { useTranslation } from 'react-i18next';
+import { EmojiText } from './EmojiText';
 import type { TFunction } from 'i18next';
 import { Gamepad2 } from 'lucide-react';
 import type { Activity, User } from '@backspace/shared';
@@ -48,11 +49,11 @@ export function ProfileActivityDetails({ user }: { user: User }) {
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-medium leading-[1.35] text-txt-primary break-words">
                   {isMusic
-                    ? tSocial('profile.activity.listening', { name: activity.name })
-                    : tSocial('profile.activity.playing', { name: activity.name })}
+                    ? <><EmojiText>{tSocial('profile.activity.listening', { name: activity.name })}</EmojiText></>
+                    : <><EmojiText>{tSocial('profile.activity.playing', { name: activity.name })}</EmojiText></>}
                 </div>
-                {activity.details && <div className="text-[13px] leading-[1.35] text-txt-secondary break-words">{activity.details}</div>}
-                {activity.state && <div className="text-[12px] leading-[1.35] text-txt-tertiary break-words">{activity.state}</div>}
+                {activity.details && <div className="text-[13px] leading-[1.35] text-txt-secondary break-words"><EmojiText>{activity.details}</EmojiText></div>}
+                {activity.state && <div className="text-[12px] leading-[1.35] text-txt-tertiary break-words"><EmojiText>{activity.state}</EmojiText></div>}
                 {activity.timestamps?.start && (
                   <div className="mt-0.5 text-[11px] leading-[1.35] text-txt-tertiary">
                     {formatElapsed(activity.timestamps.start, now, tCommon)}

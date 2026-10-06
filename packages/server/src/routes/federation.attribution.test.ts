@@ -22,6 +22,7 @@ vi.mock('../utils/federationAuth.js', async (importActual) => {
 });
 
 import { verifyAttribution, extractDomain } from './federation.js';
+import { resolveLocalUser } from './federation/identity.js';
 
 function applyMigrations(db: Database.Database): void {
   const dir = path.resolve(__dirname, '../../drizzle');
@@ -174,5 +175,23 @@ describe('extractDomain', () => {
   it('strips http:// prefix and port via URL constructor', () => {
     // URL.hostname strips port — extractDomain returns bare hostname
     expect(extractDomain('http://localhost:3000')).toBe('localhost');
+  });
+});
+
+describe('resolveLocalUser identity scoping', () => {
+  it('resolves colliding home user IDs only within the asserted instance', () => {
+    seedNativeUser('shared-id');
+    testDb.insert(schema.users).values({
+      id: 'orbit-row', username: 'kim@orbit.ddns.net', passwordHash: '!federation-replicated',
+      isAdmin: 0, homeUserId: 'shared-id', homeInstance: 'orbit.ddns.net', createdAt: Date.now(),
+    } as typeof schema.users.$inferInsert).run();
+    testDb.insert(schema.users).values({
+      id: 'vault-row', username: 'kim@vault.ddns.net', passwordHash: '!federation-replicated',
+      isAdmin: 0, homeUserId: 'shared-id', homeInstance: 'vault.ddns.net', createdAt: Date.now(),
+    } as typeof schema.users.$inferInsert).run();
+
+    expect(resolveLocalUser('shared-id', testDb, 'https://orbit.ddns.net')?.id).toBe('orbit-row');
+    expect(resolveLocalUser('shared-id', testDb, 'nova.ddns.net')?.id).toBe('shared-id');
+    expect(resolveLocalUser('shared-id', testDb, 'https://unknown.ddns.net')).toBeUndefined();
   });
 });

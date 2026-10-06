@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next';
 import { Gamepad2 } from 'lucide-react';
 import { useActivityClock } from '../../hooks/useActivityClock';
 import { useTranslation } from 'react-i18next';
+import { EmojiText } from './EmojiText';
 
 interface ActivityCardProps {
   activities: Activity[];
@@ -48,14 +49,14 @@ export function ActivityCard({ activities, fallbackCustomStatus }: ActivityCardP
 
   if (!primary) {
     if (fallbackCustomStatus) {
-      return <div className="text-[11px] leading-[1.3] text-txt-tertiary truncate">{fallbackCustomStatus}</div>;
+      return <div className="text-[11px] leading-[1.3] text-txt-tertiary truncate"><EmojiText>{fallbackCustomStatus}</EmojiText></div>;
     }
     return null;
   }
 
   // Custom status — plain text, no card treatment
   if (primary.type === 'custom') {
-    return <div className="text-[11px] leading-[1.3] text-txt-tertiary truncate">{primary.name}</div>;
+    return <div className="text-[11px] leading-[1.3] text-txt-tertiary truncate"><EmojiText>{primary.name}</EmojiText></div>;
   }
 
   const music = primary.type === 'listening' ? null : activities.find((activity) => activity.type === 'listening');
@@ -76,10 +77,10 @@ export function ActivityCard({ activities, fallbackCustomStatus }: ActivityCardP
         )}
         <div className="min-w-0">
           <div className="text-[11px] leading-[1.3] text-txt-secondary truncate">
-            {primary.name}
+            <EmojiText>{primary.name}</EmojiText>
           </div>
-          {primary.details && <div className="text-[10px] leading-[1.3] text-txt-primary truncate">{primary.details}</div>}
-          {primary.state && <div className="text-[10px] leading-[1.3] text-txt-tertiary truncate">{primary.state}</div>}
+          {primary.details && <div className="text-[10px] leading-[1.3] text-txt-primary truncate"><EmojiText>{primary.details}</EmojiText></div>}
+          {primary.state && <div className="text-[10px] leading-[1.3] text-txt-tertiary truncate"><EmojiText>{primary.state}</EmojiText></div>}
         </div>
       </div>
       {primary.timestamps?.start && (

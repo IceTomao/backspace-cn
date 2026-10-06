@@ -4,8 +4,10 @@ import { useFormatters } from '../../i18n/formatters';
 import { describeError } from '../../i18n/errors';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import { remarkEmojiShortcodes } from '../../utils/emojiShortcodes';
 import type { User } from '@backspace/shared';
 import { Avatar } from '../ui/Avatar';
+import { EmojiText } from '../ui/EmojiText';
 import { Username } from '../ui/Username';
 import { ProfileActivityDetails } from '../ui/ProfileActivityDetails';
 import { useUIStore } from '../../stores/uiStore';
@@ -324,7 +326,7 @@ export function UserProfileModal({ mobile = false, userId: pageUserId, origin: p
             </div>
             {user.customStatus && (
               <div className="text-[13px] text-txt-secondary italic mt-1">
-                {user.customStatus}
+                <EmojiText>{user.customStatus}</EmojiText>
               </div>
             )}
           </div>
@@ -367,6 +369,7 @@ export function UserProfileModal({ mobile = false, userId: pageUserId, origin: p
                   </span>
                   <div className="text-[13px] text-txt-secondary mt-1 whitespace-pre-wrap break-words leading-relaxed [&_strong]:font-semibold [&_strong]:text-txt-primary [&_em]:italic [&_a]:text-accent-primary [&_a]:underline">
                     <ReactMarkdown
+                      remarkPlugins={[remarkEmojiShortcodes]}
                       allowedElements={['p', 'strong', 'em', 'a', 'br']}
                       unwrapDisallowed
                       components={{

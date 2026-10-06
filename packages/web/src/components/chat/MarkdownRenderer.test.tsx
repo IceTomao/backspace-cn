@@ -40,6 +40,12 @@ const MIXED = [
 ].join('\n');
 
 describe('MarkdownRenderer', () => {
+  it('renders emoji shortcodes in text while preserving inline code', () => {
+    const { container } = render(<MarkdownRenderer content={'hi :smile: `:heart:`'} />);
+    expect(container.textContent).toContain('😄');
+    expect(container.textContent).toContain(':heart:');
+  });
+
   it('renders every element of a mixed markdown message', () => {
     const { container } = render(<MarkdownRenderer content={MIXED} />);
 

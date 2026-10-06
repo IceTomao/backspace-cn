@@ -11,6 +11,7 @@ import {
   type ContextMenuItem,
 } from '../../stores/contextMenuStore';
 import { useUIStore } from '../../stores/uiStore';
+import { EmojiText } from '../ui/EmojiText';
 
 export type DmMemberRowAction = 'profile' | 'transfer' | 'kick' | 'remove-friend';
 
@@ -224,7 +225,7 @@ export function DmMemberRow({
 
         {!isOffline && canonical.customStatus && (
           <div className="text-[11px] leading-[1.3] text-txt-tertiary truncate">
-            {canonical.customStatus}
+            <EmojiText>{canonical.customStatus}</EmojiText>
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { Avatar } from '../ui/Avatar';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { parseFederatedUsername } from '../../utils/identity';
+import { EmojiText } from '../ui/EmojiText';
 
 export function MobileYouScreen() {
   const { t } = useTranslation(['mobile', 'settings', 'common', 'admin']);
@@ -110,10 +111,10 @@ export function MobileYouScreen() {
             return <div className="text-[10px] leading-[1.3] text-txt-tertiary opacity-60">{t('mobile:you.homeInstance', { domain })}</div>;
           })()}
           {user.customStatus && (
-            <p className="text-sm text-txt-secondary mt-1">{user.customStatus}</p>
+            <p className="text-sm text-txt-secondary mt-1"><EmojiText>{user.customStatus}</EmojiText></p>
           )}
           {user.bio && (
-            <p className="text-sm text-txt-message mt-2 whitespace-pre-wrap">{user.bio}</p>
+            <p className="text-sm text-txt-message mt-2 whitespace-pre-wrap"><EmojiText>{user.bio}</EmojiText></p>
           )}
         </div>
       </div>

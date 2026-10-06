@@ -7,6 +7,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FederationRelayEvent } from '@backspace/shared';
 import { buildDmChannelPayload } from '../dmChannels.js';
 import { extractDomain, resolveLocalUser, verifyAttribution } from '../identity.js';
+import { dmChannelMembers, mayRelayInto, memberWithIdentity } from '../dmChannels.js';
 
 export function processFileRejectedEvent(
   event: FederationRelayEvent,
@@ -258,8 +259,14 @@ export function processReadStateUpdateEvent(
     return;
   }
 
+  const members = dmChannelMembers(channel.id, db);
+  if (!memberWithIdentity(members, event.readState.user) || !mayRelayInto(members, event.readState.user, sourceInstance)) {
+    rejected.push({ messageId: event.messageId, reason: 'invalid_target' });
+    return;
+  }
+
   // Resolve the user locally
-  const localUser = resolveLocalUser(event.readState.user.homeUserId, db);
+  const localUser = resolveLocalUser(event.readState.user.homeUserId, db, event.readState.user.homeInstance);
   if (!localUser) {
     rejected.push({ messageId: event.messageId, reason: 'user_not_found' });
     return;
@@ -364,8 +371,14 @@ export function processDmCloseEvent(
     return;
   }
 
+  const members = dmChannelMembers(channel.id, db);
+  if (!memberWithIdentity(members, event.dmCloseReopen) || !mayRelayInto(members, event.dmCloseReopen, sourceInstance)) {
+    accepted.push(event.messageId);
+    return;
+  }
+
   // Resolve the user locally
-  const localUser = resolveLocalUser(event.dmCloseReopen.homeUserId, db);
+  const localUser = resolveLocalUser(event.dmCloseReopen.homeUserId, db, event.dmCloseReopen.homeInstance);
   if (!localUser) {
     // User not found locally — silently accept
     accepted.push(event.messageId);
@@ -440,8 +453,14 @@ export function processDmReopenEvent(
     return;
   }
 
+  const members = dmChannelMembers(channel.id, db);
+  if (!memberWithIdentity(members, event.dmCloseReopen) || !mayRelayInto(members, event.dmCloseReopen, sourceInstance)) {
+    accepted.push(event.messageId);
+    return;
+  }
+
   // Resolve the user locally
-  const localUser = resolveLocalUser(event.dmCloseReopen.homeUserId, db);
+  const localUser = resolveLocalUser(event.dmCloseReopen.homeUserId, db, event.dmCloseReopen.homeInstance);
   if (!localUser) {
     // User not found locally — silently accept
     accepted.push(event.messageId);

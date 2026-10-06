@@ -4,6 +4,7 @@ import { File, Image as ImageIcon, Link2, Music2, Paperclip, Video } from 'lucid
 import { useTranslation } from 'react-i18next';
 import { serverUrl } from '../../platform/android';
 import { MentionBadge } from './MentionBadge';
+import { EmojiText } from '../ui/EmojiText';
 
 const GIF_URL_REGEX = /^https:\/\/(?:media\.tenor\.com|static\.klipy\.com)\/.+$/;
 
@@ -31,7 +32,7 @@ function attachmentKind(mimetype: string): ReplyPreviewKind {
 function renderInlineWithMentions(content: string) {
   return content.split(/(<@[a-zA-Z0-9_-]+>)/g).map((part, index) => {
     const match = /^<@([a-zA-Z0-9_-]+)>$/.exec(part);
-    return match ? <MentionBadge key={index} userId={match[1]!} /> : part;
+    return match ? <MentionBadge key={index} userId={match[1]!} /> : <EmojiText key={index}>{part}</EmojiText>;
   });
 }
 

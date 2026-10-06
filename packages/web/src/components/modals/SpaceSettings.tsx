@@ -9,10 +9,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { Avatar } from '../ui/Avatar';
 import { api } from '../../api/client';
 import { hasPermissionBit, PermissionBits } from '../../utils/permissions';
-import { OverviewPanel } from './spaceSettingsPanels/OverviewPanel';
-import { MembersPanel } from './spaceSettingsPanels/MembersPanel';
-import { RolesPanel } from './spaceSettingsPanels/RolesPanel';
-import { BansPanel } from './spaceSettingsPanels/BansPanel';
+import { OverviewPanel, MembersPanel, RolesPanel, BansPanel, SettingsPanelSuspense } from './lazySettingsPanels';
 import { useVisibilityOptions } from './spaceSettingsPanels/spaceOptions';
 import type { SpaceVisibility, JoinRequest } from '@backspace/shared';
 
@@ -394,11 +391,13 @@ export function SpaceSettingsModal() {
                   {t('spaces:settings.title')}
                 </button>
               )}
-              {tab === 'overview' && <OverviewPanel spaceId={currentSpaceId} />}
-              {tab === 'discovery' && canManageSpace && <DiscoveryPanel spaceId={currentSpaceId} />}
-              {tab === 'members' && <MembersPanel spaceId={currentSpaceId} />}
-              {tab === 'roles' && canManageRoles && <RolesPanel spaceId={currentSpaceId} />}
-              {tab === 'bans' && canBanMembers && <BansPanel spaceId={currentSpaceId} />}
+              <SettingsPanelSuspense>
+                {tab === 'overview' && <OverviewPanel spaceId={currentSpaceId} />}
+                {tab === 'discovery' && canManageSpace && <DiscoveryPanel spaceId={currentSpaceId} />}
+                {tab === 'members' && <MembersPanel spaceId={currentSpaceId} />}
+                {tab === 'roles' && canManageRoles && <RolesPanel spaceId={currentSpaceId} />}
+                {tab === 'bans' && canBanMembers && <BansPanel spaceId={currentSpaceId} />}
+              </SettingsPanelSuspense>
             </div>
           </div>
         )}

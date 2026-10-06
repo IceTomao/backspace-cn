@@ -3,8 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { useFormatters } from '../../i18n/formatters';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import { remarkEmojiShortcodes } from '../../utils/emojiShortcodes';
 import type { User } from '@backspace/shared';
 import { Avatar } from '../ui/Avatar';
+import { EmojiText } from './EmojiText';
 import { Username } from '../ui/Username';
 import { ProfileActivityDetails } from './ProfileActivityDetails';
 import { useSpaceStore, getApiForOrigin, resolveUserOrigin } from '../../stores/spaceStore';
@@ -181,7 +183,7 @@ export function UserProfilePopout({ user: propUser, onClose, anchor, placement =
           </div>
           {user.customStatus && (
             <div className="text-[13px] text-txt-secondary italic mt-1">
-              {user.customStatus}
+              <EmojiText>{user.customStatus}</EmojiText>
             </div>
           )}
         </div>
@@ -196,6 +198,7 @@ export function UserProfilePopout({ user: propUser, onClose, anchor, placement =
               </span>
               <div className="text-[13px] text-txt-secondary mt-1 whitespace-pre-wrap break-words leading-relaxed [&_strong]:font-semibold [&_strong]:text-txt-primary [&_em]:italic [&_a]:text-accent-primary [&_a]:underline">
                 <ReactMarkdown
+                  remarkPlugins={[remarkEmojiShortcodes]}
                   allowedElements={['p', 'strong', 'em', 'a', 'br']}
                   unwrapDisallowed
                   components={{

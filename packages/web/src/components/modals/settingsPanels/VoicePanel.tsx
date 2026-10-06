@@ -7,6 +7,7 @@ import { AudioInputSection } from './AudioInputSection';
 import { AudioOutputSection } from './AudioOutputSection';
 import { isAndroid } from '../../../platform/android';
 import { AndroidAudioSettings } from '../../android/AndroidAudioSettings';
+import { useUIStore } from '../../../stores/uiStore';
 
 export function VoicePanel() {
   const { t } = useTranslation(['settings']);
@@ -21,6 +22,9 @@ export function VoicePanel() {
   const setSoundEffectVolume = useVoiceStore((s) => s.setSoundEffectVolume);
   const messageSoundAllChannels = useVoiceStore((s) => s.messageSoundAllChannels);
   const setMessageSoundAllChannels = useVoiceStore((s) => s.setMessageSoundAllChannels);
+  const pipEnabled = useVoiceStore((s) => s.pipEnabled);
+  const setPipEnabled = useVoiceStore((s) => s.setPipEnabled);
+  const isMobile = useUIStore((s) => s.isMobile);
   if (isAndroid()) return <AndroidAudioSettings />; // i18n-check: allow-literal (code between JSX branches)
 
   return (
@@ -63,6 +67,19 @@ export function VoicePanel() {
           </div>
         </div>
       </div>
+
+      {!isMobile && <div>
+        <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">{t('settings:voice.pip.sectionTitle')}</div>
+        <div className="rounded-lg bg-white/[0.03] border border-white/[0.04] p-3.5">
+          <div className="flex items-center justify-between py-2">
+            <div>
+              <div className="text-sm text-txt-primary">{t('settings:voice.pip.showOnSwitch.label')}</div>
+              <div className="text-xs text-txt-tertiary">{t('settings:voice.pip.showOnSwitch.description')}</div>
+            </div>
+            <Toggle enabled={pipEnabled} onChange={setPipEnabled} />
+          </div>
+        </div>
+      </div>}
 
       <VideoSection />
 
