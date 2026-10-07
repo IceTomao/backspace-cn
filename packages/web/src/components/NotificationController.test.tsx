@@ -8,6 +8,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useSpaceStore } from '../stores/spaceStore';
 import { useChatStore } from '../stores/chatStore';
 import { useUIStore } from '../stores/uiStore';
+import { useChannelNotificationStore } from '../stores/channelNotificationStore';
 
 vi.mock('../audio/AudioManager', () => ({ AudioManager: { getInstance: () => ({}) } }));
 
@@ -51,6 +52,7 @@ beforeEach(() => {
   });
   useChatStore.setState({ realtimeMessageEvents: [] });
   useUIStore.setState({ isMobile: false, mobileStack: [] });
+  useChannelNotificationStore.setState({ mutedChannels: new Set(), loaded: true });
 });
 
 afterEach(() => {
@@ -142,7 +144,7 @@ describe('notification clicks', () => {
     expect(view.getByTestId('route')).toHaveTextContent('/channels/remote-space/remote-chat');
   });
 
-  it('does not notify for ordinary channel messages without a mention', () => {
+  it('notifies for ordinary channel messages without a mention', () => {
     const oldEvents = [{ channelId: 'remote-chat', message: { id: 'old' } as MessageWithUser }];
     useChatStore.setState({ realtimeMessageEvents: oldEvents });
     mount();
@@ -151,7 +153,7 @@ describe('notification clicks', () => {
       channelId: 'remote-chat',
       message: { id: 'ordinary', channelId: 'remote-chat', userId: 'other', content: 'Hello' } as MessageWithUser,
     }] }));
-    expect(BrowserNotification.instances).toHaveLength(0);
+    expect(BrowserNotification.instances).toHaveLength(1);
   });
 
   it('still notifies for a direct message', () => {
@@ -164,5 +166,18 @@ describe('notification clicks', () => {
       message: { id: 'dm-new', channelId: 'dm', userId: 'other', content: 'Hello' } as MessageWithUser,
     }] }));
     expect(BrowserNotification.instances).toHaveLength(1);
+  });
+
+  it('does not notify for a muted channel', () => {
+    useChannelNotificationStore.setState({ mutedChannels: new Set(['remote-chat']) });
+    const oldEvents = [{ channelId: 'remote-chat', message: { id: 'old' } as MessageWithUser }];
+    useChatStore.setState({ realtimeMessageEvents: oldEvents });
+    mount();
+    act(() => vi.advanceTimersByTime(1000));
+    act(() => useChatStore.setState({ realtimeMessageEvents: [...oldEvents, {
+      channelId: 'remote-chat',
+      message: { id: 'muted', channelId: 'remote-chat', userId: 'other', content: 'Hello' } as MessageWithUser,
+    }] }));
+    expect(BrowserNotification.instances).toHaveLength(0);
   });
 });

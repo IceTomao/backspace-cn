@@ -11,10 +11,9 @@ import {
   syncWebPushSubscription,
   updateBadgeCount,
 } from '../platform/notifications';
-import { useSpaceStore, getMyUserIdForOrigin, isDmChannel } from '../stores/spaceStore';
+import { useSpaceStore, getMyUserIdForOrigin } from '../stores/spaceStore';
 import { useUIStore } from '../stores/uiStore';
 import { useChannelNotificationStore } from '../stores/channelNotificationStore';
-import { shouldPlayMessageSound } from '../utils/notificationFilters';
 import { renderEmojiShortcodes } from '../utils/emojiShortcodes';
 
 /**
@@ -118,14 +117,6 @@ export function NotificationController() {
           const myIds = new Set([currentUser?.id, currentUser?.homeUserId].filter((id): id is string => Boolean(id)));
           const localId = getMyUserIdForOrigin(channelOriginMap.get(message.channelId) ?? '');
           if (message.userId === localId) continue;
-          if (!shouldPlayMessageSound({
-            authorUserId: message.userId,
-            myIds,
-            isDmChannel: isDmChannel(message.channelId),
-            content: message.content,
-            allChannels: false,
-          })) continue;
-
           const displayName = message.user?.displayName || message.user?.username || '新消息';
           const body = message.content
             ? message.content.replace(/[*_~`>#\-\[\]]/g, '').slice(0, 100)

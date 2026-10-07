@@ -111,4 +111,25 @@ describe('sendWebPushToUsers', () => {
     });
     await vi.waitFor(() => expect(mocks.db.delete).toHaveBeenCalledOnce());
   });
+
+  it('does not send notifications to users who muted the channel', () => {
+    mocks.mutedUsers = [{ userId: 'recipient' }];
+    sendWebPushToUsers(['recipient'], {
+      id: 'message-id',
+      title: 'Message',
+      body: 'Body',
+      channelId: 'channel-id',
+    });
+    expect(mocks.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it('sends an ordinary channel message to an unmuted recipient', () => {
+    sendWebPushToUsers(['recipient'], {
+      id: 'message-id',
+      title: 'Message',
+      body: 'Body without a mention',
+      channelId: 'channel-id',
+    });
+    expect(mocks.sendNotification).toHaveBeenCalledOnce();
+  });
 });

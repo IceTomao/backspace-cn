@@ -287,9 +287,7 @@ function handleMessageCreate(event: Record<string, unknown>, userId: string): vo
       .from(schema.spaceMembers).where(eq(schema.spaceMembers.spaceId, spaceId)).all()
       .map((member) => member.userId)
       .filter((memberId) => memberId !== userId && hasPermission(memberId, spaceId, PermissionBits.VIEW_CHANNEL, channelId));
-    // Public channel messages notify only members explicitly mentioned. DMs
-    // use broadcastDmMessage and keep their normal notification behavior.
-    sendWebPushToUsers(memberIds.filter((memberId) => content.includes(`<@${memberId}>`)), {
+    sendWebPushToUsers(memberIds, {
       id: messageId,
       title: sender?.displayName || sender?.username || '新消息',
       body: content.trim(),
