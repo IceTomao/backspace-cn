@@ -171,7 +171,9 @@
     "backToMenu": "Zurück zum Einstellungsmenü"
   },
   "appearance": {
-    "title": "Darstellung"
+    "title": "Darstellung",
+    "theme": "Design",
+    "themeMode": { "system": "Systemeinstellung", "light": "Hell", "dark": "Dunkel" }
   },
   "account": {
     "title": "Mein Konto",

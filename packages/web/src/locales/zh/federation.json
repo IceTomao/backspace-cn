@@ -132,9 +132,9 @@
     "description": "配置联合中继、机密轮换和管理对等实例。",
     "relay": {
       "title": "中继设置：",
-      "description": "控制联合实例之间的DM中继。启用后，对等实例上具有用户的DM将被中继到服务器。",
+      "description": "控制联合实例之间的私信中继。启用后，对等实例上具有用户的私信将被中继到服务器。",
       "enable": {
-        "label": "启用DM中继",
+        "label": "启用私信中继",
         "description": "将直接消息中继到对等实例和从对等实例中继"
       },
       "autoAccept": {
@@ -156,7 +156,7 @@
       "unreachable": "無法觸及",
       "rejected": "已拒绝（自动对等连接被拒绝）",
       "rejectedShort": "已拒绝",
-      "revoked": "已撤消",
+      "revoked": "已撤销",
       "awaitingApproval": "等待审批",
       "needsAttention": "需要注意"
     },
@@ -171,7 +171,7 @@
     },
     "views": {
       "active": "活跃",
-      "revoked": "已撤消"
+      "revoked": "已撤销"
     },
     "peer": {
       "revokedMeta": "已撤销： {{revoked}} ·对等： {{peered}}",
@@ -211,7 +211,7 @@
       "subscriber": {
         "friendAdd": "添加好友：{{target}}",
         "spaceJoin": "想要加入{{target}}",
-        "directMessage": "想要DM {{target}}"
+        "directMessage": "想要私信{{target}}"
       },
       "approve": "批准",
       "deny": "拒绝",
@@ -235,7 +235,7 @@
     "resetCleanup": {
       "title": "重置清理",
       "peerReset": "{{name}}已重置",
-      "peerResetDescription": "此域上正在运行一个新实例。重新建立联盟，以治愈陈旧的友谊和DM。",
+      "peerResetDescription": "此域上正在运行一个新实例。重新建立联盟，以修复陈旧的好友关系和私信。",
       "repeer": "重新连接",
       "resetToast": "{{host}}已重置—联盟需要重新建立",
       "repeerIncomplete": "重新连接未完成：{{name}}仍保留旧连接。对方管理员需要先重置连接，然后再次尝试。",
@@ -299,7 +299,7 @@
         },
         "reset": {
           "title": "重置对等体",
-          "description": "使用{{name}}重置对等？这将删除本地对等记录和所有挂起的发件箱条目。您必须在重置后重新启动与远程管理员的对等连接。此操作无法撤消。",
+          "description": "使用{{name}}重置对等？这将删除本地对等记录和所有挂起的发件箱条目。您必须在重置后重新启动与远程管理员的对等连接。此操作无法撤销。",
           "confirm": "一键复原"
         }
       }

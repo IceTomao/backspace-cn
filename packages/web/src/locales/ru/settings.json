@@ -171,7 +171,9 @@
     "backToMenu": "Назад к меню настроек"
   },
   "appearance": {
-    "title": "Оформление"
+    "title": "Оформление",
+    "theme": "Тема",
+    "themeMode": { "system": "Как в системе", "light": "Светлая", "dark": "Тёмная" }
   },
   "account": {
     "title": "Моя учётная запись",

@@ -913,7 +913,7 @@ function TabButton({ children, active, onClick }: { children: React.ReactNode, a
     <button
       onClick={onClick}
       className={`px-2 py-0.5 rounded-[4px] text-[16px] font-medium transition-colors ${
-        active ? 'bg-interactive-selected text-white' : 'text-txt-tertiary hover:bg-interactive-hover hover:text-txt-secondary'
+        active ? 'bg-interactive-selected text-txt-selected' : 'text-txt-tertiary hover:bg-interactive-hover hover:text-txt-secondary'
       }`}
     >
       {children}

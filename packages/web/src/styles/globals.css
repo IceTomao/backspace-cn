@@ -20,6 +20,7 @@
 
 @layer base {
   :root {
+    color-scheme: dark;
     --interface-scale: 1;
     --titlebar-inset: 0px;
     --safe-bottom: calc(env(safe-area-inset-bottom, 0px) / var(--interface-scale));
@@ -71,6 +72,11 @@
     --text-tertiary: 92 92 104;
     --text-category: 72 72 84;
     --text-message: 216 216 222;
+    --text-username: 216 216 222;
+    --text-username-owner: 253 164 175;
+    --text-selected: 255 255 255;
+    --selection-indicator: 255 255 255;
+    --surface-selected: 37 37 48;
     --text-link: 125 211 252;
     --text-positive: 134 239 172;
     --text-warning: 252 211 77;
@@ -80,6 +86,7 @@
     --interactive-hover: rgba(255, 255, 255, 0.06);
     --interactive-active: rgba(255, 255, 255, 0.12);
     --interactive-selected: rgba(255, 255, 255, 0.16);
+    --interactive-message-hover: rgba(255, 255, 255, 0.025);
     --interactive-muted: 58 58 68;
 
     /* ── Status ── */
@@ -98,6 +105,66 @@
     --notification: 253 164 175;
   }
 
+  @media (forced-colors: none) {
+    :root[data-color-scheme="light"] {
+      color-scheme: light;
+      --bg-base: 239 243 248;
+      --bg-channel: 232 237 244;
+      --bg-chat: 247 249 252;
+      --bg-members: 242 246 250;
+      --bg-elevated: 255 255 255;
+      --bg-input: 255 255 255;
+      --bg-overlay: rgba(23, 29, 38, 0.42);
+
+      --border-hard: 209 218 228;
+      --border-soft: 225 231 239;
+
+      --accent-mint: 20 112 76;
+      --accent-peach: 168 60 54;
+      --accent-lavender: 112 65 167;
+      --accent-sky: 22 103 151;
+      --accent-amber: 145 94 0;
+      --accent-rose: 175 46 73;
+      --accent-coral: 173 74 16;
+
+      --accent-primary: 96 79 190;
+      --accent-primary-hover: 80 64 169;
+      --accent-primary-active: 68 53 151;
+
+      --text-primary: 34 39 47;
+      --text-secondary: 77 84 95;
+      --text-tertiary: 105 113 125;
+      --text-category: 95 103 115;
+      --text-message: 42 47 55;
+      --text-username: 42 47 55;
+      --text-username-owner: 175 46 73;
+      --text-selected: 34 39 47;
+      --selection-indicator: 96 79 190;
+      --surface-selected: 236 233 250;
+      --text-link: 24 91 157;
+      --text-positive: 20 112 76;
+      --text-warning: 145 94 0;
+      --text-danger: 175 46 73;
+
+      --interactive-hover: rgba(44, 61, 82, 0.055);
+      --interactive-active: rgba(44, 61, 82, 0.095);
+      --interactive-selected: rgba(96, 79, 190, 0.12);
+      --interactive-message-hover: rgba(44, 61, 82, 0.035);
+      --interactive-muted: 178 189 202;
+
+      --status-online: 22 128 82;
+      --status-idle: 160 110 6;
+      --status-dnd: 188 52 65;
+      --status-offline: 137 145 157;
+
+      --glass-bg: rgba(255, 255, 255, 0.98);
+      --glass-modal-bg: rgba(255, 255, 255, 0.995);
+      --glass-border: rgba(46, 62, 82, 0.12);
+      --glass-highlight: rgba(255, 255, 255, 0.95);
+      --notification: 188 52 65;
+    }
+  }
+
   html[data-platform="android"] {
     --app-height: calc(100 * var(--app-dvh));
   }
@@ -110,6 +177,13 @@
   ::selection {
     background: rgba(134, 239, 172, 0.25);
     color: rgb(var(--text-primary));
+  }
+
+  @media (forced-colors: none) {
+    :root[data-color-scheme="light"] ::selection {
+      background: rgba(96, 79, 190, 0.18);
+      color: rgb(var(--text-primary));
+    }
   }
 
   html, body, #root {
@@ -165,6 +239,87 @@
     -webkit-text-fill-color: #ffffff;
     -webkit-box-shadow: 0 0 0px 1000px #111118 inset;
     transition: background-color 5000s ease-in-out 0s;
+  }
+
+  @media (forced-colors: none) {
+    :root[data-color-scheme="light"] input:-webkit-autofill,
+    :root[data-color-scheme="light"] input:-webkit-autofill:hover,
+    :root[data-color-scheme="light"] input:-webkit-autofill:focus {
+      -webkit-text-fill-color: rgb(var(--text-primary));
+      -webkit-box-shadow: 0 0 0 1000px rgb(var(--bg-input)) inset;
+    }
+  }
+
+  @media (forced-colors: none) {
+    :root[data-color-scheme="light"] ::-webkit-scrollbar-thumb {
+      background-color: rgb(188 198 210);
+    }
+    :root[data-color-scheme="light"] ::-webkit-scrollbar-thumb:hover {
+      background-color: rgb(155 169 186);
+    }
+
+    :root[data-color-scheme="light"] :is(.input-standard, .input-search, .input-danger) {
+      border-color: rgb(var(--border-soft));
+      box-shadow: 0 1px 2px rgba(36, 52, 72, 0.045);
+    }
+
+    :root[data-color-scheme="light"] :is(.border-white\/\[0\.06\], .border-white\/\[0\.08\], .border-white\/10) {
+      border-color: rgb(var(--border-soft));
+    }
+
+    :root[data-color-scheme="light"] :is(.shadow-header, .shadow-elevation-low) {
+      box-shadow: 0 1px 2px rgba(36, 52, 72, 0.045);
+    }
+
+    :root[data-color-scheme="light"] :is(.shadow-elevation-high, .shadow-glass) {
+      box-shadow: 0 12px 32px rgba(36, 52, 72, 0.14);
+    }
+
+    :root[data-color-scheme="light"] .shadow-input {
+      box-shadow: 0 1px 3px rgba(36, 52, 72, 0.09);
+    }
+
+    :root[data-color-scheme="light"] .glass {
+      box-shadow: 0 10px 28px rgba(36, 52, 72, 0.14), inset 0 1px 0 var(--glass-highlight);
+    }
+    :root[data-color-scheme="light"] .glass-bubble {
+      box-shadow: 0 8px 24px rgba(36, 52, 72, 0.13), inset 0 1px 0 var(--glass-highlight);
+    }
+    :root[data-color-scheme="light"] .glass-modal {
+      box-shadow: 0 16px 44px rgba(36, 52, 72, 0.18), inset 0 1px 0 var(--glass-highlight);
+    }
+    :root[data-color-scheme="light"] .glass-pill {
+      background: var(--interactive-hover);
+      border-color: var(--glass-border);
+      box-shadow: none;
+    }
+    :root[data-color-scheme="light"] .glass-pill:hover {
+      background: var(--interactive-active);
+      border-color: rgba(46, 62, 82, 0.18);
+    }
+    :root[data-color-scheme="light"] .glass-pill-mine {
+      background: rgba(20, 112, 76, 0.09);
+      border-color: rgba(20, 112, 76, 0.24);
+      box-shadow: none;
+    }
+    :root[data-color-scheme="light"] .glass-pill-mine:hover {
+      background: rgba(20, 112, 76, 0.14);
+    }
+
+    :root[data-color-scheme="light"] .emoji-picker-wrapper em-emoji-picker {
+      --rgb-background: 255, 255, 255;
+      --rgb-input: 247, 249, 252;
+      --rgb-color: 34, 39, 47;
+      --color-border: rgba(46, 62, 82, 0.12);
+      --color-border-over: rgba(46, 62, 82, 0.20);
+      --em-rgb-background: 255, 255, 255;
+      --em-rgb-input: 247, 249, 252;
+      --em-rgb-color: 34, 39, 47;
+      --em-color-border: rgba(46, 62, 82, 0.12);
+      --em-color-border-over: rgba(46, 62, 82, 0.20);
+      --em-rgb-accent: 96, 79, 190;
+      --rgb-accent: 96, 79, 190;
+    }
   }
 }
 

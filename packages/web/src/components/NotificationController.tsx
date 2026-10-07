@@ -11,9 +11,11 @@ import {
   syncWebPushSubscription,
   updateBadgeCount,
 } from '../platform/notifications';
-import { useSpaceStore, getMyUserIdForOrigin } from '../stores/spaceStore';
+import { useSpaceStore, getMyUserIdForOrigin, isDmChannel } from '../stores/spaceStore';
 import { useUIStore } from '../stores/uiStore';
 import { useChannelNotificationStore } from '../stores/channelNotificationStore';
+import { shouldPlayMessageSound } from '../utils/notificationFilters';
+import { renderEmojiShortcodes } from '../utils/emojiShortcodes';
 
 /**
  * Headless component that bridges store events to native OS notifications and badge counts.
@@ -113,18 +115,27 @@ export function NotificationController() {
           if (deliveredEventIds.current.size > 200) deliveredEventIds.current.delete(deliveredEventIds.current.values().next().value as string);
           if (webPushActive.current) continue;
           const { channelToSpaceMap, channelOriginMap } = useSpaceStore.getState();
-          if (message.userId !== getMyUserIdForOrigin(channelOriginMap.get(message.channelId) ?? '')) {
-            const displayName = message.user?.displayName || message.user?.username || 'Someone';
-            const body = message.content
-              ? message.content.replace(/[*_~`>#\-\[\]]/g, '').slice(0, 100)
-              : 'Sent an attachment';
-            sendNotification(displayName, body, {
-              channelId: message.channelId,
-              spaceId: channelToSpaceMap.get(message.channelId),
-              userId: currentUser?.id,
-            });
-            break; // one notification per batch
-          }
+          const myIds = new Set([currentUser?.id, currentUser?.homeUserId].filter((id): id is string => Boolean(id)));
+          const localId = getMyUserIdForOrigin(channelOriginMap.get(message.channelId) ?? '');
+          if (message.userId === localId) continue;
+          if (!shouldPlayMessageSound({
+            authorUserId: message.userId,
+            myIds,
+            isDmChannel: isDmChannel(message.channelId),
+            content: message.content,
+            allChannels: false,
+          })) continue;
+
+          const displayName = message.user?.displayName || message.user?.username || '新消息';
+          const body = message.content
+            ? message.content.replace(/[*_~`>#\-\[\]]/g, '').slice(0, 100)
+            : '发送了一个附件';
+          sendNotification(renderEmojiShortcodes(displayName), renderEmojiShortcodes(body), {
+            channelId: message.channelId,
+            spaceId: channelToSpaceMap.get(message.channelId),
+            userId: currentUser?.id,
+          });
+          break; // one notification per batch
         }
       }
     });

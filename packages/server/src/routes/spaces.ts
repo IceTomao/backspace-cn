@@ -4,7 +4,7 @@ import { eq, and, inArray } from 'drizzle-orm';
 import { getDb, getRawDb, schema } from '../db/index.js';
 import { authenticate } from '../utils/auth.js';
 import { generateSnowflake } from '../utils/snowflake.js';
-import { isMember, isSpaceOwner, isBanned, hasPermission, computePermissions, PermissionBits } from '../utils/permissions.js';
+import { isMember, isSpaceOwner, isBanned, hasPermission, computePermissions, PermissionBits, canManageRole, canGrantPermissions, getHighestManageableRolePosition } from '../utils/permissions.js';
 import { DEFAULT_EVERYONE_PERMISSIONS, ALL_PERMISSIONS, permissionsToString } from '@backspace/shared/src/permissions.js';
 import crypto from 'crypto';
 import { connectionManager } from '../ws/handler.js';
@@ -833,6 +833,11 @@ export async function spaceRoutes(app: FastifyInstance): Promise<void> {
       return sendError(reply, 404, 'member_not_found');
     }
 
+    const actorRolePosition = getHighestManageableRolePosition(id, request.userId);
+    if (!isSpaceOwner(id, request.userId) && getHighestManageableRolePosition(id, uid) >= actorRolePosition) {
+      return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES (仅限管理低于自身层级的成员)' });
+    }
+
     // Validate all roleIds belong to this server and are not @everyone
     if (roleIds.length > 0) {
       const spaceRoles = db.select()
@@ -848,6 +853,9 @@ export async function spaceRoutes(app: FastifyInstance): Promise<void> {
         }
         if (roleId === id) {
           return sendError(reply, 400, 'everyone_role_not_assignable');
+        }
+        if (!canManageRole(id, request.userId, roleId)) {
+          return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES (仅限管理低于自身层级的角色)' });
         }
       }
     }
@@ -1023,6 +1031,8 @@ export async function spaceRoutes(app: FastifyInstance): Promise<void> {
       return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES' });
     }
 
+    const actorRolePosition = getHighestManageableRolePosition(id, request.userId);
+
     // Validate permissions string is a valid bigint if provided
     let permStr: string;
     if (permissions !== undefined && permissions !== null) {
@@ -1050,12 +1060,18 @@ export async function spaceRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const roleId = generateSnowflake();
+    let newPosition = Math.max(0, actorRolePosition === Number.MAX_SAFE_INTEGER ? 1 : actorRolePosition - 1);
+    if (!Number.isSafeInteger(newPosition) || newPosition < 0) newPosition = 0;
+    if (permissions !== undefined && !canGrantPermissions(id, request.userId, BigInt(permStr))) {
+      return sendError(reply, 403, 'missing_permission', { permission: '只能授予自己拥有的权限' });
+    }
+
     db.insert(schema.roles).values({
       id: roleId,
       spaceId: id,
       name: roleName,
       color: color || '#b9bbbe',
-      position: 0,
+      position: newPosition,
       permissions: permStr,
       createdAt: Date.now(),
     }).run();
@@ -1084,6 +1100,13 @@ export async function spaceRoutes(app: FastifyInstance): Promise<void> {
       return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES' });
     }
 
+    const targetRole = db.select().from(schema.roles)
+      .where(and(eq(schema.roles.id, roleId), eq(schema.roles.spaceId, id))).get();
+    if (!targetRole) return sendError(reply, 404, 'role_not_in_space', { roleId });
+    if (!canManageRole(id, request.userId, roleId)) {
+      return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES (仅限管理低于自身层级的角色)' });
+    }
+
     const updates: Partial<typeof schema.roles.$inferInsert> = {};
     if (name !== undefined) {
       const trimmed = name.trim();
@@ -1101,11 +1124,21 @@ export async function spaceRoutes(app: FastifyInstance): Promise<void> {
       updates.name = trimmed;
     }
     if (color !== undefined) updates.color = color;
-    if (position !== undefined) updates.position = position;
+    if (position !== undefined) {
+      if (!Number.isInteger(position) || position < 0) return sendError(reply, 400, 'permissions_invalid');
+      const actorRolePosition = getHighestManageableRolePosition(id, request.userId);
+      if (actorRolePosition !== Number.MAX_SAFE_INTEGER && position >= actorRolePosition) {
+        return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES (角色不能高于自身层级)' });
+      }
+      updates.position = position;
+    }
 
     if (permissions !== undefined) {
       try {
-        BigInt(permissions);
+        const parsed = BigInt(permissions);
+        if (!canGrantPermissions(id, request.userId, parsed)) {
+          return sendError(reply, 403, 'missing_permission', { permission: '只能授予自己拥有的权限' });
+        }
         updates.permissions = permissions;
       } catch {
         return sendError(reply, 400, 'permissions_invalid');
@@ -1145,6 +1178,10 @@ export async function spaceRoutes(app: FastifyInstance): Promise<void> {
       return sendError(reply, 400, 'everyone_role_not_deletable');
     }
 
+    if (!canManageRole(id, request.userId, roleId)) {
+      return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES (仅限管理低于自身层级的角色)' });
+    }
+
     // Delete channel overrides referencing this role
     db.delete(schema.channelOverrides).where(
       and(eq(schema.channelOverrides.targetType, 'role'), eq(schema.channelOverrides.targetId, roleId))
@@ -1174,6 +1211,21 @@ export async function spaceRoutes(app: FastifyInstance): Promise<void> {
       return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES' });
     }
 
+    const member = db.select().from(schema.spaceMembers).where(and(
+      eq(schema.spaceMembers.spaceId, id), eq(schema.spaceMembers.userId, uid),
+    )).get();
+    if (!member) return sendError(reply, 404, 'member_not_found');
+    if (isSpaceOwner(id, uid) && !isSpaceOwner(id, request.userId)) return sendError(reply, 403, 'space_owner_only');
+    if (uid === request.userId) return sendError(reply, 403, 'cannot_target_self');
+    if (!isSpaceOwner(id, request.userId)
+      && getHighestManageableRolePosition(id, uid) >= getHighestManageableRolePosition(id, request.userId)) {
+      return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES (仅限管理低于自身层级的成员)' });
+    }
+    if (!canManageRole(id, request.userId, roleId)) {
+      return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES (仅限管理低于自身层级的角色)' });
+    }
+    if (roleId === id) return sendError(reply, 400, 'everyone_role_not_assignable');
+
     db.insert(schema.memberRoles).values({
       spaceId: id,
       userId: uid,
@@ -1192,6 +1244,16 @@ export async function spaceRoutes(app: FastifyInstance): Promise<void> {
 
     if (!hasPermission(request.userId, id, PermissionBits.MANAGE_ROLES)) {
       return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES' });
+    }
+
+    if (isSpaceOwner(id, uid) && !isSpaceOwner(id, request.userId)) return sendError(reply, 403, 'space_owner_only');
+    if (uid === request.userId) return sendError(reply, 403, 'cannot_target_self');
+    if (!isSpaceOwner(id, request.userId)
+      && getHighestManageableRolePosition(id, uid) >= getHighestManageableRolePosition(id, request.userId)) {
+      return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES (仅限管理低于自身层级的成员)' });
+    }
+    if (!canManageRole(id, request.userId, roleId)) {
+      return sendError(reply, 403, 'missing_permission', { permission: 'MANAGE_ROLES (仅限管理低于自身层级的角色)' });
     }
 
     db.delete(schema.memberRoles).where(and(

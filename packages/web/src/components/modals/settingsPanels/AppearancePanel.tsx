@@ -3,6 +3,8 @@ import { LanguageSection } from './LanguageSection';
 import { InterfaceScaleSection } from './InterfaceScaleSection';
 import { isAndroid } from '../../../platform/android';
 import { AndroidSettings } from '../../android/AndroidSettings';
+import { WebThemeSection } from './WebThemeSection';
+import { isElectron } from '../../../platform/platform';
 
 /**
  * Presentation preferences that belong to this browser or app rather than to
@@ -17,6 +19,7 @@ export function AppearancePanel() {
       <h2 className="text-lg font-semibold text-txt-primary mb-6">{t('settings:appearance.title')}</h2>
       <LanguageSection />
       {isAndroid() && <AndroidSettings />}
+      {!isAndroid() && !isElectron() && <WebThemeSection />}
       <InterfaceScaleSection />
     </div>
   );

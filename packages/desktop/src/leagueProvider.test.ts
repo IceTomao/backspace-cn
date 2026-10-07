@@ -12,19 +12,28 @@ import {
   parseQueueCatalog,
   resolveLeagueMode,
 } from './leagueProvider';
+import { updateLeagueMatchStart } from './leagueMatchContext';
 
 describe('League activity fallback', () => {
-  it('creates a base playing activity when LCU details are unavailable', () => {
-    expect(createLeagueActivity(1760000000123)).toEqual({
+  it('creates a base playing activity without a client-lifetime timer or placeholder avatar', () => {
+    expect(createLeagueActivity()).toEqual({
       source: 'game',
       type: 'playing',
       name: 'League of Legends',
-      timestamps: { start: 1760000000123 },
-      assets: {
-        largeImage: 'https://cdn.communitydragon.org/latest/profile-icon/29',
-        largeText: 'League of Legends',
-      },
     });
+  });
+
+  it('starts the timer only at InProgress and preserves it across reconnects', () => {
+    const started = updateLeagueMatchStart(undefined, 'InProgress', 1_760_000_000_000);
+    expect(started).toBe(1_760_000_000_000);
+    expect(updateLeagueMatchStart(started, 'Reconnect', 1_760_000_030_000)).toBe(started);
+  });
+
+  it('does not time loading or post-match phases and starts a later match independently', () => {
+    expect(updateLeagueMatchStart(undefined, 'GameStart', 1_760_000_000_000)).toBeUndefined();
+    const started = updateLeagueMatchStart(undefined, 'InProgress', 1_760_000_000_000);
+    expect(updateLeagueMatchStart(started, 'EndOfGame', 1_760_003_000_000)).toBeUndefined();
+    expect(updateLeagueMatchStart(undefined, 'InProgress', 1_760_100_000_000)).toBe(1_760_100_000_000);
   });
 
   it('uses a stable public champion icon URL', () => {

@@ -135,10 +135,34 @@ describe('notification clicks', () => {
     act(() => vi.advanceTimersByTime(1000));
     act(() => useChatStore.setState({ realtimeMessageEvents: [...oldEvents.slice(1), {
       channelId: 'remote-chat',
-      message: { id: 'new', channelId: 'remote-chat', userId: 'other', content: 'Hello' } as MessageWithUser,
+      message: { id: 'new', channelId: 'remote-chat', userId: 'other', content: 'Hello <@me>' } as MessageWithUser,
     }] }));
     expect(BrowserNotification.instances).toHaveLength(1);
     act(() => BrowserNotification.instances[0]!.onclick?.());
     expect(view.getByTestId('route')).toHaveTextContent('/channels/remote-space/remote-chat');
+  });
+
+  it('does not notify for ordinary channel messages without a mention', () => {
+    const oldEvents = [{ channelId: 'remote-chat', message: { id: 'old' } as MessageWithUser }];
+    useChatStore.setState({ realtimeMessageEvents: oldEvents });
+    mount();
+    act(() => vi.advanceTimersByTime(1000));
+    act(() => useChatStore.setState({ realtimeMessageEvents: [...oldEvents, {
+      channelId: 'remote-chat',
+      message: { id: 'ordinary', channelId: 'remote-chat', userId: 'other', content: 'Hello' } as MessageWithUser,
+    }] }));
+    expect(BrowserNotification.instances).toHaveLength(0);
+  });
+
+  it('still notifies for a direct message', () => {
+    const oldEvents = [{ channelId: 'dm', message: { id: 'old' } as MessageWithUser }];
+    useChatStore.setState({ realtimeMessageEvents: oldEvents });
+    mount();
+    act(() => vi.advanceTimersByTime(1000));
+    act(() => useChatStore.setState({ realtimeMessageEvents: [...oldEvents, {
+      channelId: 'dm',
+      message: { id: 'dm-new', channelId: 'dm', userId: 'other', content: 'Hello' } as MessageWithUser,
+    }] }));
+    expect(BrowserNotification.instances).toHaveLength(1);
   });
 });

@@ -11,5 +11,6 @@ describe('AppearancePanel', () => {
     const { container } = render(<AppearancePanel />);
     expect(container.querySelector('#language-select')).not.toBeNull();
     expect(container.querySelector('#interface-scale')).not.toBeNull();
+    expect(container.querySelector('[role="radiogroup"]')).not.toBeNull();
   });
 });

@@ -36,6 +36,7 @@
     "loading": "Loading messages",
     "loadingOlder": "Loading older messages",
     "jumpToPresent": "Jump to Present",
+    "jumpFailed": "Could not find that message. Please try again.",
     "welcome": {
       "channel": {
         "title": "Welcome to the channel!",

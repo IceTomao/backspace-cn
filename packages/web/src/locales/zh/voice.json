@@ -193,7 +193,7 @@
     "noiseSuppressionOn": "启用AI噪音抑制"
   },
   "status": {
-    "dmCall": "DM通话",
+    "dmCall": "私信通话",
     "voiceChannel": "语音频道",
     "voiceCall": "语音通话",
     "connectionFailed": "连接失败",

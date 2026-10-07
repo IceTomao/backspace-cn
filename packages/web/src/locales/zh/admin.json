@@ -63,7 +63,7 @@
       "active": "有效",
       "expired": "已失效",
       "exhausted": "用尽",
-      "revoked": "已撤消"
+      "revoked": "已撤销"
     },
     "expiry": {
       "preset": {
@@ -178,7 +178,7 @@
       },
       "deleteDialog": {
         "title": "永久删除「{{name}}」？",
-        "description": "此操作无法撤消。此链接的兑换历史记录也将被删除。如果您只想停止链接，请改用<strong>撤销</strong> ，这将保留兑换记录。",
+        "description": "此操作无法撤销。此链接的兑换历史记录也将被删除。如果您只想停止链接，请改用<strong>撤销</strong>，这将保留兑换记录。",
         "confirm": "永久删除"
       }
     }

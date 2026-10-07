@@ -183,19 +183,25 @@ describe('theme stylesheet IPC guard', () => {
     expect(canReadThemeStyles({ sender: webContents, senderFrame: mainFrame } as never, win as never, localPages)).toBe(false);
     mainFrame.url = 'file:///app/resources/instance-picker.html?lang=zh#section';
 
-    let listener: ((event: { sender: unknown; senderFrame: unknown }, ...args: unknown[]) => void) | undefined;
+    const listeners = new Map<string, (event: { sender: unknown; senderFrame: unknown; returnValue?: unknown }, ...args: unknown[]) => void>();
     const ipc = {
-      on: vi.fn((_channel: string, callback: typeof listener) => { listener = callback; }),
+      on: vi.fn((channel: string, callback: typeof listeners extends Map<string, infer T> ? T : never) => { listeners.set(channel, callback); }),
       removeListener: vi.fn(),
     };
-    const dispose = registerThemeStyles(ipc as never, () => win as never, 'fixed-css', localPages);
-    const allowed = { sender: webContents, senderFrame: mainFrame, returnValue: '' };
-    listener!(allowed);
+    const dispose = registerThemeStyles(ipc as never, () => win as never, 'fixed-css', localPages, () => 'light');
+    const allowed = { sender: webContents, senderFrame: mainFrame, returnValue: '' as unknown };
+    listeners.get('desktop-theme-styles')!(allowed);
     expect(allowed.returnValue).toBe('fixed-css');
     const withArgs = { ...allowed, returnValue: '' };
-    listener!(withArgs, 'ignored');
+    listeners.get('desktop-theme-styles')!(withArgs, 'ignored');
     expect(withArgs.returnValue).toBe('');
+    const mode = { ...allowed, returnValue: '' };
+    listeners.get('desktop-theme-mode')!(mode);
+    expect(mode.returnValue).toBe('light');
+    const modeWithArgs = { ...allowed, returnValue: '' };
+    listeners.get('desktop-theme-mode')!(modeWithArgs, 'ignored');
+    expect(modeWithArgs.returnValue).toBe('system');
     dispose();
-    expect(ipc.removeListener).toHaveBeenCalledTimes(1);
+    expect(ipc.removeListener).toHaveBeenCalledTimes(2);
   });
 });

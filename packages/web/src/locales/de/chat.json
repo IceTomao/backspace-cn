@@ -36,6 +36,7 @@
     "loading": "Nachrichten werden geladen",
     "loadingOlder": "Ältere Nachrichten werden geladen",
     "jumpToPresent": "Zu den neuesten Nachrichten",
+    "jumpFailed": "Diese Nachricht konnte nicht gefunden werden. Bitte versuche es erneut.",
     "welcome": {
       "channel": {
         "title": "Willkommen im Kanal!",

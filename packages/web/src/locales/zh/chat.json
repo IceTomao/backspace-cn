@@ -36,6 +36,7 @@
     "loading": "正在加载消息",
     "loadingOlder": "正在加载更早的消息…",
     "jumpToPresent": "跳转到最新消息",
+    "jumpFailed": "无法跳转到这条消息，请重试",
     "welcome": {
       "channel": {
         "title": "欢迎来到频道",

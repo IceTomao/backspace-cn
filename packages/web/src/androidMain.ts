@@ -14,9 +14,11 @@ function applyInsets(insets: AndroidInsets): void {
 const themeStyle = document.createElement('style');
 function applyTheme(settings: AndroidPreferences): void {
   document.documentElement.dataset.androidTheme = settings.dark ? 'dark' : 'light';
-  themeStyle.textContent = desktopTheme
-    .replace('@media (prefers-color-scheme: dark)', settings.dark ? '@media all' : '@media not all')
-    .replace('@media (prefers-color-scheme: light)', settings.dark ? '@media not all' : '@media all');
+  document.documentElement.dataset.colorScheme = settings.dark ? 'dark' : 'light';
+  document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute(
+    'content', settings.dark ? '#0b0b10' : '#eff3f8',
+  );
+  themeStyle.textContent = desktopTheme;
 }
 async function boot(): Promise<void> {
   const state = await androidCall<{ settings: AndroidPreferences; storage: Record<string, string>; insets: AndroidInsets }>('bootstrap');

@@ -27,7 +27,7 @@ export function InterfaceScaleSection() {
       <label htmlFor="interface-scale" className="block text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">
         {t('interfaceScale.label')}
       </label>
-      <div className="rounded-lg bg-white/[0.03] border border-white/[0.04] p-3.5">
+      <div className="rounded-lg bg-surface-elevated border border-border-soft p-3.5">
         <p id="interface-scale-description" className="text-xs text-txt-tertiary mb-2">{t('interfaceScale.description')}</p>
         <div className="flex flex-wrap gap-2">
           <select id="interface-scale" aria-describedby="interface-scale-description" value={scale}
@@ -35,7 +35,7 @@ export function InterfaceScaleSection() {
             {INTERFACE_SCALES.map(value => <option key={value} value={value}>{value}%</option>)}
           </select>
           <button type="button" onClick={() => changeScale(100)} disabled={scale === 100}
-            className="px-3 py-2 rounded-md bg-white/5 hover:bg-white/10 text-sm text-txt-primary disabled:opacity-50">{t('interfaceScale.reset')}</button>
+            className="px-3 py-2 rounded-md bg-surface-input hover:bg-interactive-hover text-sm text-txt-primary disabled:opacity-50">{t('interfaceScale.reset')}</button>
         </div>
       </div>
     </div>

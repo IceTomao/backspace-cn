@@ -449,11 +449,11 @@ export function ChannelSidebar() {
             onClick={handleHomeClick}
             className={`flex items-center gap-3 px-2 h-[42px] rounded-[6px] cursor-pointer mb-[2px] transition-colors group ${
               !currentChannelId && location.pathname !== '/explore'
-                ? 'bg-interactive-selected text-white'
+                ? 'bg-interactive-selected text-txt-selected'
                 : 'text-txt-tertiary hover:bg-interactive-hover hover:text-txt-secondary'
             }`}
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className={`flex-shrink-0 ${!currentChannelId ? 'text-white' : 'opacity-70 group-hover:opacity-100'}`}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className={`flex-shrink-0 ${!currentChannelId ? 'text-txt-selected' : 'opacity-70 group-hover:opacity-100'}`}>
               <path d="M13 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-2-4a2 2 0 1 1 4 0 2 2 0 0 1-4 0Z" />
               <path d="M3 18a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1v-1c0-2.76-5.37-4-8-4s-8 1.24-8 4v1Z" />
               <path d="M3.5 13.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" opacity=".5" />
@@ -673,7 +673,7 @@ export function ChannelSidebar() {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className={`opacity-70 transition-transform flex-shrink-0 ${isCollapsed ? '-rotate-90' : ''}`}>
                       <path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z" />
                     </svg>
-                    <span className="text-[11px] font-medium uppercase tracking-[0.06em] truncate" style={{ color: '#484854' }}>{category.name}</span>
+                    <span className="text-[11px] font-medium uppercase tracking-[0.06em] truncate text-txt-category">{category.name}</span>
                     {category.isPrivate && (
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-txt-muted flex-shrink-0">
                         <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" />
@@ -1306,16 +1306,16 @@ function ChannelItem({
         onClick={onChannelClick}
         className={`relative w-full flex items-center gap-1.5 px-[10px] h-8 rounded-[6px] group transition-colors ${
           isActive
-            ? 'bg-surface-elevated text-txt-primary'
+            ? 'bg-surface-selected text-txt-selected'
             : isUnread
-              ? 'text-white hover:text-white hover:bg-interactive-hover'
+              ? 'text-txt-selected hover:text-txt-selected hover:bg-interactive-hover'
               : 'text-txt-tertiary hover:text-txt-secondary hover:bg-interactive-hover'
         }`}
       >
         {isActive && (
           <div
-            className="absolute -left-[2px] top-1/2 -translate-y-1/2 w-[3px] bg-white rounded-r-full"
-            style={{ height: '55%', opacity: 0.7 }}
+            className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] bg-[rgb(var(--selection-indicator))] rounded-r-full"
+            style={{ height: '60%' }}
           />
         )}
         {isUnread && (

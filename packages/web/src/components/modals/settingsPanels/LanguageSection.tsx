@@ -21,7 +21,7 @@ export function LanguageSection() {
       <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">
         {t('common:language.label')}
       </div>
-      <div className="rounded-lg bg-white/[0.03] border border-white/[0.04] p-3.5">
+      <div className="rounded-lg bg-surface-elevated border border-border-soft p-3.5">
         <label htmlFor="language-select" className="block text-xs text-txt-tertiary mb-2">
           {t('common:language.description')}
         </label>

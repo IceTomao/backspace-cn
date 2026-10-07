@@ -171,7 +171,9 @@
     "backToMenu": "Back to settings menu"
   },
   "appearance": {
-    "title": "Appearance"
+    "title": "Appearance",
+    "theme": "Theme",
+    "themeMode": { "system": "Follow system", "light": "Light", "dark": "Dark" }
   },
   "account": {
     "title": "My Account",

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const { pathToFileURL } = require('node:url');
-const { ThemeManager, registerThemeStyles } = require('../dist/theme');
+const { ThemeManager, registerThemeStyles, registerThemeControls } = require('../dist/theme');
 
 const desktop = path.resolve(__dirname, '..');
 const output = path.join(desktop, 'dist-electron', 'theme-qa');
@@ -17,10 +17,12 @@ let win;
 let server;
 let manager;
 let cleanup;
+let cleanupControls;
 
-const fixture = `<!doctype html><html data-theme="aether-drift"><head>
+const fixture = `<!doctype html><html data-theme="aether-drift" data-color-scheme="dark"><head>
 <meta charset="utf-8"><style>
-:root { --bg-base:11 11 16; --text-message:216 216 222; --bg-elevated:37 37 48; }
+:root { color-scheme:dark; --bg-base:11 11 16; --text-message:216 216 222; --text-username:216 216 222; --bg-elevated:37 37 48; }
+@media (forced-colors:none) { :root[data-color-scheme="light"] { color-scheme:light; --bg-base:239 243 248; --text-message:42 47 55; --text-username:42 47 55; --bg-elevated:255 255 255; } }
 body { background:rgb(var(--bg-base)); color:rgb(var(--text-message)); font:16px sans-serif; margin:32px; }
 .row { display:flex; gap:24px; align-items:start; }
 pre { padding:16px; } .glass-modal { padding:20px; background:rgb(var(--bg-elevated)); }
@@ -31,7 +33,7 @@ img { width:80px; height:80px; } iframe { width:160px; height:100px; }
 }
 </style></head><body>
 <h1>Backspace theme fixture</h1>
-<p id="msg-fixture"><span class="font-semibold" style="color: rgb(216, 216, 222);">Default name</span>
+<p id="msg-fixture"><span class="font-semibold" style="color: rgb(var(--text-username));">Default name</span>
 <span id="role" style="color:rgb(200,50,180)">Custom role color</span></p>
 <div class="row"><div><div class="glass-modal">Dialog <input placeholder="Message"></div>
 <pre class="font-mono"><span class="token keyword" style="color:rgb(198,120,221)">const</span>
@@ -60,12 +62,16 @@ async function inspect() {
     background:getComputedStyle(document.body).backgroundColor,
     text:getComputedStyle(document.body).color,
     dark:matchMedia('(prefers-color-scheme: dark)').matches,
+    scheme:document.documentElement.dataset.colorScheme,
+    forcedColors:matchMedia('(forced-colors: active)').matches,
     marker:window.loadMarker,
     firstFrame:window.firstFrame,
     language:localStorage.getItem('backspace-language'),
     keyword:document.querySelector('.token.keyword') && getComputedStyle(document.querySelector('.token.keyword')).color,
     nameBacking:document.querySelector('#msg-fixture .font-semibold') &&
       getComputedStyle(document.querySelector('#msg-fixture .font-semibold')).backgroundColor,
+    name:document.querySelector('#msg-fixture .font-semibold') &&
+      getComputedStyle(document.querySelector('#msg-fixture .font-semibold')).color,
     role:document.querySelector('#role') && getComputedStyle(document.querySelector('#role')).color,
     media:document.querySelector('#media') && getComputedStyle(document.querySelector('#media')).filter,
     video:document.querySelector('#video') && getComputedStyle(document.querySelector('#video')).filter,
@@ -128,7 +134,7 @@ app.whenReady().then(async () => {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.end(req.url === '/frame'
         ? '<html data-theme="aether-drift"><body style="background:rgb(20,30,40);color:white">Unstyled frame</body></html>'
-        : req.url === '/third-party' ? fixture.replace('data-theme="aether-drift"', '') : fixture);
+        : req.url === '/third-party' ? '<html><body style="background:rgb(11,11,16);color:rgb(216,216,222)">Unstyled third-party page</body></html>' : fixture);
     }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -138,8 +144,9 @@ app.whenReady().then(async () => {
   const config = path.join(app.getPath('userData'), 'theme.json');
   manager = new ThemeManager(nativeTheme, config);
   manager.setMode('light');
+  cleanupControls = registerThemeControls(ipcMain, () => win, manager);
   cleanup = registerThemeStyles(ipcMain, () => win, fs.readFileSync(path.join(desktop, 'resources/theme.css'), 'utf8'),
-    new Set([pathToFileURL(picker).href, pathToFileURL(recovery).href]));
+    new Set([pathToFileURL(picker).href, pathToFileURL(recovery).href]), () => manager.getMode());
   ipcMain.handle('get-app-version', () => '1.3.1');
   ipcMain.handle('get-instance-url', () => null);
   ipcMain.handle('get-recovery-state', () => ({
@@ -158,9 +165,10 @@ app.whenReady().then(async () => {
   await win.loadURL(url);
   await waitFor(async () => (await inspect()).emoji, 'Emoji Mart render');
   const light = await inspect();
-  assert.equal(light.background, 'rgb(243, 244, 246)');
+  assert.equal(light.background, 'rgb(239, 243, 248)', JSON.stringify(light));
   assert.equal(light.keyword, 'rgb(117, 66, 143)');
-  assert.equal(light.nameBacking, 'rgb(52, 52, 62)');
+  assert.equal(light.name, 'rgb(42, 47, 55)');
+  assert.notEqual(light.nameBacking, 'rgb(52, 52, 62)');
   assert.equal(light.role, 'rgb(200, 50, 180)');
   assert.equal(light.media, 'none');
   assert.equal(light.video, 'none');
@@ -200,7 +208,7 @@ app.whenReady().then(async () => {
       await win.loadFile(file, { query: { lang: 'zh' } });
       const style = await inspect();
       const expectedDark = name === 'recovery' ? 'rgb(19, 19, 26)' : 'rgb(11, 11, 16)';
-      assert.equal(style.background, mode === 'light' ? 'rgb(243, 244, 246)' : expectedDark);
+      assert.equal(style.background, mode === 'light' ? 'rgb(239, 243, 248)' : expectedDark);
       await snapshot(`${name}-${mode}`);
     }
   }
@@ -225,7 +233,7 @@ app.whenReady().then(async () => {
       await win.loadURL('https://chat.kevz.me:2096');
       await waitFor(() => win.webContents.executeJavaScript(`!!document.querySelector('input[type="password"]')`), 'public login page');
       const state = await inspect();
-      assert.equal(state.background, mode === 'light' ? 'rgb(243, 244, 246)' : 'rgb(11, 11, 16)');
+      assert.equal(state.background, mode === 'light' ? 'rgb(239, 243, 248)' : 'rgb(11, 11, 16)');
       await snapshot(`login-${mode}`);
     }
     results.push('Public online login page: light/dark loaded without signing in');
@@ -233,6 +241,7 @@ app.whenReady().then(async () => {
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
   console.log(results.join('\n'));
   cleanup();
+  cleanupControls();
   manager.dispose();
   win.destroy();
   server.close();

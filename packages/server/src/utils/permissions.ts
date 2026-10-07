@@ -190,6 +190,59 @@ export function isSpaceOwner(spaceId: string, userId: string): boolean {
   return space?.ownerId === userId;
 }
 
+/**
+ * Return the highest role position a member may manage.  Role position 0 is
+ * reserved for @everyone, so a member with MANAGE_ROLES but no custom role
+ * receives the implicit manager level 1. Owners, instance admins, and
+ * administrators are intentionally unbounded.
+ */
+export function getHighestManageableRolePosition(spaceId: string, userId: string): number {
+  const db = getDb();
+  const user = db.select({ isAdmin: schema.users.isAdmin })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  if (isSpaceOwner(spaceId, userId) || user?.isAdmin === 1) return Number.MAX_SAFE_INTEGER;
+
+  const permissions = computePermissions(userId, spaceId);
+  if ((permissions & PermissionBits.ADMINISTRATOR) !== 0n) return Number.MAX_SAFE_INTEGER;
+
+  const assigned = db.select({ roleId: schema.memberRoles.roleId })
+    .from(schema.memberRoles)
+    .where(and(
+      eq(schema.memberRoles.spaceId, spaceId),
+      eq(schema.memberRoles.userId, userId),
+    ))
+    .all();
+  const roleIds = new Set(assigned.map((row) => row.roleId));
+  const roles = db.select({ id: schema.roles.id, position: schema.roles.position })
+    .from(schema.roles)
+    .where(eq(schema.roles.spaceId, spaceId))
+    .all();
+  const highest = roles
+    .filter((role) => role.id !== spaceId && roleIds.has(role.id))
+    .reduce((max, role) => Math.max(max, role.position ?? 0), 0);
+  return Math.max(1, highest);
+}
+
+/** A role is manageable only when it is below the actor's highest role. */
+export function canManageRole(spaceId: string, userId: string, roleId: string): boolean {
+  if (roleId === spaceId) return false;
+  const role = getDb().select({ position: schema.roles.position })
+    .from(schema.roles)
+    .where(and(eq(schema.roles.id, roleId), eq(schema.roles.spaceId, spaceId)))
+    .get();
+  if (!role) return false;
+  return (role.position ?? 0) < getHighestManageableRolePosition(spaceId, userId);
+}
+
+/** Prevent a role manager from granting permissions they do not hold. */
+export function canGrantPermissions(spaceId: string, userId: string, permissions: bigint): boolean {
+  const highest = getHighestManageableRolePosition(spaceId, userId);
+  if (highest === Number.MAX_SAFE_INTEGER) return true;
+  return (permissions & ~computePermissions(userId, spaceId)) === 0n;
+}
+
 export function getChannelSpaceId(channelId: string): string | null {
   const db = getDb();
   const channel = db.select().from(schema.channels).where(eq(schema.channels.id, channelId)).get();

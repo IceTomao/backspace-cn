@@ -22,6 +22,7 @@ it('uses scaled tokens and a shared breakpoint in production styles', () => {
   const violations: string[] = [];
   for (const file of files(root)) {
     if (!/\.(tsx?|css)$/.test(file) || /\.test\./.test(file)) continue;
+    if (relative(root, file).startsWith(`dev${sep}`)) continue;
     const source = readFileSync(file, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, match => match.replace(/[^\n]/g, ' '))
       .replace(/\/\/[^\n]*/g, '');

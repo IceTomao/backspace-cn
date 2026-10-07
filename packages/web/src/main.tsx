@@ -6,9 +6,20 @@ import { startPendingMessageOrchestrator } from './stores/pendingMessageRehydrat
 import i18n, { initI18n } from './i18n';
 import './styles/globals.css';
 import { initializeInterfaceScale } from './platform/interfaceScale';
+import compatibilityTheme from '../../desktop/resources/theme.css?raw';
+import { isAndroid } from './platform/android';
+import { isElectron } from './platform/platform';
+import { initializeWebTheme } from './platform/webTheme';
 
 const stopInterfaceScale = initializeInterfaceScale();
 if (import.meta.hot) import.meta.hot.dispose(stopInterfaceScale);
+const stopWebTheme = initializeWebTheme();
+if (!isAndroid() && !isElectron()) {
+  const themeStyle = document.createElement('style');
+  themeStyle.textContent = compatibilityTheme;
+  document.head.append(themeStyle);
+}
+if (import.meta.hot) import.meta.hot.dispose(stopWebTheme);
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -44,21 +55,21 @@ class ErrorBoundary extends React.Component<
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: '#0b0b10',
-          color: '#efefef',
+          backgroundColor: 'rgb(var(--bg-base))',
+          color: 'rgb(var(--text-primary))',
           fontFamily: "'DM Sans', sans-serif",
           flexDirection: 'column',
           gap: '16px',
           padding: '24px',
         }}>
           <h1 style={{ fontSize: '24px', fontWeight: 'bold' }}>{i18n.t('common:crash.title')}</h1>
-          <p style={{ color: '#a0a0aa', maxWidth: '480px', textAlign: 'center' }}>{this.state.error?.message}</p>
+          <p style={{ color: 'rgb(var(--text-secondary))', maxWidth: '480px', textAlign: 'center' }}>{this.state.error?.message}</p>
           <div style={{ display: 'flex', gap: '12px' }}>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
               style={{
                 padding: '8px 24px',
-                backgroundColor: '#7c6cf6',
+                backgroundColor: 'rgb(var(--accent-primary))',
                 color: 'white',
                 border: 'none',
                 borderRadius: '8px',
@@ -74,8 +85,8 @@ class ErrorBoundary extends React.Component<
               style={{
                 padding: '8px 24px',
                 backgroundColor: 'transparent',
-                color: '#a0a0aa',
-                border: '1px solid rgba(255,255,255,0.1)',
+                color: 'rgb(var(--text-secondary))',
+                border: '1px solid rgb(var(--border-soft))',
                 borderRadius: '8px',
                 cursor: 'pointer',
                 fontSize: '14px',
@@ -91,16 +102,16 @@ class ErrorBoundary extends React.Component<
               onToggle={(e) => this.setState({ showStack: (e.target as HTMLDetailsElement).open })}
               style={{ maxWidth: '600px', width: '100%', marginTop: '8px' }}
             >
-              <summary style={{ color: '#a0a0aa', cursor: 'pointer', fontSize: '13px' }}>
+              <summary style={{ color: 'rgb(var(--text-secondary))', cursor: 'pointer', fontSize: '13px' }}>
                 {i18n.t('common:crash.details')}
               </summary>
               <pre style={{
                 marginTop: '8px',
                 padding: '12px',
-                backgroundColor: 'rgba(255,255,255,0.05)',
+                backgroundColor: 'rgb(var(--bg-elevated))',
                 borderRadius: '8px',
                 fontSize: '11px',
-                color: '#a0a0aa',
+                color: 'rgb(var(--text-secondary))',
                 overflow: 'auto',
                 maxHeight: '200px',
                 whiteSpace: 'pre-wrap',

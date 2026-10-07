@@ -17,6 +17,7 @@ export default {
           chat:     'rgb(var(--bg-chat) / <alpha-value>)',
           members:  'rgb(var(--bg-members) / <alpha-value>)',
           elevated: 'rgb(var(--bg-elevated) / <alpha-value>)',
+        selected: 'rgb(var(--surface-selected) / <alpha-value>)',
           input:    'rgb(var(--bg-input) / <alpha-value>)',
           overlay:  'var(--bg-overlay)',
         },
@@ -38,6 +39,7 @@ export default {
         },
         txt: {
           primary:   'rgb(var(--text-primary) / <alpha-value>)',
+          selected:  'rgb(var(--text-selected) / <alpha-value>)',
           secondary: 'rgb(var(--text-secondary) / <alpha-value>)',
           tertiary:  'rgb(var(--text-tertiary) / <alpha-value>)',
           message:   'rgb(var(--text-message) / <alpha-value>)',

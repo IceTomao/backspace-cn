@@ -389,14 +389,14 @@ export function Message({ message, isCompact, isFirstInGroup, previousMessageId,
   const ownerId = spaces.find(s => s.id === currentSpaceId)?.ownerId;
 
   const getMemberDisplayColor = (userId: string) => {
-    if (isDmMessage) return { color: '#d8d8de' };
+    if (isDmMessage) return { color: 'rgb(var(--text-username))' };
     const member = members.find(m => m.userId === userId);
     if (member?.roles && member.roles.length > 0) {
       const sorted = [...member.roles].sort((a, b) => b.position - a.position);
       return { color: sorted[0]!.color };
     }
-    if (ownerId && userId === ownerId) return { color: '#fda4af' };
-    return { color: '#d8d8de' };
+    if (ownerId && userId === ownerId) return { color: 'rgb(var(--text-username-owner))' };
+    return { color: 'rgb(var(--text-username))' };
   };
 
   const roleColor = getMemberDisplayColor(message.userId);
@@ -412,7 +412,7 @@ export function Message({ message, isCompact, isFirstInGroup, previousMessageId,
       className={`group relative flex gap-4 px-5 py-[3px] transition-colors ${isFirstInGroup || message.replyToId ? 'mt-[1.0625rem]' : ''} ${
         isMentioned
           ? 'bg-accent-amber/10 border-l-2 border-l-accent-amber hover:bg-accent-amber/15'
-          : 'hover:bg-[rgba(255,255,255,0.025)]'
+          : 'hover:bg-[var(--interactive-message-hover)]'
       }`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {

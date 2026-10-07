@@ -22,7 +22,7 @@ export function startActivityDetection(
 ): void {
   if (providers.length) return;
   callback = onActivitiesChange;
-  providers = [new LeagueProvider(), new ProcessGameProvider(assetPublisher), new WindowsMediaProvider(assetPublisher)];
+  providers = [new LeagueProvider(assetPublisher), new ProcessGameProvider(assetPublisher), new WindowsMediaProvider(assetPublisher)];
   for (const provider of providers) provider.start(emit);
   emit();
 }

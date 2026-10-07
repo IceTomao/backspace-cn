@@ -59,8 +59,8 @@
     },
     "delete": {
       "title": "删除# {{name}} ？",
-      "description": "这将永久删除<strong> # {{name}}</strong>及其所有消息。此操作无法撤消。",
-      "descriptionVoice": "这将永久删除<strong> # {{name}}</strong>及其所有消息。当前在此语音频道中的任何用户都将被断开连接。此操作无法撤消。",
+      "description": "这将永久删除<strong> # {{name}}</strong>及其所有消息。此操作无法撤销。",
+      "descriptionVoice": "这将永久删除<strong> # {{name}}</strong>及其所有消息。当前在此语音频道中的任何用户都将被断开连接。此操作无法撤销。",
       "confirm": "删除频道"
     }
   },
@@ -86,7 +86,7 @@
     },
     "delete": {
       "title": "删除「{{name}}」？",
-      "description": "这将永久删除<strong>{{name}}</strong>类别。其中的频道将被移动到顶层。此操作无法撤消。",
+      "description": "这将永久删除<strong>{{name}}</strong>类别。其中的频道将被移动到顶层。此操作无法撤销。",
       "confirm": "删除类别"
     }
   },
@@ -500,7 +500,7 @@
       "memberCount_other": "（ {{count}}名成员）",
       "startVoiceCall": "开始语音通话",
       "startVideoCall": "开始视频",
-      "addFriends": "将好友添加到DM"
+    "addFriends": "将好友添加到私信"
     }
   },
   "ownership": {

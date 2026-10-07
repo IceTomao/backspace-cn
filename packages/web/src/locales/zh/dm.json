@@ -95,12 +95,12 @@
     "noUsers": "未找到相应用户"
   },
   "addMember": {
-    "title": "将好友添加到DM",
+    "title": "将好友添加到私信",
     "description": "选择要添加到此对话的好友。",
     "capacity": "{{current}}/{{max}}",
     "searchPlaceholder": "搜索好友...",
-    "limitReached": "此群组DM已达到{{max}}成员上限。",
-    "alreadyInDm": "已在此DM中",
+    "limitReached": "此群组私信已达到{{max}}名成员上限。",
+    "alreadyInDm": "已在此私信中",
     "noMatch": "没有好友符合您的搜索条件",
     "noFriends": "还没有朋友",
     "selectFriends": "选择好友",
@@ -111,10 +111,10 @@
     "failed": "添加成员失败"
   },
   "groupSettings": {
-    "title": "组设置",
+    "title": "群组设置",
     "general": "常规",
     "overview": "概述",
-    "backToMenu": "返回群组DM设置菜单",
+    "backToMenu": "返回群组私信设置菜单",
     "changeIcon": "更改群组图标",
     "icon": "群组图标",
     "clickToUpload": "点击上传",
@@ -134,7 +134,7 @@
     "notFound": "暂无对话！",
     "notGroup": "此对话没有群组信息。",
     "cancelEdit": "取消编辑",
-    "federated": "联合组",
+    "federated": "联邦群组",
     "memberCount_one": "{{count}} 位成员",
     "memberCount_other": "{{count}}位成员"
   }

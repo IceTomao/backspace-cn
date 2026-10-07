@@ -3,6 +3,7 @@ import type { BrowserWindow, IpcMain, IpcMainEvent } from 'electron';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 export const THEME_STYLES_CHANNEL = 'desktop-theme-styles';
+export const THEME_MODE_CHANNEL = 'desktop-theme-mode';
 
 interface NativeThemeSource {
   themeSource: ThemeMode;
@@ -105,14 +106,22 @@ export function registerThemeStyles(
   getWindow: () => BrowserWindow | null,
   styles: string,
   localPages: ReadonlySet<string>,
+  getMode: () => ThemeMode = () => 'system',
 ): () => void {
   // One fixed, memory-cached response before first paint. No renderer paths,
   // CSS, scripts or theme-setting commands are accepted by this channel.
   const listener = (event: IpcMainEvent, ...args: unknown[]) => {
     event.returnValue = args.length === 0 && canReadThemeStyles(event, getWindow(), localPages) ? styles : '';
   };
+  const modeListener = (event: IpcMainEvent, ...args: unknown[]) => {
+    event.returnValue = args.length === 0 && canReadThemeStyles(event, getWindow(), localPages) ? getMode() : 'system';
+  };
   ipc.on(THEME_STYLES_CHANNEL, listener);
-  return () => { ipc.removeListener(THEME_STYLES_CHANNEL, listener); };
+  ipc.on(THEME_MODE_CHANNEL, modeListener);
+  return () => {
+    ipc.removeListener(THEME_STYLES_CHANNEL, listener);
+    ipc.removeListener(THEME_MODE_CHANNEL, modeListener);
+  };
 }
 
 export function registerThemeControls(

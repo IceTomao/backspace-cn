@@ -124,4 +124,42 @@ describe('computePermissions', () => {
     const { computePermissions } = await import('./permissions.js');
     expect(computePermissions(ADMIN_ID, SPACE_ID)).toBe(ALL_PERMISSIONS);
   });
+
+  it('allows a role manager to manage lower roles but not equal or higher roles', async () => {
+    const { canManageRole, getHighestManageableRolePosition } = await import('./permissions.js');
+    const managerRole = 'role-manager';
+    const lowerRole = 'role-lower';
+    const equalRole = 'role-equal';
+    const higherRole = 'role-higher';
+    for (const [id, position, permissions] of [
+      [managerRole, 2, PermissionBits.MANAGE_ROLES],
+      [lowerRole, 1, 0n],
+      [equalRole, 2, 0n],
+      [higherRole, 3, 0n],
+    ] as const) {
+      testDb.insert(schema.roles).values({
+        id, spaceId: SPACE_ID, name: id, position,
+        permissions: permissionsToString(permissions), createdAt: now,
+      }).run();
+    }
+    testDb.insert(schema.memberRoles).values({ spaceId: SPACE_ID, userId: MEMBER_ID, roleId: managerRole }).run();
+
+    expect(getHighestManageableRolePosition(SPACE_ID, MEMBER_ID)).toBe(2);
+    expect(canManageRole(SPACE_ID, MEMBER_ID, lowerRole)).toBe(true);
+    expect(canManageRole(SPACE_ID, MEMBER_ID, equalRole)).toBe(false);
+    expect(canManageRole(SPACE_ID, MEMBER_ID, higherRole)).toBe(false);
+  });
+
+  it('does not allow a role manager to grant permissions they do not hold', async () => {
+    const { canGrantPermissions } = await import('./permissions.js');
+    const managerRole = 'role-manager-perms';
+    testDb.insert(schema.roles).values({
+      id: managerRole, spaceId: SPACE_ID, name: managerRole, position: 1,
+      permissions: permissionsToString(PermissionBits.MANAGE_ROLES), createdAt: now,
+    }).run();
+    testDb.insert(schema.memberRoles).values({ spaceId: SPACE_ID, userId: MEMBER_ID, roleId: managerRole }).run();
+
+    expect(canGrantPermissions(SPACE_ID, MEMBER_ID, PermissionBits.MANAGE_ROLES)).toBe(true);
+    expect(canGrantPermissions(SPACE_ID, MEMBER_ID, PermissionBits.BAN_MEMBERS)).toBe(false);
+  });
 });

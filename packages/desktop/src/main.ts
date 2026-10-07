@@ -1422,7 +1422,7 @@ if (!gotTheLock) {
       disposeThemeStyles = registerThemeStyles(ipcMain, () => mainWindow, themeStyles, new Set([
         pathToFileURL(getPickerPath()).href,
         pathToFileURL(path.join(__dirname, '..', 'resources', 'recovery.html')).href,
-      ]));
+      ]), () => themeManager?.getMode() ?? 'system');
     }
     // Win/Linux: frameless window has no menu bar, but we still need an
     // application menu so keyboard accelerators (Ctrl+C/V/X/Z/A) work.

@@ -431,7 +431,9 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       .from(schema.spaceMembers).where(eq(schema.spaceMembers.spaceId, spaceId)).all()
       .map((member) => member.userId)
       .filter((memberId) => memberId !== request.userId && hasPermission(memberId, spaceId, PermissionBits.VIEW_CHANNEL, id));
-    sendWebPushToUsers(memberIds, {
+    // Public channel messages notify only members explicitly mentioned. DMs
+    // use the dedicated DM route and retain their normal notification behavior.
+    sendWebPushToUsers(memberIds.filter((memberId) => content?.includes(`<@${memberId}>`)), {
       id: messageId,
       title: user.displayName || user.username,
       body: content?.trim() || (attachmentRows.length ? `发送了 ${attachmentRows.length} 个附件` : '发送了一条消息'),

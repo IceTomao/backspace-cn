@@ -3,7 +3,8 @@ import https from 'https';
 import path from 'path';
 import { app } from 'electron';
 import type { ActivityProvider, DetectedActivity } from './activityTypes';
-import { updateLeagueMatchContext, type LeagueChampionPresence, type LeagueMatchContext } from './leagueMatchContext';
+import type { ActivityAssetPublisher } from './activityAssetPublisher';
+import { updateLeagueMatchContext, updateLeagueMatchStart, type LeagueChampionPresence, type LeagueMatchContext } from './leagueMatchContext';
 import { resolveLcuConnection, type LcuConnection, type LeagueProcessSnapshot } from './leagueConnection';
 import { readLeagueProcessesNative } from './leagueProcessNative';
 
@@ -25,7 +26,6 @@ export interface LeagueQueueRecord {
 const CLIENT_PROCESSES = new Set(['leagueclient.exe', 'leagueclientux.exe']);
 const GAME_PROCESSES = new Set(['league of legends.exe', 'leagueoflegends.exe']);
 const POLL_INTERVAL_MS = 3_000;
-const LEAGUE_ICON_URL = 'https://cdn.communitydragon.org/latest/profile-icon/29';
 let processScanWarned = false;
 let connectionWarned = false;
 let noProcessWarned = false;
@@ -316,13 +316,12 @@ function liveGameRequest<T>(endpoint: string): Promise<T | null> {
   });
 }
 
-export function createLeagueActivity(start: number): DetectedActivity {
+export function createLeagueActivity(start?: number): DetectedActivity {
   return {
     source: 'game',
     type: 'playing',
     name: 'League of Legends',
-    timestamps: { start },
-    assets: { largeImage: LEAGUE_ICON_URL, largeText: 'League of Legends' },
+    ...(start ? { timestamps: { start } } : {}),
   };
 }
 
@@ -351,9 +350,17 @@ export class LeagueProvider implements ActivityProvider {
   private matchContext: LeagueMatchContext = {};
   private queueCatalog = new Map<number, LeagueQueueRecord>();
   private queueCatalogLoaded = false;
+  private matchStartedAt: number | undefined;
+  private clientExecutablePath: string | null = null;
+  private clientArtworkKey: string | null = null;
+  private clientArtworkUrl: string | null = null;
+  private onChange: (() => void) | null = null;
+
+  constructor(private readonly publisher?: ActivityAssetPublisher) {}
 
   start(onChange: () => void): void {
     if (this.timer || process.platform !== 'win32') return;
+    this.onChange = onChange;
     const poll = () => void this.refresh(onChange);
     poll();
     this.timer = setInterval(poll, POLL_INTERVAL_MS);
@@ -366,6 +373,11 @@ export class LeagueProvider implements ActivityProvider {
     this.matchContext = {};
     this.queueCatalog = new Map();
     this.queueCatalogLoaded = false;
+    this.matchStartedAt = undefined;
+    this.clientExecutablePath = null;
+    this.clientArtworkKey = null;
+    this.clientArtworkUrl = null;
+    this.onChange = null;
   }
   getActivities(): DetectedActivity[] { return this.activity ? [this.activity] : []; }
 
@@ -377,13 +389,23 @@ export class LeagueProvider implements ActivityProvider {
         noProcessWarned = true;
         console.info('[league] no LeagueClient or League of Legends process detected');
       }
+      this.matchStartedAt = undefined;
+      this.matchContext = {};
+      this.clientExecutablePath = null;
+      this.clientArtworkKey = null;
+      this.clientArtworkUrl = null;
       if (this.activity) { this.activity = null; onChange(); }
       return;
     }
     noProcessWarned = false;
 
-    const start = client?.startedAt ?? this.activity?.timestamps?.start ?? Date.now();
-    const next = createLeagueActivity(start);
+    if (client?.executablePath && client.executablePath !== this.clientExecutablePath) {
+      this.clientExecutablePath = client.executablePath;
+      this.clientArtworkKey = null;
+      this.clientArtworkUrl = null;
+    }
+
+    const next = createLeagueActivity();
     const connection = clients
       .map((candidate) => resolveLcuConnection(candidate.commandLine, candidate.executablePath))
       .find((candidate): candidate is LcuConnection => candidate !== null) ?? null;
@@ -395,9 +417,18 @@ export class LeagueProvider implements ActivityProvider {
     if (connection) {
       await this.enrich(next, connection, hasGame);
     } else if (hasGame) {
-      await this.enrichFromLiveGame(next);
+      if (await this.enrichFromLiveGame(next)) {
+        this.matchStartedAt ??= Date.now();
+        next.timestamps = { start: this.matchStartedAt };
+      }
+    } else {
+      this.matchStartedAt = undefined;
+    }
+    if (!next.assets?.largeImage && this.clientArtworkUrl) {
+      next.assets = { largeImage: this.clientArtworkUrl, largeText: next.name };
     }
     this.publish(next, onChange);
+    this.refreshClientArtwork(this.clientExecutablePath);
   }
 
   private async enrichFromLiveGame(activity: DetectedActivity, phase?: unknown): Promise<boolean> {
@@ -411,6 +442,7 @@ export class LeagueProvider implements ActivityProvider {
     }
     gameClientWarned = false;
     const presence = parseLiveGamePresence(data);
+    this.matchStartedAt ??= Date.now();
     this.matchContext = updateLeagueMatchContext(
       this.matchContext,
       'InProgress',
@@ -461,6 +493,7 @@ export class LeagueProvider implements ActivityProvider {
     }
 
     if (phase !== null && phase !== undefined) {
+      this.matchStartedAt = updateLeagueMatchStart(this.matchStartedAt, phase, Date.now());
       this.matchContext = updateLeagueMatchContext(
         this.matchContext,
         phase,
@@ -468,8 +501,20 @@ export class LeagueProvider implements ActivityProvider {
         championPresence,
         presence.gameId,
       );
+    } else if (!hasGame) {
+      this.matchStartedAt = undefined;
     }
-    if (hasGame) await this.enrichFromLiveGame(activity, phase);
+    let liveGameConfirmed = false;
+    if (hasGame && (phase === null || phase === undefined || phase === 'InProgress' || phase === 'Reconnect')) {
+      liveGameConfirmed = await this.enrichFromLiveGame(activity, phase);
+    }
+    if (liveGameConfirmed) this.matchStartedAt ??= Date.now();
+    const matchConfirmed = phase === 'InProgress'
+      || (phase === 'Reconnect' && this.matchStartedAt !== undefined)
+      || (phase === null || phase === undefined) && liveGameConfirmed;
+    if (matchConfirmed && this.matchStartedAt !== undefined) {
+      activity.timestamps = { start: this.matchStartedAt };
+    }
     const phaseText = phaseLabel(phase);
     activity.state = [this.matchContext.mode, phaseText].filter(Boolean).join(' · ') || undefined;
     if (this.matchContext.champion) {
@@ -529,6 +574,30 @@ export class LeagueProvider implements ActivityProvider {
   private async getChampionFromDataDragon(connection: LcuConnection, championId: number): Promise<ChampionRecord | undefined> {
     await this.loadChampionImages(connection);
     return this.champions.get(championId);
+  }
+
+  private refreshClientArtwork(executablePath: string | null): void {
+    if (!this.publisher?.canPublish() || !executablePath || !this.activity) return;
+    const key = executablePath.toLowerCase();
+    if (this.clientArtworkKey === key) return;
+    this.clientArtworkKey = key;
+    void Promise.resolve()
+      .then(() => app.getFileIcon(executablePath, { size: 'large' }))
+      .then(async (icon) => {
+        if (this.clientArtworkKey !== key || icon.isEmpty()) return;
+        const url = await this.publisher!.publish(icon.toPNG());
+        if (!url || this.clientArtworkKey !== key || !this.activity) return;
+        this.clientArtworkUrl = url;
+        if (this.activity.assets?.largeImage) return;
+        this.activity = {
+          ...this.activity,
+          assets: { largeImage: url, largeText: this.activity.name },
+        };
+        this.onChange?.();
+      })
+      .catch(() => {
+        if (this.clientArtworkKey === key && !this.clientArtworkUrl) this.clientArtworkKey = null;
+      });
   }
 
   private publish(next: DetectedActivity, onChange: () => void): void {

@@ -73,6 +73,7 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
   const hasMore = useChatStore((s) => s.hasMore.get(channelId) ?? true);
   const hasNewerMessages = useChatStore((s) => s.hasNewer.get(channelId) ?? false);
   const ackChannel = useChatStore((s) => s.ackChannel);
+  const addToast = useUIStore((s) => s.addToast);
   const saveScrollPosition = useChatStore((s) => s.saveScrollPosition);
   const bottomScrollRequest = useChatStore((s) => s.bottomScrollRequests.get(channelId) ?? null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -559,6 +560,10 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
         }, 2500);
         beginSmoothScrollIntent('message');
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Make the result of a search/reply jump keyboard-accessible without
+        // changing the scroll position established above.
+        if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+        el.focus({ preventScroll: true });
         el.classList.add('search-highlight');
         setTimeout(() => el.classList.remove('search-highlight'), 2000);
         onComplete?.();
@@ -570,8 +575,12 @@ export function MessageList({ channelId, jumpToMessageId, onJumpComplete }: Mess
     void ensureMessageJumpTarget({
       tryScroll: scrollToMessage,
       loadAround: () => loadMessagesAround(channelId, messageId),
+    }).then((found) => {
+      if (!found) addToast(t('chat:list.jumpFailed'), 'warning', 3500);
+    }).catch(() => {
+      addToast(t('chat:list.jumpFailed'), 'warning', 3500);
     });
-  }, [channelId, loadMessagesAround, beginSmoothScrollIntent]);
+  }, [channelId, loadMessagesAround, beginSmoothScrollIntent, addToast, t]);
 
   // Search results and reply previews share the same target-loading path.
   useEffect(() => {

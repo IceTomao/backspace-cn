@@ -18,6 +18,16 @@ const MATCH_PHASES = new Set([
   'Reconnect',
 ]);
 
+export function updateLeagueMatchStart(
+  previousStart: number | undefined,
+  phase: unknown,
+  now: number,
+): number | undefined {
+  if (phase === 'InProgress') return previousStart ?? now;
+  if (phase === 'Reconnect') return previousStart;
+  return undefined;
+}
+
 /**
  * The champion-select endpoint disappears as soon as loading starts. Keep the
  * confirmed pick locally until this match returns to a non-match client phase.

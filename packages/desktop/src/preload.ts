@@ -52,6 +52,38 @@ if (process.platform === 'win32' && process.isMainFrame) {
   } catch (error) {
     console.warn('[theme] Theme bootstrap unavailable:', error);
   }
+  const applyColorScheme = (mode: unknown) => {
+    const root = document.documentElement;
+    if (!root) return;
+    const isDark = mode === 'dark' || (mode !== 'light' && (window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true));
+    root.dataset.colorScheme = isDark ? 'dark' : 'light';
+  };
+  const systemScheme = window.matchMedia?.('(prefers-color-scheme: dark)');
+  let themeMode: unknown = 'system';
+  try { themeMode = ipcRenderer.sendSync('desktop-theme-mode'); } catch { /* Use the system preference as a fallback. */ }
+  let rootObserver: MutationObserver | undefined;
+  if (document.documentElement) applyColorScheme(themeMode);
+  else if (typeof MutationObserver === 'function') {
+    rootObserver = new MutationObserver(() => {
+      if (!document.documentElement) return;
+      applyColorScheme(themeMode);
+      rootObserver?.disconnect();
+      rootObserver = undefined;
+    });
+    rootObserver.observe(document, { childList: true });
+  } else document.addEventListener?.('DOMContentLoaded', () => applyColorScheme(themeMode), { once: true });
+  const onSystemChange = () => { if (themeMode === 'system') applyColorScheme('system'); };
+  const onThemeChanged = (_event: Electron.IpcRendererEvent, value: unknown) => {
+    themeMode = value;
+    applyColorScheme(themeMode);
+  };
+  systemScheme?.addEventListener?.('change', onSystemChange);
+  ipcRenderer.on?.('desktop-theme-changed', onThemeChanged);
+  window.addEventListener?.('pagehide', () => {
+    rootObserver?.disconnect();
+    systemScheme?.removeEventListener?.('change', onSystemChange);
+    ipcRenderer.removeListener?.('desktop-theme-changed', onThemeChanged);
+  }, { once: true });
 }
 
 // The settings UI is hosted remotely. Add a desktop-owned control in the
