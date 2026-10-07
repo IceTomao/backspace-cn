@@ -11,7 +11,10 @@ dist-electron
 .DS_Store
 .idea
 .vscode
-packages/desktop
+packages/desktop/*
+!packages/desktop/resources/
+packages/desktop/resources/*
+!packages/desktop/resources/theme.css
 npm
 livekit
 translation-draft
