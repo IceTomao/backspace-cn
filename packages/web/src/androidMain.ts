@@ -16,7 +16,7 @@ function applyTheme(settings: AndroidPreferences): void {
   document.documentElement.dataset.androidTheme = settings.dark ? 'dark' : 'light';
   document.documentElement.dataset.colorScheme = settings.dark ? 'dark' : 'light';
   document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute(
-    'content', settings.dark ? '#0b0b10' : '#eff3f8',
+    'content', settings.dark ? '#0b0b10' : '#f4f4f6',
   );
   themeStyle.textContent = desktopTheme;
 }

@@ -22,7 +22,7 @@ let cleanupControls;
 const fixture = `<!doctype html><html data-theme="aether-drift" data-color-scheme="dark"><head>
 <meta charset="utf-8"><style>
 :root { color-scheme:dark; --bg-base:11 11 16; --text-message:216 216 222; --text-username:216 216 222; --bg-elevated:37 37 48; }
-@media (forced-colors:none) { :root[data-color-scheme="light"] { color-scheme:light; --bg-base:239 243 248; --text-message:42 47 55; --text-username:42 47 55; --bg-elevated:255 255 255; } }
+@media (forced-colors:none) { :root[data-color-scheme="light"] { color-scheme:light; --bg-base:244 244 246; --text-message:42 47 55; --text-username:42 47 55; --bg-elevated:255 255 255; } }
 body { background:rgb(var(--bg-base)); color:rgb(var(--text-message)); font:16px sans-serif; margin:32px; }
 .row { display:flex; gap:24px; align-items:start; }
 pre { padding:16px; } .glass-modal { padding:20px; background:rgb(var(--bg-elevated)); }
@@ -154,7 +154,7 @@ app.whenReady().then(async () => {
     updateState: 'idle', updatesEnabled: false,
   }));
   win = new BrowserWindow({
-    width: 1200, height: 820, show: false, backgroundColor: '#f3f4f6',
+    width: 1200, height: 820, show: false, backgroundColor: '#f4f4f6',
     webPreferences: {
       preload: path.join(desktop, 'dist/preload.js'), sandbox: true,
       contextIsolation: true, nodeIntegration: false, offscreen: true,
@@ -165,7 +165,7 @@ app.whenReady().then(async () => {
   await win.loadURL(url);
   await waitFor(async () => (await inspect()).emoji, 'Emoji Mart render');
   const light = await inspect();
-  assert.equal(light.background, 'rgb(239, 243, 248)', JSON.stringify(light));
+  assert.equal(light.background, 'rgb(244, 244, 246)', JSON.stringify(light));
   assert.equal(light.keyword, 'rgb(117, 66, 143)');
   assert.equal(light.name, 'rgb(42, 47, 55)');
   assert.notEqual(light.nameBacking, 'rgb(52, 52, 62)');
@@ -208,7 +208,7 @@ app.whenReady().then(async () => {
       await win.loadFile(file, { query: { lang: 'zh' } });
       const style = await inspect();
       const expectedDark = name === 'recovery' ? 'rgb(19, 19, 26)' : 'rgb(11, 11, 16)';
-      assert.equal(style.background, mode === 'light' ? 'rgb(239, 243, 248)' : expectedDark);
+      assert.equal(style.background, mode === 'light' ? 'rgb(244, 244, 246)' : expectedDark);
       await snapshot(`${name}-${mode}`);
     }
   }
@@ -233,7 +233,7 @@ app.whenReady().then(async () => {
       await win.loadURL('https://chat.kevz.me:2096');
       await waitFor(() => win.webContents.executeJavaScript(`!!document.querySelector('input[type="password"]')`), 'public login page');
       const state = await inspect();
-      assert.equal(state.background, mode === 'light' ? 'rgb(239, 243, 248)' : 'rgb(11, 11, 16)');
+      assert.equal(state.background, mode === 'light' ? 'rgb(244, 244, 246)' : 'rgb(11, 11, 16)');
       await snapshot(`login-${mode}`);
     }
     results.push('Public online login page: light/dark loaded without signing in');

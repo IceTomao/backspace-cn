@@ -47,6 +47,7 @@
     --bg-elevated: 37 37 48;
     --bg-input: 17 17 24;
     --bg-overlay: rgba(0, 0, 0, 0.85);
+    --shadow-color: 0 0 0;
 
     /* ── Borders ── */
     --border-hard: 34 34 44;
@@ -108,60 +109,63 @@
   @media (forced-colors: none) {
     :root[data-color-scheme="light"] {
       color-scheme: light;
-      --bg-base: 239 243 248;
-      --bg-channel: 232 237 244;
-      --bg-chat: 247 249 252;
-      --bg-members: 242 246 250;
+      /* Warm neutral surfaces keep structural regions distinct without
+         turning the app into a collection of white cards. */
+      --bg-base: 244 244 246;
+      --bg-channel: 236 238 242;
+      --bg-chat: 250 250 251;
+      --bg-members: 242 243 246;
       --bg-elevated: 255 255 255;
-      --bg-input: 255 255 255;
-      --bg-overlay: rgba(23, 29, 38, 0.42);
+      --bg-input: 246 247 249;
+      --bg-overlay: rgba(27, 31, 39, 0.46);
+      --shadow-color: 31 41 55;
 
-      --border-hard: 209 218 228;
-      --border-soft: 225 231 239;
+      --border-hard: 209 212 220;
+      --border-soft: 225 227 233;
 
-      --accent-mint: 20 112 76;
-      --accent-peach: 168 60 54;
-      --accent-lavender: 112 65 167;
-      --accent-sky: 22 103 151;
-      --accent-amber: 145 94 0;
-      --accent-rose: 175 46 73;
-      --accent-coral: 173 74 16;
+      --accent-mint: 21 120 84;
+      --accent-peach: 176 75 64;
+      --accent-lavender: 103 72 161;
+      --accent-sky: 27 100 156;
+      --accent-amber: 148 95 10;
+      --accent-rose: 183 57 80;
+      --accent-coral: 179 77 19;
 
-      --accent-primary: 96 79 190;
-      --accent-primary-hover: 80 64 169;
-      --accent-primary-active: 68 53 151;
+      --accent-primary: 93 74 180;
+      --accent-primary-hover: 77 59 155;
+      --accent-primary-active: 64 47 133;
 
-      --text-primary: 34 39 47;
-      --text-secondary: 77 84 95;
-      --text-tertiary: 105 113 125;
-      --text-category: 95 103 115;
+      --text-primary: 27 31 39;
+      --text-secondary: 69 75 87;
+      --text-tertiary: 99 106 119;
+      --text-category: 91 98 110;
       --text-message: 42 47 55;
       --text-username: 42 47 55;
-      --text-username-owner: 175 46 73;
-      --text-selected: 34 39 47;
-      --selection-indicator: 96 79 190;
-      --surface-selected: 236 233 250;
+      --text-username-owner: 183 57 80;
+      --text-selected: 27 31 39;
+      --selection-indicator: 93 74 180;
+      --surface-selected: 235 232 248;
       --text-link: 24 91 157;
-      --text-positive: 20 112 76;
-      --text-warning: 145 94 0;
-      --text-danger: 175 46 73;
+      --text-positive: 21 120 84;
+      --text-warning: 148 95 10;
+      --text-danger: 183 57 80;
 
-      --interactive-hover: rgba(44, 61, 82, 0.055);
-      --interactive-active: rgba(44, 61, 82, 0.095);
-      --interactive-selected: rgba(96, 79, 190, 0.12);
-      --interactive-message-hover: rgba(44, 61, 82, 0.035);
-      --interactive-muted: 178 189 202;
+      --interactive-hover: rgba(31, 41, 55, 0.055);
+      --interactive-active: rgba(31, 41, 55, 0.105);
+      --interactive-selected: rgba(93, 74, 180, 0.13);
+      --interactive-message-hover: rgba(31, 41, 55, 0.035);
+      --interactive-muted: 170 178 190;
 
-      --status-online: 22 128 82;
-      --status-idle: 160 110 6;
-      --status-dnd: 188 52 65;
-      --status-offline: 137 145 157;
+      --status-online: 21 128 84;
+      --status-idle: 160 105 8;
+      --status-dnd: 190 55 70;
+      --status-offline: 132 140 153;
 
-      --glass-bg: rgba(255, 255, 255, 0.98);
-      --glass-modal-bg: rgba(255, 255, 255, 0.995);
-      --glass-border: rgba(46, 62, 82, 0.12);
-      --glass-highlight: rgba(255, 255, 255, 0.95);
-      --notification: 188 52 65;
+      --glass-bg: rgba(255, 255, 255, 0.92);
+      --glass-modal-bg: rgba(255, 255, 255, 0.98);
+      --glass-border: rgba(31, 41, 55, 0.14);
+      --glass-highlight: rgba(255, 255, 255, 0.8);
+      --notification: 190 55 70;
     }
   }
 
@@ -181,7 +185,7 @@
 
   @media (forced-colors: none) {
     :root[data-color-scheme="light"] ::selection {
-      background: rgba(96, 79, 190, 0.18);
+      background: rgba(93, 74, 180, 0.18);
       color: rgb(var(--text-primary));
     }
   }
@@ -260,7 +264,7 @@
 
     :root[data-color-scheme="light"] :is(.input-standard, .input-search, .input-danger) {
       border-color: rgb(var(--border-soft));
-      box-shadow: 0 1px 2px rgba(36, 52, 72, 0.045);
+      box-shadow: 0 1px 2px rgb(var(--shadow-color) / 0.045);
     }
 
     :root[data-color-scheme="light"] :is(.border-white\/\[0\.06\], .border-white\/\[0\.08\], .border-white\/10) {
@@ -268,25 +272,25 @@
     }
 
     :root[data-color-scheme="light"] :is(.shadow-header, .shadow-elevation-low) {
-      box-shadow: 0 1px 2px rgba(36, 52, 72, 0.045);
+      box-shadow: 0 1px 2px rgb(var(--shadow-color) / 0.045);
     }
 
     :root[data-color-scheme="light"] :is(.shadow-elevation-high, .shadow-glass) {
-      box-shadow: 0 12px 32px rgba(36, 52, 72, 0.14);
+      box-shadow: 0 12px 32px rgb(var(--shadow-color) / 0.14);
     }
 
     :root[data-color-scheme="light"] .shadow-input {
-      box-shadow: 0 1px 3px rgba(36, 52, 72, 0.09);
+      box-shadow: 0 1px 3px rgb(var(--shadow-color) / 0.09);
     }
 
     :root[data-color-scheme="light"] .glass {
-      box-shadow: 0 10px 28px rgba(36, 52, 72, 0.14), inset 0 1px 0 var(--glass-highlight);
+      box-shadow: 0 10px 28px rgb(var(--shadow-color) / 0.14), inset 0 1px 0 var(--glass-highlight);
     }
     :root[data-color-scheme="light"] .glass-bubble {
-      box-shadow: 0 8px 24px rgba(36, 52, 72, 0.13), inset 0 1px 0 var(--glass-highlight);
+      box-shadow: 0 8px 24px rgb(var(--shadow-color) / 0.13), inset 0 1px 0 var(--glass-highlight);
     }
     :root[data-color-scheme="light"] .glass-modal {
-      box-shadow: 0 16px 44px rgba(36, 52, 72, 0.18), inset 0 1px 0 var(--glass-highlight);
+      box-shadow: 0 16px 44px rgb(var(--shadow-color) / 0.18), inset 0 1px 0 var(--glass-highlight);
     }
     :root[data-color-scheme="light"] .glass-pill {
       background: var(--interactive-hover);
@@ -295,30 +299,30 @@
     }
     :root[data-color-scheme="light"] .glass-pill:hover {
       background: var(--interactive-active);
-      border-color: rgba(46, 62, 82, 0.18);
+      border-color: rgba(31, 41, 55, 0.2);
     }
     :root[data-color-scheme="light"] .glass-pill-mine {
-      background: rgba(20, 112, 76, 0.09);
-      border-color: rgba(20, 112, 76, 0.24);
+      background: rgb(var(--accent-mint) / 0.1);
+      border-color: rgb(var(--accent-mint) / 0.28);
       box-shadow: none;
     }
     :root[data-color-scheme="light"] .glass-pill-mine:hover {
-      background: rgba(20, 112, 76, 0.14);
+      background: rgb(var(--accent-mint) / 0.16);
     }
 
     :root[data-color-scheme="light"] .emoji-picker-wrapper em-emoji-picker {
       --rgb-background: 255, 255, 255;
-      --rgb-input: 247, 249, 252;
-      --rgb-color: 34, 39, 47;
-      --color-border: rgba(46, 62, 82, 0.12);
-      --color-border-over: rgba(46, 62, 82, 0.20);
+      --rgb-input: 246, 247, 249;
+      --rgb-color: 27, 31, 39;
+      --color-border: rgba(31, 41, 55, 0.14);
+      --color-border-over: rgba(31, 41, 55, 0.22);
       --em-rgb-background: 255, 255, 255;
-      --em-rgb-input: 247, 249, 252;
-      --em-rgb-color: 34, 39, 47;
-      --em-color-border: rgba(46, 62, 82, 0.12);
-      --em-color-border-over: rgba(46, 62, 82, 0.20);
-      --em-rgb-accent: 96, 79, 190;
-      --rgb-accent: 96, 79, 190;
+      --em-rgb-input: 246, 247, 249;
+      --em-rgb-color: 27, 31, 39;
+      --em-color-border: rgba(31, 41, 55, 0.14);
+      --em-color-border-over: rgba(31, 41, 55, 0.22);
+      --em-rgb-accent: 93, 74, 180;
+      --rgb-accent: 93, 74, 180;
     }
   }
 }

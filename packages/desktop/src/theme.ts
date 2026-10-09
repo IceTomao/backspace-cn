@@ -80,7 +80,7 @@ export class ThemeManager {
 export function windowThemeColors(dark: boolean): { color: string; symbolColor: string } {
   return dark
     ? { color: '#0b0b10', symbolColor: '#d8d8de' }
-    : { color: '#f3f4f6', symbolColor: '#25272c' };
+    : { color: '#f4f4f6', symbolColor: '#25272c' };
 }
 
 export function canReadThemeStyles(

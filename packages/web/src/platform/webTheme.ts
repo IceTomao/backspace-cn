@@ -25,7 +25,7 @@ export function setWebThemeMode(mode: ThemeMode): void {
 
 function updateThemeColor(theme: 'light' | 'dark'): void {
   document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute(
-    'content', theme === 'light' ? '#eff3f8' : '#0b0b10',
+    'content', theme === 'light' ? '#f4f4f6' : '#0b0b10',
   );
   document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute(
     'content', theme === 'light' ? 'default' : 'black',

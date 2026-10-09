@@ -25,7 +25,7 @@ export function ThemePreview() {
   function changeScheme(value: 'light' | 'dark') {
     setScheme(value);
     document.documentElement.dataset.colorScheme = value;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', value === 'light' ? '#eff3f8' : '#0b0b10');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', value === 'light' ? '#f4f4f6' : '#0b0b10');
   }
 
   function sendMessage(event: FormEvent) {

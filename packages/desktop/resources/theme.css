@@ -24,7 +24,7 @@
     }
 
     :scope[data-color-scheme="light"] ::selection {
-      background: rgba(96, 79, 190, 0.18) !important;
+      background: rgba(93, 74, 180, 0.18) !important;
       color: rgb(var(--text-primary)) !important;
     }
 
@@ -32,8 +32,13 @@
       background-color: rgb(var(--bg-base)) !important;
     }
     :scope[data-color-scheme="light"] .skeleton {
-      background: linear-gradient(90deg, #eaedf1 0%, #f6f7f9 40%, #eaedf1 80%) !important;
+      background: linear-gradient(90deg, #eceef2 0%, #f8f8fa 40%, #eceef2 80%) !important;
       background-size: 400px 100% !important;
+    }
+
+    :scope[data-color-scheme="light"] .glass-strip {
+      border-right-color: rgba(31, 41, 55, 0.1) !important;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 2px 0 12px rgba(31, 41, 55, 0.08) !important;
     }
 
     /* Preserve white text on colored controls; only correct neutral selected rows. */
@@ -97,29 +102,35 @@
     /* Standalone desktop pages do not load the shared web stylesheet. */
     :scope[data-color-scheme="light"] .emoji-picker-wrapper em-emoji-picker {
       --rgb-background: 255, 255, 255 !important;
-      --rgb-input: 247, 249, 252 !important;
-      --rgb-color: 34, 39, 47 !important;
-      --color-border: rgba(46, 62, 82, 0.12) !important;
-      --color-border-over: rgba(46, 62, 82, 0.20) !important;
+      --rgb-input: 246, 247, 249 !important;
+      --rgb-color: 27, 31, 39 !important;
+      --color-border: rgba(31, 41, 55, 0.14) !important;
+      --color-border-over: rgba(31, 41, 55, 0.22) !important;
       --em-rgb-background: 255, 255, 255 !important;
-      --em-rgb-input: 247, 249, 252 !important;
-      --em-rgb-color: 34, 39, 47 !important;
-      --em-color-border: rgba(46, 62, 82, 0.12) !important;
-      --em-color-border-over: rgba(46, 62, 82, 0.20) !important;
-      --em-rgb-accent: 96, 79, 190 !important;
-      --rgb-accent: 96, 79, 190 !important;
+      --em-rgb-input: 246, 247, 249 !important;
+      --em-rgb-color: 27, 31, 39 !important;
+      --em-color-border: rgba(31, 41, 55, 0.14) !important;
+      --em-color-border-over: rgba(31, 41, 55, 0.22) !important;
+      --em-rgb-accent: 93, 74, 180 !important;
+      --rgb-accent: 93, 74, 180 !important;
     }
 
     :scope[data-color-scheme="light"][data-backspace-page] {
-      --bg-base: 239 243 248;
+      --bg-base: 244 244 246;
+      --bg-channel: 236 238 242;
+      --bg-chat: 250 250 251;
+      --bg-members: 242 243 246;
       --bg-elevated: 255 255 255;
-      --bg-input: 255 255 255;
-      --border-soft: 225 231 239;
-      --accent-primary: 96 79 190;
-      --accent-primary-hover: 80 64 169;
-      --text-primary: 34 39 47;
-      --text-secondary: 77 84 95;
-      --text-tertiary: 105 113 125;
+      --bg-input: 246 247 249;
+      --border-hard: 209 212 220;
+      --border-soft: 225 227 233;
+      --accent-primary: 93 74 180;
+      --accent-primary-hover: 77 59 155;
+      --accent-primary-active: 64 47 133;
+      --text-primary: 27 31 39;
+      --text-secondary: 69 75 87;
+      --text-tertiary: 99 106 119;
+      --shadow-color: 31 41 55;
     }
     :scope[data-color-scheme="light"][data-backspace-page] .titlebar {
       background: rgb(var(--bg-base)) !important;
@@ -127,7 +138,7 @@
     :scope[data-color-scheme="light"][data-backspace-page] body::before { background: none !important; }
     :scope[data-color-scheme="light"][data-backspace-page] .card {
       background: rgb(var(--bg-elevated)) !important;
-      box-shadow: 0 4px 20px rgba(25, 33, 46, 0.12) !important;
+      box-shadow: 0 4px 20px rgb(var(--shadow-color) / 0.12) !important;
     }
     :scope[data-color-scheme="light"][data-backspace-page] :is(h1, .instance-info .name) {
       color: rgb(var(--text-primary)) !important;
