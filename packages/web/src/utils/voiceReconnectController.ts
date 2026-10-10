@@ -52,7 +52,7 @@ export class VoiceReconnectController {
     if (this.timer) clearTimeout(this.timer);
     if (this.watchdog) clearTimeout(this.watchdog);
     this.watchdog = undefined;
-    const wait = delay ?? DELAYS[Math.min(this.attempts++, DELAYS.length - 1)] * (0.8 + Math.random() * 0.2);
+    const wait = delay ?? (DELAYS[Math.min(this.attempts++, DELAYS.length - 1)] ?? 30_000) * (0.8 + Math.random() * 0.2);
     this.timer = setTimeout(() => { this.timer = undefined; void this.run(); }, wait);
   }
 
