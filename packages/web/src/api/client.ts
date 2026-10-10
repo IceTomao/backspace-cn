@@ -24,6 +24,7 @@ import type {
   JoinSpaceRequest,
   UpdateMemberRequest,
   LiveKitTokenResponse,
+  LiveKitStatusResponse,
   CreateDmRequest,
   AddDmMemberRequest,
   CreateGroupDmRequest,
@@ -309,6 +310,7 @@ export class BackspaceApiClient {
   };
 
   readonly livekit: {
+    status: () => Promise<LiveKitStatusResponse>;
     token: (channelId: string) => Promise<LiveKitTokenResponse>;
     dmToken: (dmChannelId: string) => Promise<LiveKitTokenResponse>;
   };
@@ -719,6 +721,7 @@ export class BackspaceApiClient {
     };
 
     this.livekit = {
+      status: () => request<LiveKitStatusResponse>('GET', '/livekit/status'),
       token: (channelId: string) =>
         request<LiveKitTokenResponse>('POST', '/livekit/token', { channelId }),
       dmToken: (dmChannelId: string) =>

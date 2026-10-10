@@ -24,6 +24,9 @@ import { sanitizeUser } from '../utils/sanitize.js';
 import { collectProfileBroadcastTargetIds } from '../utils/userDeletion.js';
 import { touchUserActivity, parseClientKind } from '../telemetry/activity.js';
 import { utcDay } from '../telemetry/day.js';
+import { config } from '../config.js';
+import { readVoiceServiceState, voiceRecoveryDeadline } from '../utils/voiceRecovery.js';
+import type { VoiceServiceState } from '@backspace/shared';
 
 // ─── Heartbeat State ──────────────────────────────────────────────────────────
 const wsIsAlive: WeakMap<WebSocket, boolean> = new WeakMap();
@@ -33,7 +36,7 @@ let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 // Chunk inArray() calls to stay safely under this limit.
 const BATCH_CHUNK_SIZE = 500;
 
-export const VOICE_RECONNECT_GRACE_MS = 60_000;
+export const VOICE_RECONNECT_GRACE_MS = Math.max(60_000, Math.min(300_000, config.livekit?.reconnectGraceMs ?? 60_000));
 const MAX_PENDING_VOICE_RECONNECTS = 10_000;
 
 function batchInArray<TId, TResult>(ids: TId[], queryFn: (chunk: TId[]) => TResult[]): TResult[] {
@@ -196,7 +199,7 @@ class ConnectionManager {
     }
   }
 
-  private scheduleVoiceDisconnect(userId: string): void {
+  private scheduleVoiceDisconnect(userId: string, baseDeadline = Date.now() + VOICE_RECONNECT_GRACE_MS): void {
     this.cancelVoiceDisconnect(userId);
     const roomId = this.userToRoom.get(userId)
       ?? Array.from(this.voiceRooms).find(([, room]) =>
@@ -221,9 +224,14 @@ class ConnectionManager {
     const timeout = setTimeout(() => {
       const pending = this.pendingVoiceReconnects.get(userId);
       if (!pending || pending.timeout !== timeout) return;
+      if (this.getUserRoom(userId)?.room.roomType === 'space' && voiceRecoveryDeadline() > Date.now()) {
+        this.scheduleVoiceDisconnect(userId, baseDeadline);
+        return;
+      }
       this.pendingVoiceReconnects.delete(userId);
       if (!this.voiceWs.has(userId)) this.finalizeVoiceDisconnect(userId, pending.roomId);
-    }, VOICE_RECONNECT_GRACE_MS);
+    }, Math.max(0, baseDeadline - Date.now(),
+      this.getUserRoom(userId)?.room.roomType === 'space' ? voiceRecoveryDeadline() - Date.now() : 0));
     this.pendingVoiceReconnects.set(userId, { timeout, roomId });
   }
 
@@ -1192,6 +1200,7 @@ function buildReadyPayload(userId: string): {
   spaceLayout: SpaceLayoutItem[] | null;
   layoutUpdatedAt: number | null;
   voiceStates: Record<string, string[]>;
+  voiceServiceState: VoiceServiceState | null;
   voiceChannelElapsedSeconds: Record<string, number>;
   voiceUserStates: Record<string, { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean }>;
   spaceVoiceStates: Record<string, { spaceMuted: boolean; spaceDeafened: boolean; permissionMuted: boolean }>;
@@ -1741,7 +1750,7 @@ function buildReadyPayload(userId: string): {
     pendingApprovalCount = countResult?.count ?? 0;
   }
 
-  return { user, spaces, dmChannels, folders, spaceLayout, layoutUpdatedAt, voiceStates, voiceChannelElapsedSeconds, voiceUserStates, spaceVoiceStates, readStates, activeCalls, userActivities, rejectedPeerOrigins, awaitingApprovalPeerOrigins, activePeerOrigins, pendingApprovalCount };
+  return { user, spaces, dmChannels, folders, spaceLayout, layoutUpdatedAt, voiceServiceState: readVoiceServiceState(), voiceStates, voiceChannelElapsedSeconds, voiceUserStates, spaceVoiceStates, readStates, activeCalls, userActivities, rejectedPeerOrigins, awaitingApprovalPeerOrigins, activePeerOrigins, pendingApprovalCount };
 }
 
 export async function registerWebSocket(app: FastifyInstance): Promise<void> {

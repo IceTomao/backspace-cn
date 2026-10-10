@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import { connectionManager, VOICE_RECONNECT_GRACE_MS } from './handler.js';
 import { handleClientEvent } from './events.js';
+import * as voiceRecovery from '../utils/voiceRecovery.js';
 
 function socket(): WebSocket {
   return { readyState: 1, send: vi.fn() } as unknown as WebSocket;
@@ -27,6 +28,48 @@ afterEach(() => {
 });
 
 describe('voice reconnect grace', () => {
+  it('extends a space session only to the fixed recovery deadline', () => {
+    const startedAt = Date.now();
+    const deadline = startedAt + 600_000;
+    vi.spyOn(voiceRecovery, 'voiceRecoveryDeadline').mockImplementation(() => Date.now() < deadline ? deadline : 0);
+    const ws = socket();
+    joinSpace('recovery-expire-user', 'recovery-expire-room', ws);
+    close(ws);
+    vi.advanceTimersByTime(599_999);
+    expect(connectionManager.getUserRoom('recovery-expire-user')?.roomId).toBe('recovery-expire-room');
+    vi.advanceTimersByTime(1);
+    expect(connectionManager.getUserRoom('recovery-expire-user')).toBeNull();
+  });
+
+  it('detects recovery after the original grace timer started without renewing base grace', () => {
+    const startedAt = Date.now();
+    const deadline = startedAt + VOICE_RECONNECT_GRACE_MS + 10_000;
+    const recovery = vi.spyOn(voiceRecovery, 'voiceRecoveryDeadline').mockReturnValue(0);
+    const ws = socket();
+    joinSpace('recovery-late-user', 'recovery-late-room', ws);
+    close(ws);
+    recovery.mockImplementation(() => Date.now() < deadline ? deadline : 0);
+    vi.advanceTimersByTime(VOICE_RECONNECT_GRACE_MS);
+    expect(connectionManager.getUserRoom('recovery-late-user')).not.toBeNull();
+    vi.advanceTimersByTime(10_000);
+    expect(connectionManager.getUserRoom('recovery-late-user')).toBeNull();
+  });
+
+  it('does not extend DM grace for a service recovery', () => {
+    vi.spyOn(voiceRecovery, 'voiceRecoveryDeadline').mockReturnValue(Date.now() + 600_000);
+    const ws = socket();
+    connectionManager.createRoom('recovery-dm-room', 'dm', {
+      type: 'dm', callerId: 'recovery-dm-user', state: 'active',
+    });
+    connectionManager.joinRoom('recovery-dm-room', 'recovery-dm-user');
+    connectionManager.addConnection('recovery-dm-user', ws);
+    connectionManager.addConnection('recovery-dm-user', socket());
+    connectionManager.setVoiceWs('recovery-dm-user', ws);
+    close(ws);
+    vi.advanceTimersByTime(VOICE_RECONNECT_GRACE_MS);
+    expect(connectionManager.getRoom('recovery-dm-room')).toBeUndefined();
+  });
+
   it('keeps a space participant during the grace period', () => {
     const ws = socket();
     joinSpace('grace-space-user', 'grace-space-room', ws);

@@ -40,6 +40,9 @@ import {
 import { parseStreamWatch } from '../utils/streamWatchProtocol';
 import { getMediaStreamTrack } from '../utils/livekitInternals';
 import { deactivate as deactivateHwOverdrive } from '../utils/hwOverdrive';
+import { HttpError } from '../api/client';
+import { VoiceReconnectController } from '../utils/voiceReconnectController';
+import { onVoiceRecovery } from '../utils/voiceRecoverySignals';
 
 let _activeRoom: Room | null = null;
 /**
@@ -223,6 +226,15 @@ function useBrowserLiveKit() {
   const roomRef = useRef<Room | null>(null);
   const connectedChannelRef = useRef<string | null>(null);
   const switchCameraGenRef = useRef(0);
+  const retryConnectRef = useRef<(channel: string) => Promise<boolean>>(async () => false);
+  const recoveryRef = useRef<VoiceReconnectController | null>(null);
+  if (!recoveryRef.current) {
+    recoveryRef.current = new VoiceReconnectController(
+      channel => useVoiceStore.getState().currentVoiceChannelId === channel
+        && !useVoiceStore.getState().activeDmCall,
+      channel => retryConnectRef.current(channel),
+    );
+  }
   
   const isMuted = useVoiceStore((s) => s.isMuted);
   const isDeafened = useVoiceStore((s) => s.isDeafened);
@@ -603,9 +615,11 @@ function useBrowserLiveKit() {
     })();
   }, [cameraDeviceId, isCameraOn, isConnected]);
 
-  const connect = useCallback(async (channelId: string, isDm?: boolean) => {
+  const connect = useCallback(async (channelId: string, isDm?: boolean, recovering = false) => {
     const storedId = isDm ? `dm-${channelId}` : channelId;
-    if (connectedChannelRef.current === storedId && roomRef.current?.state === ConnectionState.Connected) return;
+    if (!recovering && connectedChannelRef.current === storedId && roomRef.current?.state === ConnectionState.Connected) return;
+    if (!recovering) recoveryRef.current?.cancel();
+    const ownsRecovery = () => !recovering || useVoiceStore.getState().currentVoiceChannelId === channelId;
 
     // Entering a DM call: drop any space voice channel we're still "in" on the
     // client. Done synchronously (before any await) so the sidebar updates
@@ -622,10 +636,28 @@ function useBrowserLiveKit() {
       broadcastVoiceStatus(origin);
     };
     const gen = ++_connectGeneration;
+    const attemptDeadline = Date.now() + 35_000;
+    const bounded = async <T,>(work: Promise<T> | T): Promise<T> => {
+      if (!recovering) return work;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          Promise.resolve(work),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Voice recovery attempt timed out')),
+              Math.max(0, attemptDeadline - Date.now()));
+          }),
+        ]);
+      } finally { if (timer !== undefined) clearTimeout(timer); }
+    };
 
     // Ensure AudioContext is created and resumed before tracks arrive
-    await AudioManager.getInstance().resumeContext();
+    // Capture was already armed by the original gesture. A suspended context
+    // must not block network recovery while a mobile browser is in the background.
+    if (recovering) void AudioManager.getInstance().resumeContext().catch(() => {});
+    else await AudioManager.getInstance().resumeContext();
     if (gen !== _connectGeneration) return;
+    if (!ownsRecovery()) return;
 
     // 1. Reset state immediately to reflect "Loading/Switching" in UI
     SpeakingDetector.getInstance().clear();
@@ -635,7 +667,7 @@ function useBrowserLiveKit() {
     setIsConnected(false);
     setIsConnecting(true);
     setConnectionState(ConnectionState.Connecting);
-    useVoiceStore.getState().setVoiceConnectionStatus('connecting');
+    useVoiceStore.getState().setVoiceConnectionStatus(recovering ? 'reconnecting' : 'connecting');
     setConnectionError(null);
     setConnectedChannelId(null); // Clear this so AppLayout knows we are transitioning
 
@@ -654,13 +686,14 @@ function useBrowserLiveKit() {
       _activeRoom = null;
       try {
         console.log('[LiveKit] Destroying previous room:', roomToDisconnect.name);
-        await destroyRoom(roomToDisconnect);
+        await bounded(destroyRoom(roomToDisconnect));
       } catch (err) {
         console.warn('Error disconnecting from previous room:', err);
       }
     }
     if (gen !== _connectGeneration) return;
     
+    let terminalDisconnect = false;
     try {
       let token: string;
       let url: string;
@@ -673,11 +706,12 @@ function useBrowserLiveKit() {
         clearFederatedCallData();
       } else {
         const client = getApiForOrigin(getChannelOrigin(channelId));
-        const resp = isDm ? await client.livekit.dmToken(channelId) : await client.livekit.token(channelId);
+        const resp = await bounded(isDm ? client.livekit.dmToken(channelId) : client.livekit.token(channelId));
         token = resp.token;
         url = resp.url;
       }
       if (gen !== _connectGeneration) return;
+      if (!ownsRecovery()) return;
       const newRoom = new Room({ adaptiveStream: true, dynacast: true, publishDefaults: { videoCodec: 'h264', simulcast: true } });
       roomRef.current = newRoom;
       let initialConnectPending = true;
@@ -829,6 +863,7 @@ function useBrowserLiveKit() {
       newRoom.on(RoomEvent.SignalReconnecting, () => {
         if (roomRef.current === newRoom) {
           useVoiceStore.getState().setVoiceConnectionStatus('reconnecting');
+          if (!isDm) recoveryRef.current?.sdkReconnecting();
         }
       });
       newRoom.on(RoomEvent.ConnectionStateChanged, (state) => {
@@ -842,10 +877,12 @@ function useBrowserLiveKit() {
 
           useVoiceStore.getState().setIsLiveKitConnected(connected);
           useVoiceStore.getState().setVoiceConnectionStatus(
-            connected ? 'connected' : state === ConnectionState.Reconnecting ? 'reconnecting' : 'connecting',
+            connected ? 'connected' : recovering || state === ConnectionState.Reconnecting ? 'reconnecting' : 'connecting',
           );
+          if (state === ConnectionState.Reconnecting && !isDm) recoveryRef.current?.sdkReconnecting();
 
           if (connected) {
+            if (!initialConnectPending && !isDm) recoveryRef.current?.retain(channelId);
             // On LiveKit reconnect, re-register with WS server (server may have restarted)
             if (connectedChannelRef.current) {
               registerWithServer();
@@ -859,10 +896,16 @@ function useBrowserLiveKit() {
       });
       newRoom.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
         if (roomRef.current !== newRoom) return;
+        const terminal = reason === DisconnectReason.DUPLICATE_IDENTITY
+          || reason === DisconnectReason.PARTICIPANT_REMOVED
+          || reason === DisconnectReason.ROOM_DELETED;
         // The SDK emits Disconnected before rejecting an initial connect.
         // Keep that attempt current so its catch can report the failure.
-        if (!initialConnectPending) _connectGeneration++;
-        AudioManager.getInstance().releaseInputStream();
+        if (initialConnectPending) { terminalDisconnect ||= terminal; return; }
+        _connectGeneration++;
+        const canRecover = !isDm && !terminal && reason !== DisconnectReason.CLIENT_INITIATED
+          && useVoiceStore.getState().currentVoiceChannelId === channelId;
+        if (!canRecover) AudioManager.getInstance().releaseInputStream();
         SpeakingDetector.getInstance().clear();
         setConnectionState(ConnectionState.Disconnected);
         setIsConnecting(false);
@@ -873,24 +916,27 @@ function useBrowserLiveKit() {
         // → triggers user_leave sound before the disconnect sound).
         useVoiceStore.getState().setSpeakingParticipants(new Set());
         useVoiceStore.setState({ participants: [], isLiveKitConnected: false });
-        useVoiceStore.getState().setVoiceConnectionStatus('disconnected');
+        useVoiceStore.getState().setVoiceConnectionStatus(canRecover ? 'reconnecting' : 'disconnected');
 
-        // Semantic terminal reasons must never auto-retry. An exhausted network
-        // reconnect keeps voice intent so VoiceControls can offer a user retry.
-        const terminal = reason === DisconnectReason.DUPLICATE_IDENTITY
-          || reason === DisconnectReason.PARTICIPANT_REMOVED
-          || reason === DisconnectReason.ROOM_DELETED;
+        // A semantic refusal cancels recovery; transient space drops keep capture.
         if (terminal) {
+          recoveryRef.current?.cancel();
           useVoiceStore.getState().handleForceDisconnect();
+        } else if (canRecover) {
+          recoveryRef.current?.schedule();
         } else if (reason !== DisconnectReason.CLIENT_INITIATED) {
           setConnectionError('network_disconnect');
           useVoiceStore.getState().setConnectionError('network_disconnect');
         }
       });
 
-      await newRoom.connect(url, token, { autoSubscribe: false });
+      await bounded(newRoom.connect(url, token, { autoSubscribe: false }));
+      if (terminalDisconnect) throw new Error('Voice join was refused');
       initialConnectPending = false;
-      if (gen !== _connectGeneration) { destroyRoom(newRoom); return; }
+      if (gen !== _connectGeneration || !ownsRecovery()) {
+        void Promise.resolve(destroyRoom(newRoom)).catch(() => {});
+        return;
+      }
       _activeRoom = newRoom;
       connectedChannelRef.current = storedId;
       setConnectedChannelId(storedId);
@@ -898,6 +944,9 @@ function useBrowserLiveKit() {
       setIsConnected(true);
       useVoiceStore.getState().setIsLiveKitConnected(true);
       useVoiceStore.getState().setVoiceConnectionStatus('connected');
+      setConnectionError(null);
+      useVoiceStore.getState().setConnectionError(null);
+      if (!isDm) recoveryRef.current?.retain(channelId);
 
       // Tell WS server we're in the voice channel now that LiveKit is connected
       registerWithServer();
@@ -927,16 +976,38 @@ function useBrowserLiveKit() {
       updateParticipants();
     } catch (err) {
       if (gen === _connectGeneration) {
-        AudioManager.getInstance().releaseInputStream();
-        setConnectionError('connect_failed');
-        useVoiceStore.getState().leaveVoice();
-        useVoiceStore.getState().setConnectionError('connect_failed');
+        const failedRoom = roomRef.current;
+        roomRef.current = null;
+        _activeRoom = null;
+        if (failedRoom) void Promise.resolve(destroyRoom(failedRoom)).catch(() => {});
+        setIsConnected(false);
+        setRoom(null);
+        useVoiceStore.getState().setIsLiveKitConnected(false);
+        const rejected = terminalDisconnect || (err instanceof HttpError && [401, 403, 404].includes(err.status));
+        if (recovering && !rejected && ownsRecovery()) {
+          setConnectionState(ConnectionState.Reconnecting);
+          useVoiceStore.getState().setVoiceConnectionStatus('reconnecting');
+        } else {
+          recoveryRef.current?.cancel();
+          AudioManager.getInstance().releaseInputStream();
+          setIsConnecting(false);
+          setConnectionState(ConnectionState.Disconnected);
+          setConnectionError('connect_failed');
+          useVoiceStore.getState().leaveVoice();
+          useVoiceStore.getState().setConnectionError('connect_failed');
+        }
       }
     }
     finally { if (gen === _connectGeneration) setIsConnecting(false); }
   }, [updateParticipants, handleDataReceived]);
+  retryConnectRef.current = async channel => {
+    await connect(channel, false, true);
+    return useVoiceStore.getState().currentVoiceChannelId === channel
+      && useVoiceStore.getState().isLiveKitConnected;
+  };
 
   const disconnect = useCallback(async () => {
+    recoveryRef.current?.cancel();
     const gen = ++_connectGeneration;
     // Release before SDK teardown, even if token fetching has not made a Room
     // yet. A late teardown must never stop a subsequent call's fresh capture.
@@ -965,6 +1036,39 @@ function useBrowserLiveKit() {
     useVoiceStore.getState().setSpeakingParticipants(new Set());
     useVoiceStore.setState({ participants: [], isLiveKitConnected: false });
   }, []);
+
+  useEffect(() => {
+    const wake = () => {
+      const state = useVoiceStore.getState();
+      if (state.voiceConnectionStatus === 'reconnecting' || state.voiceConnectionStatus === 'disconnected') {
+        recoveryRef.current?.schedule(0);
+      }
+    };
+    const unsubscribeSignals = onVoiceRecovery((origin, service) => {
+      const channel = useVoiceStore.getState().currentVoiceChannelId;
+      if (!channel || getChannelOrigin(channel) !== origin) return;
+      if (service?.status === 'recovering') recoveryRef.current?.sdkReconnecting();
+      else wake();
+    });
+    const unsubscribeStore = useVoiceStore.subscribe((next, previous) => {
+      if (next.currentVoiceChannelId !== previous.currentVoiceChannelId) {
+        _connectGeneration++;
+        const retained = recoveryRef.current?.retainedChannel;
+        recoveryRef.current?.cancel();
+        if (retained && next.currentVoiceChannelId === null && !next.activeDmCall) void disconnect();
+      }
+    });
+    window.addEventListener('online', wake);
+    const visible = () => { if (document.visibilityState === 'visible') wake(); };
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      unsubscribeSignals();
+      unsubscribeStore();
+      window.removeEventListener('online', wake);
+      document.removeEventListener('visibilitychange', visible);
+      recoveryRef.current?.cancel();
+    };
+  }, [disconnect]);
 
   const toggleMic = useCallback(async () => { 
     await AudioManager.getInstance().resumeContext();
@@ -1018,6 +1122,7 @@ function useBrowserLiveKit() {
 
   useEffect(() => {
     return () => {
+      recoveryRef.current?.cancel();
       _connectGeneration++;
       SpeakingDetector.getInstance().clear();
       deactivateHwOverdrive();
@@ -1025,7 +1130,7 @@ function useBrowserLiveKit() {
       const roomToDestroy = roomRef.current;
       roomRef.current = null;
       _activeRoom = null;
-      if (roomToDestroy) void destroyRoom(roomToDestroy);
+      if (roomToDestroy) void Promise.resolve(destroyRoom(roomToDestroy)).catch(() => {});
     };
   }, []);
 

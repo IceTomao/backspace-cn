@@ -1,7 +1,7 @@
 # Backspace 中文版 - Portainer Stack
 #
 # 使用前：
-# 1. 将 backspace-cn_1.3.0.tar 导入 Portainer 的镜像库。
+# 1. 等 GitHub Actions 发布应用和 LiveKit 恢复镜像后，在 Portainer 拉取。
 # 2. 在 Portainer Stack 的 Environment variables 中设置：
 #    DOMAIN, LIVEKIT_URL, JWT_SECRET, LIVEKIT_API_KEY, LIVEKIT_API_SECRET,
 #    LIVEKIT_TURN_DOMAIN。
@@ -13,7 +13,7 @@
 
 services:
   backspace:
-    image: backspace-cn:1.3.0
+    image: ${BACKSPACE_IMAGE:-ghcr.io/icetomao/backspace-cn:latest}
     container_name: backspace
     restart: unless-stopped
     environment:
@@ -33,8 +33,11 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?请在 Portainer 设置 LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?请在 Portainer 设置 LIVEKIT_API_SECRET}
       LIVEKIT_TURN_DOMAIN: ${LIVEKIT_TURN_DOMAIN:?请在 Portainer 设置 LIVEKIT_TURN_DOMAIN，例如 chat.example.com}
+      LIVEKIT_RECOVERY_STATE_PATH: /run/backspace-voice/state.json
+      LIVEKIT_RECONNECT_GRACE_MS: "300000"
     volumes:
       - backspace-data:/app/data
+      - voice-recovery:/run/backspace-voice:ro
     ports:
       - "${APP_PORT:-3000}:3000"
     networks:
@@ -47,10 +50,20 @@ services:
       start_period: 30s
 
   livekit:
-    image: livekit/livekit-server:v1.13.7
+    image: ${LIVEKIT_IMAGE:-ghcr.io/icetomao/backspace-cn-livekit:latest}
     container_name: backspace-livekit
     restart: unless-stopped
     network_mode: host
+    stop_grace_period: 15s
+    environment:
+      LIVEKIT_RECOVERY_STATE_PATH: /run/backspace-voice/state.json
+      DOMAIN: ${DOMAIN}
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_TURN_DOMAIN: ${LIVEKIT_TURN_DOMAIN}
+      LIVEKIT_DDNS_DOMAINS: ${LIVEKIT_DDNS_DOMAINS:-}
+      LIVEKIT_IP_PROBE_URLS: ${LIVEKIT_IP_PROBE_URLS:-https://api4.ipify.org,https://ipv4.icanhazip.com}
+    volumes:
+      - voice-recovery:/run/backspace-voice
     configs:
       - source: livekit_config
         target: /etc/livekit.yaml
@@ -62,6 +75,7 @@ networks:
 
 volumes:
   backspace-data:
+  voice-recovery:
 
 configs:
   livekit_config:

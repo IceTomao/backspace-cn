@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import io.livekit.android.ConnectOptions
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
+import io.livekit.android.events.DisconnectReason
 import io.livekit.android.events.collect
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.RemoteAudioTrack
@@ -24,6 +25,7 @@ import io.livekit.android.room.track.RemoteVideoTrack
 import io.livekit.android.room.track.RemoteTrackPublication
 import io.livekit.android.room.track.Track
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -35,6 +37,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 private const val MEDIA_ACTIVITY_MIN_INTERVAL_MS = 3_200L
+private class VoiceAccessException(val status: Int) : Exception("获取语音权限失败 ($status)")
 internal const val SOCKET_HEARTBEAT_MS = 60_000L
 internal const val SOCKET_PONG_TIMEOUT_MS = 30_000L
 internal fun reconnectDelay(attempt: Int, jitter: Double = Random.nextDouble()): Long =
@@ -109,7 +112,10 @@ class BackspaceRuntime internal constructor(
     internal fun setNetworkAvailable(value: Boolean) {
         if (networkAvailable == value) return
         networkAvailable = value
-        if (!value) sockets.values.forEach { it.pause() } else reconcileConnections()
+        if (!value) sockets.values.forEach { it.pause() } else {
+            reconcileConnections()
+            wakeVoiceRecovery()
+        }
     }
     private fun observeNetwork() {
         if (networkCallback != null || socketFactory != null) return
@@ -203,6 +209,11 @@ class BackspaceRuntime internal constructor(
     }
     private var roomEvents: Job? = null
     private var voiceGeneration = 0
+    private var voiceRecoveryGeneration = 0
+    private var voiceRetry: Job? = null
+    private var voiceWatchdog: Job? = null
+    private val voiceRetryWake = Channel<Unit>(Channel.CONFLATED)
+    private var voiceDeviceId: String? = null
     private var voiceOrigin = ""
     private var voiceChannel: String? = null
     private var voiceSpace = ""
@@ -754,6 +765,7 @@ class BackspaceRuntime internal constructor(
                             if (inCall && voiceOrigin == origin) {
                                 if (!voiceIsDm) ws.send(JSONObject().put("type", "voice_join").put("channelId", voiceChannel).toString())
                                 broadcastVoice()
+                                wakeVoiceRecovery()
                             }
                         } else {
                             if (event.optString("type") == "user_updated") {
@@ -908,6 +920,10 @@ class BackspaceRuntime internal constructor(
         }
         if (type in setOf("message_created", "dm_message_created")) notifyMessage(session, event)
         if (!inCall || voiceOrigin != session.origin) return
+        if (type == "voice_service_state") {
+            if (event.optJSONObject("state")?.optString("status") == "recovering") watchVoiceReconnect()
+            else wakeVoiceRecovery()
+        }
         val sameCall = event.optString("dmChannelId") == voiceChannel ||
             (federatedCallId != null && event.optString("federatedCallId") == federatedCallId)
         if (voiceIsDm && type == "dm_call_accepted" && sameCall) {
@@ -1005,56 +1021,100 @@ class BackspaceRuntime internal constructor(
         } catch (error: Exception) { if (error !is CancellationException) hangup(); throw error }
         finally { callSignalling = false }
     }
-    suspend fun joinVoice(data: JSONObject, userInitiated: Boolean = true) {
+    private suspend fun fetchVoiceToken(request: Request): JSONObject = suspendCancellableCoroutine { pending ->
+        val call = http.newCall(request)
+        call.timeout().timeout(30, TimeUnit.SECONDS)
+        pending.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, error: java.io.IOException) {
+                pending.resumeWith(Result.failure(error))
+            }
+            override fun onResponse(call: Call, response: Response) {
+                val result = runCatching {
+                    response.use {
+                        if (!it.isSuccessful) throw VoiceAccessException(it.code)
+                        JSONObject(it.body?.string() ?: error("语音权限响应为空"))
+                    }
+                }
+                pending.resumeWith(result)
+            }
+        })
+    }
+    suspend fun joinVoice(data: JSONObject, userInitiated: Boolean = true, recovering: Boolean = false) {
         if (userInitiated) require(foreground) { "请打开应用后加入语音" }
         val channel = data.getString("channelId")
         val origin = data.optString("origin")
         val dm = data.optBoolean("isDm")
         require(channel.length in 1..200)
         val session = sockets[origin] ?: error("尚未登录服务器")
-        if (voiceChannel == channel && voiceOrigin == origin && voiceStatus != "disconnected") return
-        switchingVoice = true
-        try { hangup(userInitiated) } finally { switchingVoice = false }
+        if (recovering && (voiceChannel != channel || voiceOrigin != origin || voiceIsDm)) return
+        if (!recovering && voiceChannel == channel && voiceOrigin == origin && voiceStatus != "disconnected") return
+        if (recovering) clearVoiceRoom() else {
+            switchingVoice = true
+            try { hangup(userInitiated) } finally { switchingVoice = false }
+        }
         voiceChannel = channel; voiceOrigin = origin; voiceIsDm = dm; voiceSpace = data.optString("spaceId")
         federatedCallId = data.optString("federatedCallId").takeIf { it.isNotEmpty() && it != "null" }
         ringing = data.optBoolean("ringing")
-        voiceStatus = "connecting"; voiceError = null
+        voiceStatus = if (recovering) "reconnecting" else "connecting"; voiceError = null
         muted = data.optBoolean("muted"); deafened = data.optBoolean("deafened")
         loadRestrictions(session)
         val generation = ++voiceGeneration
+        var terminalDisconnect = false
         try {
-            serviceReady = CompletableDeferred()
-            updateService()
-            withTimeout(5000) { serviceReady!!.await() }
+            if (!recovering) {
+                serviceReady = CompletableDeferred()
+                updateService()
+                withTimeout(5000) { serviceReady!!.await() }
+            }
             reconcileConnections()
             emitVoice()
             val incoming = if (data.isNull("livekitToken")) "" else data.optString("livekitToken")
             val response = if (incoming.isNotBlank()) {
                 JSONObject().put("token", incoming).put("url", data.getString("livekitUrl"))
-            } else withContext(Dispatchers.IO) {
+            } else {
                 val body = JSONObject().put(if (dm) "dmChannelId" else "channelId", channel)
                 val request = Request.Builder().url(origin.ifEmpty { server } + "/api/livekit/token")
                     .header("Authorization", "Bearer ${session.token}")
                     .post(body.toString().toRequestBody("application/json".toMediaType())).build()
-                http.newCall(request).execute().use {
-                    check(it.isSuccessful) { "获取语音权限失败 (${it.code})" }
-                    JSONObject(it.body!!.string())
-                }
+                fetchVoiceToken(request)
             }
             if (generation != voiceGeneration) throw CancellationException("通话操作已取消")
             val url = response.getString("url")
             require(URI(url).scheme in setOf("wss", "https") && URI(url).rawUserInfo == null) { "语音服务器必须使用安全连接" }
             val next = LiveKit.create(context)
             room = next
-            next.audioSwitchHandler?.audioDeviceChangeListener = { _, _ -> handler.post { emitVoice() } }
+            var initialConnectPending = true
+            var transportDisconnected = false
+            next.audioSwitchHandler?.audioDeviceChangeListener = { _, _ -> handler.post {
+                if (room === next) { restoreVoiceDevice(); emitVoice() }
+            } }
             next.setMicrophoneMute(muted || deafened || forcedMute || forcedDeafen || permissionMute || ringing)
             roomEvents = scope.launch {
                 next.events.collect { event ->
                     if (room !== next) return@collect
                     when (event) {
-                        is RoomEvent.Reconnecting -> voiceStatus = "reconnecting"
-                        is RoomEvent.Reconnected, is RoomEvent.Connected -> voiceStatus = "connected"
-                        is RoomEvent.Disconnected -> { failVoice("语音连接已断开，请重新加入"); return@collect }
+                        is RoomEvent.Reconnecting -> {
+                            voiceStatus = "reconnecting"
+                            if (!dm) watchVoiceReconnect()
+                        }
+                        is RoomEvent.Reconnected, is RoomEvent.Connected -> {
+                            voiceStatus = "connected"
+                            voiceWatchdog?.cancel(); voiceWatchdog = null
+                        }
+                        is RoomEvent.Disconnected -> {
+                            transportDisconnected = true
+                            terminalDisconnect = terminalDisconnect || event.reason in setOf(DisconnectReason.DUPLICATE_IDENTITY,
+                                DisconnectReason.PARTICIPANT_REMOVED, DisconnectReason.ROOM_DELETED)
+                            if (initialConnectPending) return@collect
+                            if (!dm && event.reason !in setOf(DisconnectReason.CLIENT_INITIATED,
+                                    DisconnectReason.DUPLICATE_IDENTITY, DisconnectReason.PARTICIPANT_REMOVED,
+                                    DisconnectReason.ROOM_DELETED)) {
+                                voiceStatus = "reconnecting"
+                                scheduleVoiceRecovery()
+                            } else failVoice("语音连接已断开，请重新加入")
+                            return@collect
+                        }
                         is RoomEvent.ParticipantPermissionsChanged -> applyAudio()
                         else -> {}
                     }
@@ -1065,21 +1125,89 @@ class BackspaceRuntime internal constructor(
             }
             next.connect(url, response.getString("token"), ConnectOptions(autoSubscribe = false, audio = false, video = false))
             if (generation != voiceGeneration) throw CancellationException("通话操作已取消")
+            initialConnectPending = false
             if (!dm) send(origin, JSONObject().put("type", "voice_join").put("channelId", channel))
             val grant = next.localParticipant.permissions
             if (grant?.canPublish == true &&
                 (grant.canPublishSources.isEmpty() || Track.Source.MICROPHONE in grant.canPublishSources) && !permissionMute) {
                 check(next.localParticipant.setMicrophoneEnabled(true)) { "无法启用麦克风" }
             }
+            if (generation != voiceGeneration) throw CancellationException("通话操作已取消")
+            check(!transportDisconnected) { "语音连接在恢复过程中断开" }
             voiceStatus = "connected"
+            restoreVoiceDevice()
             applyAudio()
             emitVoice()
         } catch (e: Exception) {
-            if (generation == voiceGeneration) failVoice(e.message ?: "加入语音失败")
+            if (generation == voiceGeneration) {
+                if (recovering && !terminalDisconnect && !(e is VoiceAccessException && e.status in setOf(401, 403, 404))
+                    && e !is SecurityException) {
+                    clearVoiceRoom()
+                    voiceStatus = "reconnecting"
+                    emitVoice()
+                } else failVoice(e.message ?: "加入语音失败")
+            }
             throw e
         }
     }
+    private fun clearVoiceRoom() {
+        roomEvents?.cancel(); roomEvents = null
+        val old = room; room = null
+        old?.audioSwitchHandler?.audioDeviceChangeListener = null
+        old?.disconnect(); old?.release()
+    }
+    private fun watchVoiceReconnect() {
+        if (voiceIsDm || !inCall || voiceWatchdog?.isActive == true || voiceRetry?.isActive == true) return
+        voiceWatchdog = scope.launch {
+            delay(30_000)
+            voiceWatchdog = null
+            if (inCall && !voiceIsDm) scheduleVoiceRecovery()
+        }
+    }
+    private fun wakeVoiceRecovery() {
+        if (voiceRetry?.isActive == true) voiceRetryWake.trySend(Unit)
+        else if (inCall && !voiceIsDm && voiceStatus == "reconnecting") scheduleVoiceRecovery()
+    }
+    private fun scheduleVoiceRecovery() {
+        if (!inCall || voiceIsDm || voiceRetry?.isActive == true) return
+        voiceWatchdog?.cancel(); voiceWatchdog = null
+        voiceStatus = "reconnecting"
+        emitVoice()
+        val channel = voiceChannel!!
+        val origin = voiceOrigin
+        val epoch = voiceRecoveryGeneration
+        voiceRetry = scope.launch(start = CoroutineStart.LAZY) {
+            var attempt = 0
+            try {
+                while (isActive && epoch == voiceRecoveryGeneration && voiceChannel == channel && voiceOrigin == origin) {
+                    if (!networkAvailable || sockets[origin]?.ready != true) {
+                        withTimeoutOrNull(1000) { voiceRetryWake.receive() }
+                        continue
+                    }
+                    val data = JSONObject().put("channelId", channel).put("origin", origin)
+                        .put("isDm", false).put("spaceId", voiceSpace).put("muted", muted).put("deafened", deafened)
+                    try {
+                        withTimeout(35_000) { joinVoice(data, false, true) }
+                        if (voiceStatus == "connected") return@launch
+                    } catch (error: CancellationException) {
+                        if (error !is TimeoutCancellationException) throw error
+                    } catch (_: Exception) { /* joinVoice classifies terminal refusals. */ }
+                    if (epoch != voiceRecoveryGeneration || voiceChannel != channel) return@launch
+                    val wait = longArrayOf(1000, 2000, 4000, 8000, 15000, 30000)[attempt.coerceAtMost(5)]
+                    attempt++
+                    withTimeoutOrNull((wait * (0.8 + Random.nextDouble() * 0.2)).toLong()) { voiceRetryWake.receive() }
+                }
+            } finally {
+                if (epoch == voiceRecoveryGeneration) voiceRetry = null
+            }
+        }
+        voiceRetry?.start()
+    }
     fun hangup(signal: Boolean = true) {
+        voiceRecoveryGeneration++
+        voiceRetry?.cancel(); voiceRetry = null
+        voiceWatchdog?.cancel(); voiceWatchdog = null
+        while (voiceRetryWake.tryReceive().isSuccess) { }
         stopWatching()
         announcedWatcher = null
         val oldChannel = voiceChannel
@@ -1092,10 +1220,8 @@ class BackspaceRuntime internal constructor(
         ringTimeout?.cancel(); ringTimeout = null
         ringing = false
         voiceChannel = null
-        roomEvents?.cancel(); roomEvents = null
-        val old = room; room = null
-        old?.audioSwitchHandler?.audioDeviceChangeListener = null
-        old?.disconnect(); old?.release()
+        voiceDeviceId = null
+        clearVoiceRoom()
         voiceStatus = "disconnected"
         voiceError = null
         updateService()
@@ -1162,7 +1288,14 @@ class BackspaceRuntime internal constructor(
         val audio = room?.audioSwitchHandler ?: error("请先加入语音")
         if (id == "auto") audio.selectDevice(null)
         else audio.selectDevice(audio.availableAudioDevices.firstOrNull { it.name == id } ?: error("音频设备不可用"))
+        voiceDeviceId = id.takeUnless { it == "auto" }
         emitVoice()
+    }
+    private fun restoreVoiceDevice() {
+        val id = voiceDeviceId ?: return
+        val audio = room?.audioSwitchHandler ?: return
+        if (audio.selectedAudioDevice?.name == id) return
+        audio.availableAudioDevices.firstOrNull { it.name == id }?.let(audio::selectDevice)
     }
     fun voiceSnapshot(): JSONObject {
         val participants = JSONArray()

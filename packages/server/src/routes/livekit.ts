@@ -7,6 +7,7 @@ import { getChannelSpaceId, hasPermission, computePermissions, isDmMember, Permi
 import type { LiveKitTokenRequest, LiveKitTokenResponse } from '@backspace/shared';
 import { getDb, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
+import { readVoiceServiceState } from '../utils/voiceRecovery.js';
 
 /**
  * Generate a LiveKit token for a federated call participant.
@@ -41,6 +42,22 @@ export async function generateFederatedCallToken(
 }
 
 export async function livekitRoutes(app: FastifyInstance): Promise<void> {
+  app.get('/api/livekit/status', { preHandler: authenticate }, async (_request, reply) => {
+    return reply.header('Cache-Control', 'no-store').send({ state: readVoiceServiceState() });
+  });
+  if (config.livekit.recoveryStatePath) {
+    const { connectionManager } = await import('../ws/handler.js');
+    let previous = JSON.stringify(readVoiceServiceState());
+    const timer = setInterval(() => {
+      const state = readVoiceServiceState();
+      const serialized = JSON.stringify(state);
+      if (previous === serialized) return;
+      previous = serialized;
+      connectionManager.sendToAll({ type: 'voice_service_state', state });
+    }, 2000);
+    timer.unref();
+    app.addHook('onClose', async () => { clearInterval(timer); });
+  }
   app.post<{ Body: LiveKitTokenRequest & { dmChannelId?: string } }>('/api/livekit/token', {
     preHandler: authenticate,
   }, async (request, reply) => {

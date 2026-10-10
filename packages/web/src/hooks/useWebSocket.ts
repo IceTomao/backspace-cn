@@ -1,4 +1,5 @@
 import { serverLocation, isAndroid, androidCall, onAndroid } from '../platform/android';
+import { notifyVoiceRecovery } from '../utils/voiceRecoverySignals';
 import React, { useEffect, useRef } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { useSpaceStore, getChannelOrigin, getMyUserIdForOrigin, setMyUserIdForOrigin, resolveDmChannelId } from '../stores/spaceStore';
@@ -574,6 +575,11 @@ function handleEvent(origin: string, event: ServerEvent): void {
           );
         }
       }
+      notifyVoiceRecovery(origin, event.voiceServiceState);
+      break;
+
+    case 'voice_service_state':
+      notifyVoiceRecovery(origin, event.state);
       break;
 
     case 'message_created':

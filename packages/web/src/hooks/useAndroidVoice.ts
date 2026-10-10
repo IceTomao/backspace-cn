@@ -76,7 +76,7 @@ export function useAndroidVoice() {
   const toggleMic = useCallback(async () => { useVoiceStore.getState().toggleMic(); }, []);
   return {
     room: null as Room | null, connect, disconnect, toggleMic,
-    isConnected: snapshot.status === 'connected', isConnecting: snapshot.status === 'connecting',
+    isConnected: snapshot.status === 'connected', isConnecting: snapshot.status === 'connecting' || snapshot.status === 'reconnecting',
     connectionState: snapshot.status as ConnectionState, connectedChannelId: snapshot.channelId, connectionError: snapshot.error,
   };
 }

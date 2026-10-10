@@ -1,0 +1,25 @@
+# Layer on top of docker-compose.yml (and docker-compose.proxy.yml if used).
+services:
+  backspace:
+    environment:
+      LIVEKIT_RECOVERY_STATE_PATH: /run/backspace-voice/state.json
+      LIVEKIT_RECONNECT_GRACE_MS: "300000"
+    volumes:
+      - voice-recovery:/run/backspace-voice:ro
+  livekit:
+    image: ${LIVEKIT_IMAGE:-ghcr.io/icetomao/backspace-cn-livekit:latest}
+    build:
+      context: .
+      dockerfile: deploy/livekit-supervisor/Dockerfile
+    stop_grace_period: 15s
+    environment:
+      LIVEKIT_RECOVERY_STATE_PATH: /run/backspace-voice/state.json
+      DOMAIN: ${DOMAIN}
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
+      LIVEKIT_TURN_DOMAIN: ${LIVEKIT_TURN_DOMAIN:-}
+      LIVEKIT_DDNS_DOMAINS: ${LIVEKIT_DDNS_DOMAINS:-}
+      LIVEKIT_IP_PROBE_URLS: ${LIVEKIT_IP_PROBE_URLS:-https://api4.ipify.org,https://ipv4.icanhazip.com}
+    volumes:
+      - voice-recovery:/run/backspace-voice
+volumes:
+  voice-recovery:

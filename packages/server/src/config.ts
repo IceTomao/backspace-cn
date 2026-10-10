@@ -119,6 +119,8 @@ export const config = {
     url: envOptional('LIVEKIT_URL'),
     apiKey: envOptional('LIVEKIT_API_KEY'),
     apiSecret: envOptional('LIVEKIT_API_SECRET'),
+    recoveryStatePath: envOptional('LIVEKIT_RECOVERY_STATE_PATH'),
+    reconnectGraceMs: envInt('LIVEKIT_RECONNECT_GRACE_MS', 60_000),
   },
 
   federation: {

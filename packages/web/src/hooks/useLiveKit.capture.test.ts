@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Room, RoomEvent, DisconnectReason, ConnectionState, Track, TrackEvent } from 'livekit-client';
 import { useLiveKit } from './useLiveKit';
 import { useVoiceStore } from '../stores/voiceStore';
+import { HttpError } from '../api/client';
 
 const mocks = vi.hoisted(() => ({
   token: vi.fn(),
@@ -52,7 +53,7 @@ beforeEach(() => {
     this.emit(RoomEvent.Disconnected, DisconnectReason.CLIENT_INITIATED);
   });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('voice capture teardown', () => {
   it('preserves voice intent across Reconnecting → Connected', async () => {
@@ -181,7 +182,7 @@ describe('voice capture teardown', () => {
     expect(mocks.audio.releaseInputStream).toHaveBeenCalledTimes(1);
   });
 
-  it('retains voice intent and exposes retry after an exhausted network reconnect', async () => {
+  it('retains voice intent and warm capture after an exhausted network reconnect', async () => {
     useVoiceStore.setState({ currentVoiceChannelId: 'channel' });
     const { result } = renderHook(() => useLiveKit());
     await act(async () => { await result.current.connect('channel'); });
@@ -189,9 +190,121 @@ describe('voice capture teardown', () => {
     act(() => { result.current.room!.emit(RoomEvent.Disconnected, undefined); });
 
     expect(useVoiceStore.getState().currentVoiceChannelId).toBe('channel');
-    expect(result.current.connectionError).toBe('network_disconnect');
-    expect(useVoiceStore.getState().connectionError).toBe('network_disconnect');
-    expect(useVoiceStore.getState().voiceConnectionStatus).toBe('disconnected');
+    expect(result.current.connectionError).toBeNull();
+    expect(useVoiceStore.getState().voiceConnectionStatus).toBe('reconnecting');
+    expect(mocks.audio.releaseInputStream).not.toHaveBeenCalled();
+  });
+
+  it('automatically reconnects with a fresh token and preserves mute/deafen', async () => {
+    vi.useFakeTimers();
+    useVoiceStore.setState({ currentVoiceChannelId: 'channel', isMuted: true, isDeafened: true });
+    const { result } = renderHook(() => useLiveKit());
+    await act(async () => { await result.current.connect('channel'); });
+    const oldRoom = result.current.room!;
+    act(() => { oldRoom.emit(RoomEvent.Disconnected, DisconnectReason.STATE_MISMATCH); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+    expect(mocks.token).toHaveBeenCalledTimes(2);
+    expect(result.current.room).not.toBe(oldRoom);
+    expect(result.current.isConnected).toBe(true);
+    expect(useVoiceStore.getState()).toMatchObject({
+      currentVoiceChannelId: 'channel', isMuted: true, isDeafened: true, voiceConnectionStatus: 'connected',
+    });
+    expect(mocks.audio.releaseInputStream).not.toHaveBeenCalled();
+  });
+
+  it('keeps retrying transient token failures without clearing voice intent', async () => {
+    vi.useFakeTimers();
+    useVoiceStore.setState({ currentVoiceChannelId: 'channel' });
+    const { result } = renderHook(() => useLiveKit());
+    await act(async () => { await result.current.connect('channel'); });
+    mocks.token.mockRejectedValueOnce(new HttpError(503, 'service unavailable'));
+    act(() => { result.current.room!.emit(RoomEvent.Disconnected); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(useVoiceStore.getState().currentVoiceChannelId).toBe('channel');
+    expect(useVoiceStore.getState().voiceConnectionStatus).toBe('reconnecting');
+    expect(mocks.audio.releaseInputStream).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(result.current.isConnected).toBe(true);
+    expect(mocks.token).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([401, 403, 404])('stops recovering when access is refused (%s)', async status => {
+    vi.useFakeTimers();
+    useVoiceStore.setState({ currentVoiceChannelId: 'channel' });
+    const { result } = renderHook(() => useLiveKit());
+    await act(async () => { await result.current.connect('channel'); });
+    mocks.token.mockRejectedValueOnce(new HttpError(status, 'access refused'));
+    act(() => { result.current.room!.emit(RoomEvent.Disconnected); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mocks.token).toHaveBeenCalledTimes(2);
+    expect(useVoiceStore.getState().currentVoiceChannelId).toBeNull();
+    expect(mocks.audio.releaseInputStream).toHaveBeenCalledOnce();
+  });
+
+  it('stops after a semantic refusal during the recovery handshake', async () => {
+    vi.useFakeTimers();
+    useVoiceStore.setState({ currentVoiceChannelId: 'channel' });
+    const { result } = renderHook(() => useLiveKit());
+    await act(async () => { await result.current.connect('channel'); });
+    mocks.connect.mockImplementationOnce(async function (this: Room) {
+      this.emit(RoomEvent.Disconnected, DisconnectReason.DUPLICATE_IDENTITY);
+      throw new Error('identity displaced');
+    });
+    act(() => { result.current.room!.emit(RoomEvent.Disconnected); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mocks.connect).toHaveBeenCalledTimes(2);
+    expect(useVoiceStore.getState().currentVoiceChannelId).toBeNull();
+  });
+
+  it('ignores a recovery token received after the user leaves', async () => {
+    vi.useFakeTimers();
+    useVoiceStore.setState({ currentVoiceChannelId: 'channel' });
+    const { result } = renderHook(() => useLiveKit());
+    await act(async () => { await result.current.connect('channel'); });
+    let finish!: (token: { token: string; url: string }) => void;
+    mocks.token.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    act(() => { result.current.room!.emit(RoomEvent.Disconnected); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    act(() => { useVoiceStore.getState().leaveVoice(); });
+    await act(async () => {
+      finish({ token: 'late', url: 'wss://example.invalid' });
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(mocks.connect).toHaveBeenCalledOnce();
+    expect(useVoiceStore.getState().currentVoiceChannelId).toBeNull();
+    expect(mocks.audio.releaseInputStream).toHaveBeenCalledOnce();
+  });
+
+  it('ignores a pending recovery connect after switching channels', async () => {
+    vi.useFakeTimers();
+    useVoiceStore.setState({ currentVoiceChannelId: 'channel' });
+    const { result } = renderHook(() => useLiveKit());
+    await act(async () => { await result.current.connect('channel'); });
+    let finish!: () => void;
+    mocks.connect.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+    act(() => { result.current.room!.emit(RoomEvent.Disconnected); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    act(() => { useVoiceStore.setState({ currentVoiceChannelId: 'second' }); });
+    await act(async () => { await result.current.connect('second'); finish(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(result.current.connectedChannelId).toBe('second');
+    expect(useVoiceStore.getState().currentVoiceChannelId).toBe('second');
+    expect(mocks.audio.releaseInputStream).not.toHaveBeenCalled();
+  });
+
+  it('bounds a hung recovery attempt and resumes retrying', async () => {
+    vi.useFakeTimers();
+    useVoiceStore.setState({ currentVoiceChannelId: 'channel' });
+    const { result } = renderHook(() => useLiveKit());
+    await act(async () => { await result.current.connect('channel'); });
+    mocks.connect.mockReturnValueOnce(new Promise<void>(() => {}));
+    act(() => { result.current.room!.emit(RoomEvent.Disconnected); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(35_999); });
+    expect(mocks.connect).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(4001); });
+    expect(mocks.connect).toHaveBeenCalledTimes(3);
+    expect(result.current.isConnected).toBe(true);
   });
 
   it('keeps capture warm while switching channels and ignores stale room events', async () => {
