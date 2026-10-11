@@ -13,6 +13,10 @@
     <string name="stream_exit_fullscreen">退出全屏</string>
     <string name="stream_brightness_percent">亮度 %1$d%%</string>
     <string name="stream_volume_percent">音量 %1$d%%</string>
+    <string name="stream_audio_not_shared">主播未分享声音</string>
+    <string name="stream_audio_connecting">正在连接直播声音…</string>
+    <string name="stream_audio_unavailable">直播声音连接失败，请关闭声音后重试</string>
+    <string name="stream_audio_failed">直播声音播放失败，请关闭声音后重试</string>
     <string name="stream_sound_off">关闭直播声音</string>
     <string name="stream_sound_on">开启直播声音</string>
     <string name="stream_unmute">取消麦克风静音</string>

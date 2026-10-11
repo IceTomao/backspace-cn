@@ -39,6 +39,9 @@ import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.annotation.Implements
+import org.robolectric.annotation.Implementation
+import org.robolectric.shadows.ShadowAudioManager
 import java.io.File
 import java.time.Duration
 
@@ -307,21 +310,21 @@ class StreamViewerActivityTest {
         assertEquals(128, Settings.System.getInt(activity.contentResolver, Settings.System.SCREEN_BRIGHTNESS))
     }
 
-    @Test fun rightSwipesChangeTheLiveKitOutputStreamWithoutUnmutingTheStreamOrMicrophone() {
+    @Test fun rightSwipesChangeMediaVolumeWithoutChangingVoiceVolumeOrUnmuting() {
         val activity = launch()
         activity.layout(393, 800)
         val audio = activity.getSystemService(AudioManager::class.java)
-        val stream = AudioManager.STREAM_VOICE_CALL
+        val stream = AudioManager.STREAM_MUSIC
         val max = audio.getStreamMaxVolume(stream)
         val min = audio.getStreamMinVolume(stream)
         audio.setStreamVolume(stream, (max + min) / 2, 0)
         val initial = audio.getStreamVolume(stream)
-        val music = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val voice = audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
         session.snapshot.put("streamSoundEnabled", false).put("muted", true)
         activity.swipe(0.75f, 0.8f, 0.01f)
         assertTrue(audio.getStreamVolume(stream) > initial)
         assertEquals(max, audio.getStreamVolume(stream))
-        assertEquals(music, audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+        assertEquals(voice, audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL))
         assertFalse(session.snapshot.getBoolean("streamSoundEnabled"))
         assertTrue(session.snapshot.getBoolean("muted"))
         activity.swipe(0.75f, 0.1f, 0.99f)
@@ -330,6 +333,68 @@ class StreamViewerActivityTest {
         assertEquals(activity.getString(R.string.stream_volume_percent, percent), activity.findViewById<TextView>(R.id.stream_gesture_label).text.toString())
         assertEquals(-1f, activity.window.attributes.screenBrightness, 0f)
         assertEquals(stream, activity.volumeControlStream)
+    }
+
+    @Test fun hardwareVolumeKeysUseMediaEvenInCommunicationModeAndKeepSoundOff() {
+        val activity = launch()
+        val audio = activity.getSystemService(AudioManager::class.java)
+        audio.mode = AudioManager.MODE_IN_COMMUNICATION
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, 3, 0)
+        val voice = audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+        session.snapshot.put("streamSoundEnabled", false)
+        for (action in listOf(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.ACTION_UP)) {
+            assertTrue(activity.dispatchKeyEvent(android.view.KeyEvent(action, android.view.KeyEvent.KEYCODE_VOLUME_UP)))
+        }
+        assertEquals(4, audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+        assertEquals(voice, audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL))
+        assertFalse(session.snapshot.getBoolean("streamSoundEnabled"))
+        activity.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_DOWN))
+        assertEquals(3, audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+    }
+
+    @Test
+    @Config(shadows = [LimitedStreamAudioManager::class])
+    fun fixedAndSystemLimitedMediaVolumeUseTheAcceptedValueForFeedback() {
+        val activity = launch()
+        activity.layout(393, 800)
+        val audio = activity.getSystemService(AudioManager::class.java)
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, 3, 0)
+        val voice = audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+        try {
+            LimitedStreamAudioManager.fixed = true
+            activity.swipe(0.75f, 0.8f, 0.01f)
+            activity.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_UP))
+            assertEquals(3, audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+            LimitedStreamAudioManager.fixed = false
+            LimitedStreamAudioManager.limit = 5
+            activity.swipe(0.75f, 0.8f, 0.01f)
+            assertEquals(5, audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+            val percent = kotlin.math.round(5 * 100f / audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)).toInt()
+            assertEquals(activity.getString(R.string.stream_volume_percent, percent), activity.findViewById<TextView>(R.id.stream_gesture_label).text.toString())
+            assertEquals(voice, audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL))
+        } finally {
+            LimitedStreamAudioManager.fixed = false
+            LimitedStreamAudioManager.limit = Int.MAX_VALUE
+        }
+    }
+
+    @Test fun audioFailuresKeepFullscreenControlsVisibleWithoutClearingTheVideo() {
+        val activity = launch()
+        activity.click(R.id.stream_fullscreen_button)
+        session.emitAudio(StreamAudioStatus.UNAVAILABLE)
+        advance(4)
+        assertEquals(View.VISIBLE, activity.view(R.id.stream_footer).visibility)
+        assertEquals(View.GONE, activity.view(R.id.stream_message).visibility)
+        assertEquals(activity.getString(R.string.stream_audio_unavailable), activity.findViewById<TextView>(R.id.stream_status).text.toString())
+        session.emitAudio(StreamAudioStatus.FAILED)
+        assertEquals(activity.getString(R.string.stream_audio_failed), activity.findViewById<TextView>(R.id.stream_status).text.toString())
+        session.emitAudio(StreamAudioStatus.NO_TRACK)
+        assertEquals(activity.getString(R.string.stream_audio_not_shared), activity.findViewById<TextView>(R.id.stream_status).text.toString())
+        activity.click(R.id.stream_sound_button)
+        assertEquals(activity.getString(R.string.stream_playing), activity.findViewById<TextView>(R.id.stream_status).text.toString())
+        controller!!.pause().stop().destroy()
+        controller = null
+        assertNull(session.audioObserver)
     }
 
     @Test fun swipeDoesNotToggleChromeAndHudDisappearsAfterReleaseWhileTapStillRevealsChrome() {
@@ -417,11 +482,17 @@ class StreamViewerActivityTest {
         capture("portrait-light", 393, 800)
         session.dark = true; session.emit()
         capture("portrait-dark", 393, 800)
+        session.emitAudio(StreamAudioStatus.FAILED)
+        capture("audio-failure-portrait", 393, 800)
+        session.emitAudio(StreamAudioStatus.PLAYING)
         val config = Configuration(activity.resources.configuration).apply { orientation = Configuration.ORIENTATION_LANDSCAPE }
         controller!!.configurationChange(config)
         capture("landscape-dark", 800, 393)
         activity.click(R.id.stream_fullscreen_button)
         capture("fullscreen-landscape", 800, 393)
+        session.emitAudio(StreamAudioStatus.UNAVAILABLE)
+        capture("audio-failure-fullscreen", 800, 393)
+        session.emitAudio(StreamAudioStatus.PLAYING)
         activity.swipe(0.25f, 0.6f, 0.35f)
         capture("gesture-brightness", 800, 393)
         activity.swipe(0.75f, 0.6f, 0.35f)
@@ -432,6 +503,15 @@ class StreamViewerActivityTest {
         capture("fullscreen-portrait", 393, 800)
         activity.click(R.id.stream_fullscreen_button)
         capture("tablet-dark", 800, 1200)
+    }
+}
+
+@Implements(AudioManager::class)
+class LimitedStreamAudioManager : ShadowAudioManager() {
+    companion object { var fixed = false; var limit = Int.MAX_VALUE }
+    @Implementation fun isVolumeFixed() = fixed
+    @Implementation override fun setStreamVolume(stream: Int, value: Int, flags: Int) {
+        super.setStreamVolume(stream, if (stream == AudioManager.STREAM_MUSIC) minOf(value, limit) else value, flags)
     }
 }
 
@@ -467,6 +547,7 @@ private class FakeStreamSession : StreamViewerSession {
     var rendererAvailable = true
     var stopsWatching = 0
     var observer: ((JSONObject) -> Unit)? = null
+    var audioObserver: ((StreamAudioStatus) -> Unit)? = null
     val snapshot = JSONObject().put("watchStatus", "playing").put("streamSoundEnabled", true).put("muted", false)
         .put("streams", JSONArray().put(JSONObject().put("identity", "alice").put("name", "Alice")))
     override fun settings() = JSONObject().put("dark", dark)
@@ -475,6 +556,11 @@ private class FakeStreamSession : StreamViewerSession {
         this.observer = observer; observer(snapshot)
         return { this.observer = null }
     }
+    override fun observeStreamAudio(observer: (StreamAudioStatus) -> Unit): () -> Unit {
+        audioObserver = observer; observer(StreamAudioStatus.PLAYING)
+        return { audioObserver = null }
+    }
+    fun emitAudio(status: StreamAudioStatus) { audioObserver?.invoke(status) }
     override fun initializeVideoRenderer(renderer: SurfaceViewRenderer) {
         check(rendererAvailable) { "Room recovering" }
         initializations++

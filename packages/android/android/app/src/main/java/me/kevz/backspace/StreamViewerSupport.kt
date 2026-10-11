@@ -71,6 +71,7 @@ internal interface StreamViewerSession {
     fun settings(): JSONObject
     fun voiceSnapshot(): JSONObject
     fun observeVoice(observer: (JSONObject) -> Unit): () -> Unit
+    fun observeStreamAudio(observer: (StreamAudioStatus) -> Unit): () -> Unit
     fun initializeVideoRenderer(renderer: SurfaceViewRenderer)
     fun videoTrack(): RemoteVideoTrack?
     fun activityStarted()
@@ -88,6 +89,7 @@ internal class RuntimeStreamViewerSession(context: Context) : StreamViewerSessio
     override fun settings() = runtime.settings()
     override fun voiceSnapshot() = runtime.voiceSnapshot()
     override fun observeVoice(observer: (JSONObject) -> Unit) = runtime.observeVoice(observer)
+    override fun observeStreamAudio(observer: (StreamAudioStatus) -> Unit) = runtime.observeStreamAudio(observer)
     override fun initializeVideoRenderer(renderer: SurfaceViewRenderer) = runtime.initializeVideoRenderer(renderer)
     override fun videoTrack() = runtime.streamVideoTrack()
     override fun activityStarted() = runtime.activityStarted()

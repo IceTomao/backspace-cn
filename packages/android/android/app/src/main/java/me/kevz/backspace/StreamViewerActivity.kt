@@ -15,6 +15,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityManager
@@ -65,6 +66,8 @@ class StreamViewerActivity : AppCompatActivity() {
     private var identity = ""
     private var attached: RemoteVideoTrack? = null
     private var removeObserver: (() -> Unit)? = null
+    private var removeAudioObserver: (() -> Unit)? = null
+    private var streamAudioStatus = StreamAudioStatus.PAUSED
     private var rendererInitialized = false
     private var started = false
     private var destroyed = false
@@ -80,8 +83,7 @@ class StreamViewerActivity : AppCompatActivity() {
     private var initialVolume = 0
     private var minVolume = 0
     private var maxVolume = 1
-    // LiveKit's default AudioSwitchHandler uses USAGE_VOICE_COMMUNICATION.
-    private val playbackVolumeStream = AudioManager.STREAM_VOICE_CALL
+    private val playbackVolumeStream = AudioManager.STREAM_MUSIC
     private var safeBars = Insets.NONE
     private var cutout = Insets.NONE
     private val hideControls = Runnable { if (canAutoHide()) setControlsVisible(false) }
@@ -111,6 +113,14 @@ class StreamViewerActivity : AppCompatActivity() {
         initializeRendererIfReady()
         renderer.onVideoSize = ::onVideoSizeChanged
         removeObserver = session.observeVoice(::update)
+        removeAudioObserver = session.observeStreamAudio {
+            if (!destroyed && !isFinishing) {
+                val changed = streamAudioStatus != it
+                streamAudioStatus = it
+                updateStatusText()
+                if (changed) revealControls()
+            }
+        }
         accessibility.addTouchExplorationStateChangeListener(explorationListener)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = leaveOrExitFullscreen()
@@ -248,14 +258,42 @@ class StreamViewerActivity : AppCompatActivity() {
                 // Read back the accepted value; device/safe-volume limits may refuse the requested level.
                 audio.setStreamVolume(playbackVolumeStream, volume, 0)
             }
-            if (maxVolume > 0) (audio.getStreamVolume(playbackVolumeStream) * 100f / maxVolume).roundToInt() else 0
+            mediaVolumePercent()
         }
+        showGestureHud(kind, percent)
+    }
+
+    private fun mediaVolumePercent(): Int {
+        val max = audio.getStreamMaxVolume(playbackVolumeStream)
+        return if (max > 0) (audio.getStreamVolume(playbackVolumeStream) * 100f / max).roundToInt() else 0
+    }
+
+    private fun showGestureHud(kind: StreamGesture, percent: Int) {
         val icon = if (kind == StreamGesture.BRIGHTNESS) StreamIcon.BRIGHTNESS else if (percent == 0) StreamIcon.SOUND_OFF else StreamIcon.SOUND
         val drawable = StreamIconDrawable(icon, Color.rgb(134, 239, 172)).apply { setBounds(0, 0, dp(24), dp(24)) }
         gestureLabel.setCompoundDrawables(drawable, null, null, null)
         gestureLabel.text = getString(if (kind == StreamGesture.BRIGHTNESS) R.string.stream_brightness_percent else R.string.stream_volume_percent, percent)
         gestureProgress.progress = percent
         gestureHud.visibility = View.VISIBLE
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (started && (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            if (event.action == KeyEvent.ACTION_DOWN && !event.isCanceled) {
+                if (!audio.isVolumeFixed) {
+                    val step = if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) 1 else -1
+                    val value = (audio.getStreamVolume(playbackVolumeStream) + step)
+                        .coerceIn(audio.getStreamMinVolume(playbackVolumeStream), audio.getStreamMaxVolume(playbackVolumeStream))
+                    audio.setStreamVolume(playbackVolumeStream, value, AudioManager.FLAG_SHOW_UI)
+                }
+                handler.removeCallbacks(hideGestureHud)
+                showGestureHud(StreamGesture.VOLUME, mediaVolumePercent())
+                endVideoGesture()
+            }
+            // Consume key-up too: the communication-mode default must not also adjust voice volume.
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun endVideoGesture() {
@@ -280,6 +318,16 @@ class StreamViewerActivity : AppCompatActivity() {
         title.text = stream?.optString("name")?.takeIf { it.isNotBlank() } ?: identity.substringAfter(':', identity)
         val previousStatus = watchStatus
         watchStatus = state.optString("watchStatus", "connecting")
+        updateStatusText()
+        if (started && watchStatus == "playing") window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (started && watchStatus == "playing") initializeRendererIfReady()
+        attach(if (started && watchStatus == "playing") session.videoTrack() else null)
+        applyTheme()
+        if (previousStatus != watchStatus || watchStatus != "playing") revealControls()
+    }
+
+    private fun updateStatusText() {
         val statusText = getString(when (watchStatus) {
             "playing" -> R.string.stream_playing
             "ended" -> R.string.stream_ended
@@ -288,15 +336,20 @@ class StreamViewerActivity : AppCompatActivity() {
             "unavailable" -> R.string.stream_unavailable
             else -> R.string.stream_connecting
         })
-        status.text = statusText
+        status.text = if (watchStatus == "playing" && voiceState.optBoolean("streamSoundEnabled", true)) {
+            when (streamAudioStatus) {
+                StreamAudioStatus.NO_TRACK -> getString(R.string.stream_audio_not_shared)
+                StreamAudioStatus.UNAVAILABLE -> getString(R.string.stream_audio_unavailable)
+                StreamAudioStatus.FAILED -> getString(R.string.stream_audio_failed)
+                StreamAudioStatus.CONNECTING -> getString(R.string.stream_audio_connecting)
+                else -> statusText
+            }
+        } else statusText
+        status.maxLines = if (streamAudioStatus == StreamAudioStatus.FAILED || streamAudioStatus == StreamAudioStatus.UNAVAILABLE) 2 else 1
+        status.ellipsize = TextUtils.TruncateAt.END
+        status.tooltipText = status.text
         message.text = statusText
         message.visibility = if (watchStatus == "playing") View.GONE else View.VISIBLE
-        if (started && watchStatus == "playing") window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        if (started && watchStatus == "playing") initializeRendererIfReady()
-        attach(if (started && watchStatus == "playing") session.videoTrack() else null)
-        applyTheme()
-        if (previousStatus != watchStatus || watchStatus != "playing") revealControls()
     }
 
     private fun initializeRendererIfReady() {
@@ -362,7 +415,9 @@ class StreamViewerActivity : AppCompatActivity() {
         if (!isFullscreen) return
         if (controlsVisible && canAutoHide()) setControlsVisible(false) else revealControls()
     }
-    private fun canAutoHide() = isFullscreen && started && watchStatus == "playing" && !gestureActive && !accessibility.isTouchExplorationEnabled
+    private fun canAutoHide() = isFullscreen && started && watchStatus == "playing" &&
+        streamAudioStatus !in setOf(StreamAudioStatus.CONNECTING, StreamAudioStatus.FAILED, StreamAudioStatus.UNAVAILABLE) &&
+        !gestureActive && !accessibility.isTouchExplorationEnabled
     private fun revealControls() {
         setControlsVisible(true)
         if (canAutoHide()) handler.postDelayed(hideControls, CONTROLS_TIMEOUT_MS)
@@ -514,6 +569,7 @@ class StreamViewerActivity : AppCompatActivity() {
         handler.removeCallbacks(hideControls)
         handler.removeCallbacks(hideGestureHud)
         removeObserver?.invoke(); removeObserver = null
+        removeAudioObserver?.invoke(); removeAudioObserver = null
         if (::root.isInitialized) {
             accessibility.removeTouchExplorationStateChangeListener(explorationListener)
             renderer.onVideoSize = null

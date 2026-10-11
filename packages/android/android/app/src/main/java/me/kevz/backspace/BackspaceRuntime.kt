@@ -12,6 +12,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.util.Base64
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import io.livekit.android.ConnectOptions
@@ -163,12 +164,28 @@ class BackspaceRuntime internal constructor(
         private set
     private var viewerVisible = false
     private var streamSoundEnabled = true
+    private var streamAudioStatus = StreamAudioStatus.PAUSED
+    private val streamAudioObservers = mutableSetOf<(StreamAudioStatus) -> Unit>()
+    private var streamAudioSubscriptionError: String? = null
+    private val streamAudioPlayback by lazy { StreamAudioPlayback(onStatus = ::updateStreamAudioStatus) }
+    private fun updateStreamAudioStatus(value: StreamAudioStatus) {
+        if (streamAudioStatus == value) return
+        streamAudioStatus = value
+        Log.d("StreamAudio", "Stream audio state: $value")
+        streamAudioObservers.toList().forEach { it(value) }
+    }
+    internal fun observeStreamAudio(observer: (StreamAudioStatus) -> Unit): () -> Unit {
+        streamAudioObservers.add(observer)
+        observer(streamAudioStatus)
+        return { streamAudioObservers.remove(observer) }
+    }
     private var announcedWatcher: String? = null
     fun selectStream(identity: String) {
         require(foreground && !voiceIsDm && room != null) { "请先加入语音频道" }
         require(room!!.remoteParticipants.values.any { it.identity?.value == identity && it.trackPublications.values.any { p -> p.source == Track.Source.SCREEN_SHARE } }) { "直播已结束" }
         stopWatching()
         watchingIdentity = identity
+        streamAudioSubscriptionError = null
         streamSoundEnabled = true
         emitVoice()
     }
@@ -178,7 +195,11 @@ class BackspaceRuntime internal constructor(
         announceWatching()
         emitVoice()
     }
-    fun setStreamSound(enabled: Boolean) { streamSoundEnabled = enabled; syncSubscriptions(); emitVoice() }
+    fun setStreamSound(enabled: Boolean) {
+        streamSoundEnabled = enabled
+        streamAudioSubscriptionError = null
+        syncSubscriptions(); emitVoice()
+    }
     fun stopWatching(identity: String? = watchingIdentity) {
         if (identity != watchingIdentity) return
         viewerVisible = false
@@ -1094,6 +1115,16 @@ class BackspaceRuntime internal constructor(
                 next.events.collect { event ->
                     if (room !== next) return@collect
                     when (event) {
+                        is RoomEvent.TrackSubscriptionFailed -> {
+                            if (event.participant.identity?.value == watchingIdentity &&
+                                event.participant.trackPublications[event.sid]?.source == Track.Source.SCREEN_SHARE_AUDIO) {
+                                streamAudioSubscriptionError = event.sid
+                                Log.w("StreamAudio", "Screen audio subscription failed", event.exception)
+                            }
+                        }
+                        is RoomEvent.TrackSubscribed -> {
+                            if (event.publication.sid == streamAudioSubscriptionError) streamAudioSubscriptionError = null
+                        }
                         is RoomEvent.Reconnecting -> {
                             voiceStatus = "reconnecting"
                             if (!dm) watchVoiceReconnect()
@@ -1151,6 +1182,9 @@ class BackspaceRuntime internal constructor(
         }
     }
     private fun clearVoiceRoom() {
+        streamAudioPlayback.stop()
+        streamAudioSubscriptionError = null
+        updateStreamAudioStatus(StreamAudioStatus.PAUSED)
         roomEvents?.cancel(); roomEvents = null
         val old = room; room = null
         old?.audioSwitchHandler?.audioDeviceChangeListener = null
@@ -1265,21 +1299,40 @@ class BackspaceRuntime internal constructor(
             .put("isDeafened", deafened || forcedDeafen).put("isCameraOn", false).put("isScreenSharing", false)) }
     }
     private fun syncSubscriptions() {
-        val streamAvailable = streamPublication() != null
+        val video = streamPublication()
+        val streamAvailable = video != null
+        val selected = room?.remoteParticipants?.values?.firstOrNull { it.identity?.value == watchingIdentity }
+        val screenAudio = selected?.trackPublications?.values
+            ?.firstOrNull { it.source == Track.Source.SCREEN_SHARE_AUDIO } as? RemoteTrackPublication
+        val userId = watchingIdentity?.substringBefore(':').orEmpty()
+        val memberVolume = audioOptions.optJSONObject("volumes")?.optDouble(userId, 100.0) ?: 100.0
+        val memberMuted = audioOptions.optJSONObject("mutes")?.optBoolean(userId) ?: false
+        val gain = StreamSubscriptionPolicy.volume(audioOptions.optDouble("outputVolume", 100.0), memberVolume,
+            deafened || forcedDeafen, memberMuted)
+        val available = streamAudioAvailability(viewerVisible && foreground, voiceStatus == "connected",
+            streamAvailable, video?.muted == true, streamSoundEnabled, gain, screenAudio != null,
+            screenAudio?.subscriptionAllowed != false, screenAudio?.muted == true,
+            screenAudio?.sid != null && screenAudio.sid == streamAudioSubscriptionError,
+            screenAudio?.subscribed == true && screenAudio.track is RemoteAudioTrack)
+        // Stop/flush media output BEFORE an unsubscribe request or any late delivery from an old track.
+        val source = if (available == StreamAudioStatus.PLAYING)
+            (screenAudio?.track as? RemoteAudioTrack)?.let(::LiveKitStreamAudioSource) else null
+        streamAudioPlayback.update(source, gain)
+        updateStreamAudioStatus(if (source != null) streamAudioPlayback.status else available)
         room?.remoteParticipants?.values?.forEach { participant ->
             participant.trackPublications.values.forEach { publication ->
                 if (publication is RemoteTrackPublication) {
                     val identity = participant.identity?.value ?: ""
                     val subscribe = StreamSubscriptionPolicy.subscribe(publication.source, identity, watchingIdentity,
-                        viewerVisible && foreground && streamAvailable,
-                        streamSoundEnabled && streamPublication()?.muted == false)
+                        viewerVisible && foreground && streamAvailable && voiceStatus == "connected",
+                        streamSoundEnabled && video?.muted == false)
                     if (publication.isDesired != subscribe) publication.setSubscribed(subscribe)
                     val userId = participant.identity?.value?.substringBefore(":") ?: ""
                     val volume = audioOptions.optJSONObject("volumes")?.optDouble(userId, 100.0) ?: 100.0
                     val localMute = audioOptions.optJSONObject("mutes")?.optBoolean(userId) ?: false
-                    (publication.track as? RemoteAudioTrack)?.setVolume(StreamSubscriptionPolicy.volume(
+                    (publication.track as? RemoteAudioTrack)?.setVolume(if (publication.source == Track.Source.SCREEN_SHARE_AUDIO) 0.0 else StreamSubscriptionPolicy.volume(
                         audioOptions.optDouble("outputVolume", 100.0), volume,
-                        deafened || forcedDeafen || (publication.source == Track.Source.SCREEN_SHARE_AUDIO && (!subscribe || !streamSoundEnabled)), localMute))
+                        deafened || forcedDeafen, localMute))
                 }
             }
         }

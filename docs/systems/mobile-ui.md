@@ -124,16 +124,32 @@ pauses viewing, returning resumes it, and final closure releases the renderer
 and stops watching without leaving voice. Native chrome uses the Web design
 system's light/dark surface and accent colors; fullscreen uses dark chrome.
 Single-finger vertical swipes in the player adjust window-only brightness on
-the left and the existing LiveKit communication audio stream volume on the
+the left and Android media volume on the
 right, with a percentage/progress overlay that disappears one second after
 release. The starting side stays fixed throughout the swipe; small movements,
 horizontal swipes, extra fingers, visible chrome and touch exploration do not
 trigger adjustments. Brightness is bounded to 5–100%, survives Activity
 recreation and never writes system settings. Volume respects the device's
-minimum, maximum and fixed-volume policy, shares its output level with voice,
+minimum, maximum, safe-volume limits and fixed-volume policy, stays separate from voice volume,
 and does not change stream mute or microphone state. Hardware volume keys use
 the same output stream. Taps still toggle fullscreen chrome; an active swipe
 temporarily suspends its idle timer.
+Screen-share audio is received through the selected publisher's LiveKit PCM
+sink and played by a separate `USAGE_MEDIA` AudioTrack. Its default WebRTC
+playout gain stays at zero, while microphone tracks retain communication-mode
+playback and the existing Room's audio focus/device handling. Member gain,
+mute and deafen rules also apply to the media output, with saturating PCM gain
+for boosts. The borrowed PCM buffer is copied, a dedicated worker handles
+nonblocking/partial writes, and the pending queue drops old audio beyond 100ms.
+Sound-off, backgrounding, stream/Room changes and viewer closure remove the sink,
+flush/release media output and reject retired callbacks before unsubscribing.
+The native viewer distinguishes audio not shared, connecting, subscription
+failure and playback failure, without changing the Web bridge. Silent PCM is
+valid playback, not an error. Toggle sound off/on to retry a failed binding.
+User device acceptance for 1.4.7 confirmed the reported live audio playback,
+sound-toggle and media/voice volume separation issues are fixed. Specific wired
+and Bluetooth routes, device models and audio/video sync measurements were not
+recorded; JVM audio tests and synthetic screenshots cannot verify those details.
 Unit tests generate synthetic-frame appearance PNGs under the Android app's
 `build/reports/stream-viewer/`; these do not validate real video decoding or
 device-specific system bars.

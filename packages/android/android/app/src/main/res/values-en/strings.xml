@@ -9,6 +9,10 @@
     <string name="stream_exit_fullscreen">Exit fullscreen</string>
     <string name="stream_brightness_percent">Brightness %1$d%%</string>
     <string name="stream_volume_percent">Volume %1$d%%</string>
+    <string name="stream_audio_not_shared">The streamer is not sharing audio</string>
+    <string name="stream_audio_connecting">Connecting stream audio…</string>
+    <string name="stream_audio_unavailable">Stream audio connection failed. Toggle sound off and on to retry.</string>
+    <string name="stream_audio_failed">Stream audio playback failed. Toggle sound off and on to retry.</string>
     <string name="stream_sound_off">Mute stream audio</string>
     <string name="stream_sound_on">Unmute stream audio</string>
     <string name="stream_unmute">Unmute microphone</string>
