@@ -3,6 +3,12 @@
     <string name="media_listener_label">Backspace media status</string>
     <string name="media_listener_description">Reads track details and artwork from supported music apps only while media status sharing is enabled.</string>
     <string name="stream_back">Back</string>
+    <string name="stream_sound_label">Stream audio</string>
+    <string name="stream_mic_label">Microphone</string>
+    <string name="stream_fullscreen">Fullscreen</string>
+    <string name="stream_exit_fullscreen">Exit fullscreen</string>
+    <string name="stream_brightness_percent">Brightness %1$d%%</string>
+    <string name="stream_volume_percent">Volume %1$d%%</string>
     <string name="stream_sound_off">Mute stream audio</string>
     <string name="stream_sound_on">Unmute stream audio</string>
     <string name="stream_unmute">Unmute microphone</string>

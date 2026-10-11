@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="stream_viewport" type="id" />
+    <item name="stream_gestures" type="id" />
+    <item name="stream_gesture_hud" type="id" />
+    <item name="stream_gesture_label" type="id" />
+    <item name="stream_header" type="id" />
+    <item name="stream_footer" type="id" />
+    <item name="stream_title" type="id" />
+    <item name="stream_status" type="id" />
+    <item name="stream_message" type="id" />
+    <item name="stream_back_button" type="id" />
+    <item name="stream_sound_button" type="id" />
+    <item name="stream_mic_button" type="id" />
+    <item name="stream_fullscreen_button" type="id" />
+</resources>

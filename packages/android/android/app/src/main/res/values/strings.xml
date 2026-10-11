@@ -7,6 +7,12 @@
     <string name="media_listener_label">Backspace 媒体状态</string>
     <string name="media_listener_description">仅在启用媒体状态分享时读取支持的音乐应用的歌曲信息和封面。</string>
     <string name="stream_back">返回</string>
+    <string name="stream_sound_label">直播声音</string>
+    <string name="stream_mic_label">麦克风</string>
+    <string name="stream_fullscreen">全屏观看</string>
+    <string name="stream_exit_fullscreen">退出全屏</string>
+    <string name="stream_brightness_percent">亮度 %1$d%%</string>
+    <string name="stream_volume_percent">音量 %1$d%%</string>
     <string name="stream_sound_off">关闭直播声音</string>
     <string name="stream_sound_on">开启直播声音</string>
     <string name="stream_unmute">取消麦克风静音</string>

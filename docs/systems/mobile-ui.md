@@ -110,6 +110,34 @@ for `--app-height`; the bottom navigation adds the native bottom inset as
 padding. Verify gesture and three-button navigation, keyboard open/closed,
 orientation, and light/dark themes on a physical device before release.
 
+The native `StreamViewerActivity` watches a screen-share track in the existing
+voice Room. Its centered video surface is sized from rotated frame dimensions
+to fit the available area without cropping; ordinary viewing follows device
+orientation. Fullscreen overlays the header and audio/microphone controls,
+hides system bars, and requests portrait or landscape according to the stream.
+Unknown or square dimensions leave the current orientation unchanged. Controls
+hide after three seconds while playing and return on tap; loading/error states
+and touch exploration keep them visible. Back exits fullscreen first, restoring
+the previous orientation policy, then closes the viewer on a subsequent press.
+Orientation changes preserve the renderer and subscription. Backgrounding
+pauses viewing, returning resumes it, and final closure releases the renderer
+and stops watching without leaving voice. Native chrome uses the Web design
+system's light/dark surface and accent colors; fullscreen uses dark chrome.
+Single-finger vertical swipes in the player adjust window-only brightness on
+the left and the existing LiveKit communication audio stream volume on the
+right, with a percentage/progress overlay that disappears one second after
+release. The starting side stays fixed throughout the swipe; small movements,
+horizontal swipes, extra fingers, visible chrome and touch exploration do not
+trigger adjustments. Brightness is bounded to 5–100%, survives Activity
+recreation and never writes system settings. Volume respects the device's
+minimum, maximum and fixed-volume policy, shares its output level with voice,
+and does not change stream mute or microphone state. Hardware volume keys use
+the same output stream. Taps still toggle fullscreen chrome; an active swipe
+temporarily suspends its idle timer.
+Unit tests generate synthetic-frame appearance PNGs under the Android app's
+`build/reports/stream-viewer/`; these do not validate real video decoding or
+device-specific system bars.
+
 Android message alerts use the native WebSocket while **background online** is
 enabled. The native runtime loads muted channel IDs per connected server and
 filters self-authored messages and DND status. The Android privacy toggle
