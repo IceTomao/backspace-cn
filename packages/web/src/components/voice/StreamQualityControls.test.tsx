@@ -1,0 +1,80 @@
+import React, { StrictMode } from 'react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { StreamQualityControls } from './StreamQualityControls';
+import { useVoiceStore } from '../../stores/voiceStore';
+import { useUIStore } from '../../stores/uiStore';
+import i18n from '../../i18n';
+
+vi.mock('../../audio/AudioManager', () => ({
+  AudioManager: { getInstance: () => ({}) },
+}));
+vi.mock('../../stores/settingsStore', () => ({
+  useSettingsStore: (selector: (state: { streamingLimits: null }) => unknown) =>
+    selector({ streamingLimits: null }),
+  getStreamingLimits: () => ({
+    minBitrateKbps: 500,
+    maxBitrateKbps: 20_000,
+    allowCustomBitrate: true,
+    bitrateMatrixOverrides: null,
+  }),
+}));
+
+beforeEach(() => {
+  vi.stubGlobal('RTCRtpSender', {
+    getCapabilities: () => ({ codecs: [{ mimeType: 'video/H265' }] }),
+  });
+  localStorage.clear();
+  useVoiceStore.setState({ ...useVoiceStore.getInitialState() });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('screen-share codec controls', () => {
+  it('offers and persists H.265 when the sender supports it', () => {
+    render(<StreamQualityControls />);
+    const option = screen.getByRole('button', { name: 'H.265/HEVC' });
+    expect(option).toBeEnabled();
+    fireEvent.click(option);
+    expect(option).toHaveAttribute('aria-pressed', 'true');
+    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('h265');
+    const persisted = JSON.parse(localStorage.getItem('backspace-voice-settings') ?? '{}');
+    expect(persisted.state.screenShareConfig.codec).toBe('h265');
+  });
+
+  it.each([
+    ['unsupported codecs', { getCapabilities: () => ({ codecs: [{ mimeType: 'video/H264' }] }) }],
+    ['missing WebRTC API', undefined],
+    ['failed detection', { getCapabilities: () => { throw new Error('unavailable'); } }],
+  ])('keeps H.265 visible but unselectable with an explanation for %s', (_label, sender) => {
+    vi.stubGlobal('RTCRtpSender', sender);
+    render(<StreamQualityControls />);
+    const option = screen.getByRole('button', { name: 'H.265/HEVC' });
+    expect(option).toBeDisabled();
+    expect(option).toHaveAccessibleDescription(i18n.t('voice:streamSettings.h265Unsupported'));
+    fireEvent.click(option);
+    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('vp9');
+    expect(screen.getByRole('button', { name: 'VP9' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'H264' })).toBeEnabled();
+  });
+
+  it('resets a restored unsupported choice once, including StrictMode effect replay', async () => {
+    useVoiceStore.getState().setScreenShareConfig({ codec: 'h265' });
+    await useVoiceStore.persist.rehydrate();
+    vi.stubGlobal('RTCRtpSender', undefined);
+    const addToast = vi.spyOn(useUIStore.getState(), 'addToast');
+    const { rerender } = render(<StrictMode><StreamQualityControls /></StrictMode>);
+
+    expect(screen.getByRole('button', { name: 'VP9' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'H.265/HEVC' })).toBeDisabled();
+    expect(addToast).toHaveBeenCalledWith(i18n.t('voice:streamSettings.h265Fallback'), 'warning', 8000);
+    rerender(<StrictMode><StreamQualityControls /></StrictMode>);
+    expect(addToast).toHaveBeenCalledTimes(1);
+    const persisted = JSON.parse(localStorage.getItem('backspace-voice-settings') ?? '{}');
+    expect(persisted.state.screenShareConfig.codec).toBe('vp9');
+  });
+});

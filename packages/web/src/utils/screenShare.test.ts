@@ -5,8 +5,12 @@ import { useUIStore } from '../stores/uiStore';
 import i18n from '../i18n';
 import {
   buildScreenShareOptions,
+  ensureSupportedScreenShareCodec,
   getPublishedScreenShareCodec,
+  getRequestedPublishedScreenShareCodec,
+  isH265ScreenShareSupported,
   publishScreenShare,
+  republishScreenShare,
   stageScreenCapture,
   stopScreenShare,
 } from './screenShare';
@@ -89,6 +93,9 @@ function attachPublishedSender(
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  vi.stubGlobal('RTCRtpSender', {
+    getCapabilities: vi.fn(() => ({ codecs: [{ mimeType: 'video/H265' }] })),
+  });
   internals.getPublisherPC.mockReturnValue(null);
   internals.getMediaStreamTrack.mockReturnValue(null);
   localStorage.clear();
@@ -108,9 +115,171 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('H.265 screen-share capability detection', () => {
+  it('uses sender capabilities rather than playback or receiver support', () => {
+    expect(isH265ScreenShareSupported()).toBe(true);
+    expect(RTCRtpSender.getCapabilities).toHaveBeenCalledWith('video');
+  });
+
+  it.each([
+    ['no sender API', undefined],
+    ['no capability API', {}],
+    ['no capabilities', { getCapabilities: () => null }],
+    ['no H.265 codec', { getCapabilities: () => ({ codecs: [{ mimeType: 'video/H264' }] }) }],
+    ['failed detection', { getCapabilities: () => { throw new Error('unavailable'); } }],
+  ])('returns false for %s', (_label, sender) => {
+    vi.stubGlobal('RTCRtpSender', sender);
+    expect(isH265ScreenShareSupported()).toBe(false);
+  });
 });
 
 describe('screen-share media options', () => {
+  it('restores and publishes H.265 with a VP8 backup, then keeps the choice after stop', async () => {
+    localStorage.setItem('backspace-voice-settings', JSON.stringify({
+      version: 15,
+      state: { screenShareConfig: { ...useVoiceStore.getState().screenShareConfig, codec: 'h265' } },
+    }));
+    await useVoiceStore.persist.rehydrate();
+    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('h265');
+
+    const room = fakeRoom();
+    const video = makeVideoTrack();
+    attachPublishedSender(room, video, [
+      ['codec-h265', { id: 'codec-h265', type: 'codec', mimeType: 'video/H265' }],
+      ['outbound-h265', {
+        id: 'outbound-h265', type: 'outbound-rtp', kind: 'video', codecId: 'codec-h265', bytesSent: 100,
+      }],
+      ['outbound-vp8', {
+        id: 'outbound-vp8', type: 'outbound-rtp', kind: 'video', mimeType: 'video/VP8', bytesSent: 500,
+      }],
+    ]);
+    const opts = buildScreenShareOptions(useVoiceStore.getState().screenShareConfig);
+
+    expect(await publishScreenShare(room, makeStream(video))).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(
+      video,
+      expect.objectContaining({
+        videoCodec: 'h265',
+        videoEncoding: opts.publish.videoEncoding,
+        screenShareEncoding: opts.publish.videoEncoding,
+        simulcast: false,
+        backupCodec: {
+          codec: 'vp8',
+          encoding: {
+            maxBitrate: opts.publish.videoEncoding.maxBitrate / 2,
+            maxFramerate: 30,
+          },
+        },
+        backupCodecPolicy: BackupCodecPolicy.SIMULCAST,
+      }),
+    );
+    expect(getRequestedPublishedScreenShareCodec()).toBe('h265');
+    expect(getPublishedScreenShareCodec()).toBe('h265');
+    expect(sdp.activate).not.toHaveBeenCalled();
+    expect(sdp.deactivate).not.toHaveBeenCalled();
+
+    await stopScreenShare(room);
+    expect(getRequestedPublishedScreenShareCodec()).toBeNull();
+    expect(getPublishedScreenShareCodec()).toBeNull();
+    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('h265');
+    const persisted = JSON.parse(localStorage.getItem('backspace-voice-settings') ?? '{}');
+    expect(persisted.state.screenShareConfig.codec).toBe('h265');
+  });
+
+  it('falls back before publishing an unsupported saved H.265 choice and warns only once', async () => {
+    vi.stubGlobal('RTCRtpSender', undefined);
+    useVoiceStore.getState().setScreenShareConfig({ codec: 'h265' });
+    await useVoiceStore.persist.rehydrate();
+    const addToast = vi.spyOn(useUIStore.getState(), 'addToast');
+    const room = fakeRoom();
+
+    expect(await publishScreenShare(room, makeStream(makeVideoTrack()))).toBe(true);
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ videoCodec: 'vp9' }),
+    );
+    expect(ensureSupportedScreenShareCodec().codec).toBe('vp9');
+    expect(ensureSupportedScreenShareCodec().codec).toBe('vp9');
+    expect(addToast).toHaveBeenCalledTimes(1);
+    expect(addToast).toHaveBeenCalledWith(i18n.t('voice:streamSettings.h265Fallback'), 'warning', 8000);
+    expect(getRequestedPublishedScreenShareCodec()).toBe('vp9');
+    const persisted = JSON.parse(localStorage.getItem('backspace-voice-settings') ?? '{}');
+    expect(persisted.state.screenShareConfig.codec).toBe('vp9');
+    expect(sdp.activate).not.toHaveBeenCalled();
+  });
+
+  it('records a sending VP8 backup separately from the requested H.265 codec', async () => {
+    useVoiceStore.getState().setScreenShareConfig({ codec: 'h265' });
+    const room = fakeRoom();
+    const video = makeVideoTrack();
+    attachPublishedSender(room, video, [
+      ['outbound-h265', {
+        id: 'outbound-h265', type: 'outbound-rtp', kind: 'video', mimeType: 'video/H265', bytesSent: 0,
+      }],
+      ['outbound-vp8', {
+        id: 'outbound-vp8', type: 'outbound-rtp', kind: 'video', mimeType: 'video/VP8', bytesSent: 100,
+      }],
+    ]);
+
+    await publishScreenShare(room, makeStream(video));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getRequestedPublishedScreenShareCodec()).toBe('h265');
+    expect(getPublishedScreenShareCodec()).toBe('vp8');
+    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('h265');
+  });
+
+  it.each(['vp9', 'h264'] as const)('switches from %s to H.265 and back without recapturing or stopping tracks', async (codec) => {
+    const video = makeVideoTrack();
+    const audio = makeTrack('audio');
+    vi.stubGlobal('MediaStream', class {
+      constructor(private tracks: FakeTrack[]) {}
+      getTracks() { return this.tracks; }
+      getVideoTracks() { return this.tracks.filter((track) => track.kind === 'video'); }
+      getAudioTracks() { return this.tracks.filter((track) => track.kind === 'audio'); }
+    });
+    const getDisplayMedia = vi.fn();
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getDisplayMedia },
+    });
+    const room = fakeRoom();
+    room.localParticipant.getTrackPublication.mockImplementation((source: Track.Source) => ({
+      track: { mediaStreamTrack: source === Track.Source.ScreenShare ? video : audio },
+    }));
+    useVoiceStore.getState().setScreenShareConfig({ codec });
+    await publishScreenShare(room, makeStream(video, audio));
+
+    useVoiceStore.getState().setScreenShareConfig({ codec: 'h265' });
+    await republishScreenShare(room);
+    expect(getRequestedPublishedScreenShareCodec()).toBe('h265');
+    useVoiceStore.getState().setScreenShareConfig({ codec });
+    await republishScreenShare(room);
+
+    const videoCalls = room.localParticipant.publishTrack.mock.calls.filter(
+      ([, options]: [unknown, { source: Track.Source }]) => options.source === Track.Source.ScreenShare,
+    );
+    expect(videoCalls.map(([, options]: [unknown, { videoCodec: string }]) => options.videoCodec))
+      .toEqual([codec, 'h265', codec]);
+    expect(videoCalls.every(([track]: [unknown]) => track === video)).toBe(true);
+    expect(room.localParticipant.unpublishTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaStreamTrack: video }), false,
+    );
+    expect(room.localParticipant.unpublishTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaStreamTrack: audio }), false,
+    );
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+    expect(video.stop).not.toHaveBeenCalled();
+    expect(audio.stop).not.toHaveBeenCalled();
+    expect(getRequestedPublishedScreenShareCodec()).toBe(codec);
+    expect(useVoiceStore.getState().isScreenSharing).toBe(true);
+    expect(sdp.activate).toHaveBeenCalledTimes(codec === 'h264' ? 2 : 0);
+  });
+
   it('publishes VP9 directly without enabling the H.264 SDP hook', async () => {
     const room = fakeRoom();
     const video = makeVideoTrack();

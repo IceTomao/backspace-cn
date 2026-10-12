@@ -1,4 +1,4 @@
-import { Room, Track, BackupCodecPolicy, AudioPresets } from 'livekit-client';
+import { Room, Track, BackupCodecPolicy, AudioPresets, supportsH265 } from 'livekit-client';
 import { useVoiceStore } from '../stores/voiceStore';
 import type { ScreenShareConfig } from '../stores/voiceStore';
 import { getStreamingLimits } from '../stores/settingsStore';
@@ -27,7 +27,7 @@ export interface OverdriveOptions {
 export interface ScreenShareBuildResult {
   capture: { width: number; height: number; frameRate: number };
   publish: {
-    videoCodec: 'vp9' | 'h264';
+    videoCodec: ScreenShareConfig['codec'];
     videoEncoding: { maxBitrate: number; maxFramerate: number };
     simulcast: false;
     backupCodec?: { codec: 'vp8' | 'h264'; encoding: { maxBitrate: number; maxFramerate: number } };
@@ -39,6 +39,32 @@ export interface ScreenShareBuildResult {
   };
   overdrive: OverdriveOptions;
   contentHint: 'motion' | 'detail';
+}
+
+export function isH265ScreenShareSupported(): boolean {
+  if (typeof RTCRtpSender === 'undefined' || typeof RTCRtpSender.getCapabilities !== 'function') {
+    return false;
+  }
+  try {
+    return supportsH265();
+  } catch {
+    return false;
+  }
+}
+
+/** Reset unsupported saved choices once, shared by the settings UI and publication. */
+export function ensureSupportedScreenShareCodec(): ScreenShareConfig {
+  const { screenShareConfig, setScreenShareConfig } = useVoiceStore.getState();
+  if (screenShareConfig.codec === 'h265' && !isH265ScreenShareSupported()) {
+    setScreenShareConfig({ codec: 'vp9' });
+    useUIStore.getState().addToast(
+      i18n.t('voice:streamSettings.h265Fallback'),
+      'warning',
+      8000,
+    );
+    return useVoiceStore.getState().screenShareConfig;
+  }
+  return screenShareConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -347,15 +373,15 @@ export function stopStagedCapture(stream: MediaStream | null | undefined): void 
 // ---------------------------------------------------------------------------
 
 /** Codec confirmed by outbound WebRTC stats; null until stats expose it. */
-let _publishedScreenShareCodec: 'vp9' | 'h264' | 'vp8' | null = null;
+let _publishedScreenShareCodec: ScreenShareConfig['codec'] | 'vp8' | null = null;
 /** Requested codec of the current publication, used only to decide whether republish is needed. */
-let _requestedPublishedScreenShareCodec: 'vp9' | 'h264' | null = null;
+let _requestedPublishedScreenShareCodec: ScreenShareConfig['codec'] | null = null;
 
-export function getPublishedScreenShareCodec(): 'vp9' | 'h264' | 'vp8' | null {
+export function getPublishedScreenShareCodec(): ScreenShareConfig['codec'] | 'vp8' | null {
   return _publishedScreenShareCodec;
 }
 
-export function getRequestedPublishedScreenShareCodec(): 'vp9' | 'h264' | null {
+export function getRequestedPublishedScreenShareCodec(): ScreenShareConfig['codec'] | null {
   return _requestedPublishedScreenShareCodec;
 }
 
@@ -376,7 +402,7 @@ export function isScreenShareRepublishing(): boolean {
 let _stopping = false;
 
 export async function publishScreenShare(room: Room, stream: MediaStream): Promise<boolean> {
-  const config = useVoiceStore.getState().screenShareConfig;
+  const config = ensureSupportedScreenShareCodec();
   const opts = buildScreenShareOptions(config);
   const needsH264SdpPatch = config.codec === 'h264';
   const videoTrack = stream.getVideoTracks()[0];
@@ -569,17 +595,18 @@ interface EncoderStatsEntry extends RTCStats {
   encoderImplementation?: string;
 }
 
-function normalizeVideoCodec(value: string | undefined): 'vp9' | 'h264' | 'vp8' | null {
+function normalizeVideoCodec(value: string | undefined): ScreenShareConfig['codec'] | 'vp8' | null {
   const normalized = value?.toLowerCase();
   if (normalized?.includes('vp9')) return 'vp9';
   if (normalized?.includes('h264')) return 'h264';
+  if (normalized?.includes('h265')) return 'h265';
   if (normalized?.includes('vp8')) return 'vp8';
   return null;
 }
 
 async function inspectPublishedEncoder(
   room: Room,
-  requestedCodec: 'vp9' | 'h264',
+  requestedCodec: ScreenShareConfig['codec'],
   expectedTrackId: string,
 ): Promise<boolean> {
   if (!useVoiceStore.getState().isScreenSharing) return true;
@@ -596,7 +623,7 @@ async function inspectPublishedEncoder(
 
   const stats = await sender.getStats();
   const codecById = new Map<string, string>();
-  const outbound: Array<{ codec: 'vp9' | 'h264' | 'vp8'; bytesSent: number; encoderImpl: string | null }> = [];
+  const outbound: Array<{ codec: ScreenShareConfig['codec'] | 'vp8'; bytesSent: number; encoderImpl: string | null }> = [];
   stats.forEach((report) => {
     const entry = report as EncoderStatsEntry;
     if (entry.type === 'codec' && entry.mimeType) codecById.set(entry.id, entry.mimeType);
@@ -649,7 +676,7 @@ const ENCODER_DETECTION_OFFSETS_MS = [0, 1000, 4000, 8000] as const;
 
 function scheduleEncoderDetection(
   room: Room,
-  requestedCodec: 'vp9' | 'h264',
+  requestedCodec: ScreenShareConfig['codec'],
   expectedTrackId: string,
 ): void {
   const startedAt = Date.now();

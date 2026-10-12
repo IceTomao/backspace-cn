@@ -13,7 +13,7 @@ export interface ScreenShareConfig {
   mode: 'gaming' | 'text';
   customBitrateKbps: number | null;
   shareAudio: boolean;
-  codec: 'vp9' | 'h264';
+  codec: 'vp9' | 'h264' | 'h265';
 }
 
 export type VoiceConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';

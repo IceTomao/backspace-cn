@@ -122,8 +122,11 @@
     "codec": "Codec",
     "codecOption": {
       "vp9": "VP9",
-      "h264": "H264"
+      "h264": "H264",
+      "h265": "H.265/HEVC"
     },
+    "h265Unsupported": "Dieses Gerät unterstützt keine H.265-Kodierung für Livestreams.",
+    "h265Fallback": "Dieses Gerät unterstützt keine H.265-Kodierung für Livestreams. VP9 wurde ausgewählt.",
     "bitrate": "Bitrate",
     "custom": "Manuell",
     "auto": "Auto",

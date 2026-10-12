@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
     getStreamGeneration: () => 1, getFreshTrack: () => null,
   },
   scheduleScreenShareOverdrive: vi.fn(),
+  republishScreenShare: vi.fn(),
+  getRequestedPublishedScreenShareCodec: vi.fn(),
 }));
 vi.mock('livekit-client', async importOriginal => {
   const sdk = await importOriginal<typeof import('livekit-client')>();
@@ -33,7 +35,12 @@ vi.mock('../utils/voice', () => ({ broadcastVoiceStatus: vi.fn(), clearSpaceVoic
 vi.mock('../utils/hwOverdrive', () => ({ deactivate: vi.fn() }));
 vi.mock('../utils/screenShare', async importOriginal => {
   const original = await importOriginal<typeof import('../utils/screenShare')>();
-  return { ...original, scheduleScreenShareOverdrive: mocks.scheduleScreenShareOverdrive };
+  return {
+    ...original,
+    scheduleScreenShareOverdrive: mocks.scheduleScreenShareOverdrive,
+    republishScreenShare: mocks.republishScreenShare,
+    getRequestedPublishedScreenShareCodec: mocks.getRequestedPublishedScreenShareCodec,
+  };
 });
 vi.mock('../stores/spaceStore', () => ({
   getApiForOrigin: () => ({ livekit: { token: mocks.token, dmToken: mocks.token } }),
@@ -43,6 +50,9 @@ vi.mock('../stores/spaceStore', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.republishScreenShare.mockReset();
+  mocks.getRequestedPublishedScreenShareCodec.mockReset();
+  mocks.getRequestedPublishedScreenShareCodec.mockReturnValue(null);
   mocks.token.mockResolvedValue({ token: 'test', url: 'wss://example.invalid' });
   mocks.audio.resumeContext.mockResolvedValue(undefined);
   mocks.audio.setRnnoiseEnabled.mockResolvedValue(undefined);
@@ -54,6 +64,37 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
+
+describe('live screen-share codec updates', () => {
+  it.each(['vp9', 'h264'] as const)('serializes rapid H.265 switches and publishes the latest %s choice', async (latestCodec) => {
+    let publishedCodec: 'vp9' | 'h264' | 'h265' = 'vp9';
+    let finishFirst!: () => void;
+    const firstPublish = new Promise<void>((resolve) => { finishFirst = resolve; });
+    const requests: string[] = [];
+    mocks.getRequestedPublishedScreenShareCodec.mockImplementation(() => publishedCodec);
+    mocks.republishScreenShare.mockImplementation(async () => {
+      const codec = useVoiceStore.getState().screenShareConfig.codec;
+      requests.push(codec);
+      if (requests.length === 1) await firstPublish;
+      publishedCodec = codec;
+    });
+    const { result } = renderHook(() => useLiveKit());
+    await act(async () => { await result.current.connect('channel'); });
+    await act(async () => { useVoiceStore.setState({ isScreenSharing: true }); });
+
+    await act(async () => { useVoiceStore.getState().setScreenShareConfig({ codec: 'h265' }); });
+    expect(requests).toEqual(['h265']);
+    act(() => { useVoiceStore.getState().setScreenShareConfig({ codec: 'h264' }); });
+    act(() => { useVoiceStore.getState().setScreenShareConfig({ codec: latestCodec }); });
+    await act(async () => { finishFirst(); });
+
+    expect(requests).toEqual(['h265', latestCodec]);
+    expect(publishedCodec).toBe(latestCodec);
+    expect(useVoiceStore.getState().screenShareConfig.codec).toBe(latestCodec);
+    expect(useVoiceStore.getState().isScreenSharing).toBe(true);
+    expect(mocks.republishScreenShare).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('voice capture teardown', () => {
   it('preserves voice intent across Reconnecting → Connected', async () => {

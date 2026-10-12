@@ -122,8 +122,11 @@
     "codec": "编解码器",
     "codecOption": {
       "vp9": "VP9",
-      "h264": "H.264/MPEG-4 AVC"
+      "h264": "H.264/MPEG-4 AVC",
+      "h265": "H.265/HEVC"
     },
+    "h265Unsupported": "当前设备不支持 H.265 直播编码。",
+    "h265Fallback": "当前设备不支持 H.265 直播编码，已切换为 VP9。",
     "bitrate": "比特率",
     "custom": "自定义",
     "auto": "推荐",

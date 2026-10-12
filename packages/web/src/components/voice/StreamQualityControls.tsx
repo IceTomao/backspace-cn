@@ -1,9 +1,13 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVoiceStore } from '../../stores/voiceStore';
 import type { ScreenShareConfig } from '../../stores/voiceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { buildScreenShareOptions } from '../../utils/screenShare';
+import {
+  buildScreenShareOptions,
+  ensureSupportedScreenShareCodec,
+  isH265ScreenShareSupported,
+} from '../../utils/screenShare';
 import { Toggle } from '../ui/Toggle';
 import { isElectron } from '../../platform/platform';
 import { RESOLUTION_LABELS } from '@backspace/shared/src/constants';
@@ -28,6 +32,7 @@ const MODES: { value: ScreenShareConfig['mode']; labelKey: 'voice:streamSettings
 const CODEC_OPTIONS = [
   { value: 'vp9' as const, labelKey: 'voice:streamSettings.codecOption.vp9' as const },
   { value: 'h264' as const, labelKey: 'voice:streamSettings.codecOption.h264' as const },
+  { value: 'h265' as const, labelKey: 'voice:streamSettings.codecOption.h265' as const },
 ];
 
 /** Whole Mbps when the value is round, otherwise one decimal; the number goes through the locale. */
@@ -78,6 +83,12 @@ export function StreamQualityControls() {
   const setConfig = useVoiceStore((s) => s.setScreenShareConfig);
   const limits = useSettingsStore((s) => s.streamingLimits);
   const electronPlatform = isElectron() ? window.backspace?.platform : null;
+  const h265Supported = isH265ScreenShareSupported();
+  const h265UnsupportedId = useId();
+
+  useEffect(() => {
+    if (config.codec === 'h265' && !h265Supported) ensureSupportedScreenShareCodec();
+  }, [config.codec, h265Supported]);
 
   const BITRATE_MIN = limits?.minBitrateKbps ?? 500;
   const BITRATE_MAX = limits?.maxBitrateKbps ?? 20000;
@@ -189,20 +200,29 @@ export function StreamQualityControls() {
         <div className="text-[11px] text-txt-tertiary font-semibold uppercase tracking-wider mb-1.5">
           {t('voice:streamSettings.codec')}
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex flex-wrap gap-1.5">
           {CODEC_OPTIONS.map((c) => {
             const isSelected = config.codec === c.value;
+            const isDisabled = c.value === 'h265' && !h265Supported;
             return (
               <button
                 key={c.value}
+                disabled={isDisabled}
+                aria-pressed={isSelected}
+                aria-describedby={isDisabled ? h265UnsupportedId : undefined}
                 onClick={() => setConfig({ codec: c.value })}
-                className={`${pillBase} ${isSelected ? pillSelected : pillUnselected}`}
+                className={`${pillBase} disabled:cursor-not-allowed ${isDisabled ? 'bg-surface-elevated text-txt-tertiary opacity-50' : isSelected ? pillSelected : pillUnselected}`}
               >
                 {t(c.labelKey)}
               </button>
             );
           })}
         </div>
+        {!h265Supported && (
+          <div id={h265UnsupportedId} className="text-[10px] text-txt-tertiary mt-1.5">
+            {t('voice:streamSettings.h265Unsupported')}
+          </div>
+        )}
       </div>
 
       {/* Bitrate — Auto | Custom pills like every other row; the slider only exists in Custom */}
