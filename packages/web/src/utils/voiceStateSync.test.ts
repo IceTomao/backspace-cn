@@ -25,6 +25,18 @@ afterEach(() => {
 });
 
 describe('applySpaceVoiceState', () => {
+  it('restores HDR per broadcaster on late join/reconnect and resets legacy/stopped streams to SDR', () => {
+    const status = { isMuted: false, isDeafened: false, isCameraOn: false, isScreenSharing: true };
+    const snapshot = { spaceId: 'sp1', voiceStates: { ch1: ['hdr', 'sdr'] }, voiceChannelElapsedSeconds: {},
+      voiceUserStates: { hdr: { ...status, dynamicRange: 'hdr' as const }, sdr: status }, spaceVoiceStates: {} };
+    applySpaceVoiceState(snapshot);
+    expect(useVoiceStore.getState().voiceUserStates.get('hdr')?.dynamicRange).toBe('hdr');
+    expect(useVoiceStore.getState().voiceUserStates.get('sdr')?.dynamicRange).toBeUndefined();
+    applySpaceVoiceState({ ...snapshot, voiceUserStates: { hdr: status } });
+    expect(useVoiceStore.getState().voiceUserStates.get('hdr')?.dynamicRange).toBeUndefined();
+    useVoiceStore.getState().setVoiceUserStatus('hdr', false, false, false, false, 'hdr');
+    expect(useVoiceStore.getState().voiceUserStates.get('hdr')?.dynamicRange).toBeUndefined();
+  });
   it('populates voiceUsers, voiceUserStates and scoped restriction sets', () => {
     applySpaceVoiceState({
       spaceId: 'sp1',

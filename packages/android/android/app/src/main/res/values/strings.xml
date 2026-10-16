@@ -39,4 +39,5 @@
     <string name="video_saving">正在保存视频…</string>
     <string name="video_saved">视频已保存</string>
     <string name="video_save_failed">视频保存失败，请重试。</string>
+    <string name="stream_hdr_unsupported">该直播间为 HDR 直播间，本机设备暂不支持查看</string>
 </resources>

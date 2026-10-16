@@ -652,6 +652,7 @@ function handleVoiceJoin(event: Record<string, unknown>, userId: string, ws: Web
         isDeafened: status.isDeafened,
         isCameraOn: status.isCameraOn,
         isScreenSharing: status.isScreenSharing,
+        ...(status.dynamicRange ? { dynamicRange: status.dynamicRange } : {}),
       });
     }
 
@@ -760,6 +761,7 @@ function handleVoiceJoin(event: Record<string, unknown>, userId: string, ws: Web
       isDeafened: status.isDeafened,
       isCameraOn: status.isCameraOn,
       isScreenSharing: status.isScreenSharing,
+      ...(status.dynamicRange ? { dynamicRange: status.dynamicRange } : {}),
     });
   }
 
@@ -825,6 +827,7 @@ function handleVoiceStatus(event: Record<string, unknown>, userId: string, ws: W
   const isDeafened = event.isDeafened === true;
   const isCameraOn = event.isCameraOn === true;
   const isScreenSharing = event.isScreenSharing === true;
+  const dynamicRange = isScreenSharing && event.dynamicRange === 'hdr' ? 'hdr' : 'sdr';
 
   // BUG FIX: uses unified getUserRoom() instead of server-only getUserVoiceChannel()
   // This now works for both server channels AND DM calls.
@@ -849,7 +852,7 @@ function handleVoiceStatus(event: Record<string, unknown>, userId: string, ws: W
   const effectiveMuted = (isSpaceMuted || isPermMuted) ? true : isMuted;
   const effectiveDeafened = isSpaceDeafened ? true : isDeafened;
 
-  connectionManager.setVoiceUserStatus(userId, effectiveMuted, effectiveDeafened, isCameraOn, isScreenSharing);
+  connectionManager.setVoiceUserStatus(userId, effectiveMuted, effectiveDeafened, isCameraOn, isScreenSharing, dynamicRange);
 
   // sendToRoom routes to sendToSpace for space rooms, sendToDmMembers for DM rooms
   connectionManager.sendToRoom(userRoom.roomId, {
@@ -860,6 +863,7 @@ function handleVoiceStatus(event: Record<string, unknown>, userId: string, ws: W
     isDeafened: effectiveDeafened,
     isCameraOn,
     isScreenSharing,
+    ...(dynamicRange === 'hdr' ? { dynamicRange } : {}),
   });
 }
 
@@ -2485,6 +2489,7 @@ function handleVoiceMove(event: Record<string, unknown>, userId: string): void {
       isDeafened: status.isDeafened,
       isCameraOn: status.isCameraOn,
       isScreenSharing: status.isScreenSharing,
+      ...(status.dynamicRange ? { dynamicRange: status.dynamicRange } : {}),
     });
   }
 }

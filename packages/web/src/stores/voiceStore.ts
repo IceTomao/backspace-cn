@@ -1,3 +1,4 @@
+import type { VoiceUserState, StreamDynamicRange } from '@backspace/shared';
 import { appStorage } from '../platform/appStorage';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
@@ -14,6 +15,8 @@ export interface ScreenShareConfig {
   customBitrateKbps: number | null;
   shareAudio: boolean;
   codec: 'vp9' | 'h264' | 'h265';
+  /** Independent of codec, which always retains the user's SDR preference. */
+  hdrEnabled: boolean;
 }
 
 export type VoiceConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
@@ -142,8 +145,8 @@ interface VoiceState {
   deafenedUserIds: Set<string>;
   setUserDeafened: (userId: string, deafened: boolean) => void;
   // WebSocket-based voice user status (visible without joining LiveKit)
-  voiceUserStates: Map<string, { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean }>;
-  setVoiceUserStatus: (userId: string, isMuted: boolean, isDeafened: boolean, isCameraOn: boolean, isScreenSharing: boolean) => void;
+  voiceUserStates: Map<string, VoiceUserState>;
+  setVoiceUserStatus: (userId: string, isMuted: boolean, isDeafened: boolean, isCameraOn: boolean, isScreenSharing: boolean, dynamicRange?: StreamDynamicRange) => void;
   clearVoiceUserStatus: (userId: string) => void;
   // Space mute/deafen state (moderator action)
   spaceMutedUserIds: Set<string>; // Stores "spaceId:userId"
@@ -204,7 +207,7 @@ export const useVoiceStore = create<VoiceState>()(
       outputDeviceId: 'default',
       cameraDeviceId: null,
       focusedParticipantId: null,
-      screenShareConfig: { height: 720, fps: 60, mode: 'gaming', customBitrateKbps: null, shareAudio: !isElectron(), codec: 'vp9' },
+      screenShareConfig: { height: 720, fps: 60, mode: 'gaming', customBitrateKbps: null, shareAudio: !isElectron(), codec: 'vp9', hdrEnabled: false },
       lastScreenShareSourceId: null,
       participantVolumes: new Map(),
       setParticipantVolume: (userId, volume) => {
@@ -497,7 +500,11 @@ export const useVoiceStore = create<VoiceState>()(
       setFocusedParticipant: (id) => set({ focusedParticipantId: id }),
       setLastScreenShareSourceId: (sourceId) => set({ lastScreenShareSourceId: sourceId }),
       setScreenShareConfig: (config) => set((state) => ({
-        screenShareConfig: { ...state.screenShareConfig, ...config },
+        screenShareConfig: {
+          ...state.screenShareConfig, ...config,
+          hdrEnabled: state.isScreenSharing ? state.screenShareConfig.hdrEnabled
+            : config.hdrEnabled ?? state.screenShareConfig.hdrEnabled,
+        },
       })),
       noiseSuppression: true,
       echoCancellation: true,
@@ -516,10 +523,12 @@ export const useVoiceStore = create<VoiceState>()(
       },
 
       voiceUserStates: new Map(),
-      setVoiceUserStatus: (userId, isMuted, isDeafened, isCameraOn, isScreenSharing) => {
+      setVoiceUserStatus: (userId, isMuted, isDeafened, isCameraOn, isScreenSharing, dynamicRange) => {
         set((state) => {
           const newMap = new Map(state.voiceUserStates);
-          newMap.set(userId, { isMuted, isDeafened, isCameraOn, isScreenSharing });
+          newMap.set(userId, { isMuted, isDeafened, isCameraOn, isScreenSharing,
+            ...(isScreenSharing && dynamicRange === 'hdr' ? { dynamicRange: 'hdr' as const } : {}),
+          });
           return { voiceUserStates: newMap };
         });
       },
@@ -768,7 +777,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: 'backspace-voice-settings',
-      version: 15,
+      version: 16,
       migrate: (persistedState: any, version: number) => {
         if (version === 0) {
           persistedState.streamAttenuationEnabled = false;
@@ -837,6 +846,9 @@ export const useVoiceStore = create<VoiceState>()(
             persistedState.screenShareConfig.codec = 'vp9';
           }
         }
+        if (version < 16 && persistedState.screenShareConfig) {
+          persistedState.screenShareConfig.hdrEnabled = false;
+        }
         return persistedState;
       },
       storage: createJSONStorage(() => appStorage),
@@ -867,6 +879,11 @@ export const useVoiceStore = create<VoiceState>()(
       }),
       merge: (persistedState: any, currentState: VoiceState) => {
         const merged = { ...currentState, ...persistedState };
+        merged.screenShareConfig = {
+          ...currentState.screenShareConfig,
+          ...persistedState?.screenShareConfig,
+          hdrEnabled: persistedState?.screenShareConfig?.hdrEnabled === true,
+        };
         // Reconstruct non-persisted Sets/Maps to their defaults
         merged.spaceMutedUserIds = currentState.spaceMutedUserIds;
         merged.spaceDeafenedUserIds = currentState.spaceDeafenedUserIds;

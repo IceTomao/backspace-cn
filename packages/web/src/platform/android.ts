@@ -32,7 +32,7 @@ export interface NativeVoiceState {
   participants: { identity: string; name: string; local: boolean; muted: boolean; speaking: boolean }[];
   devices: { id: string; name: string }[];
   deviceId: string | null;
-  streams?: { identity: string; name: string; videoSid: string; audioSid?: string | null; muted: boolean }[];
+  streams?: { identity: string; name: string; videoSid: string; audioSid?: string | null; muted: boolean; dynamicRange?: 'sdr' | 'hdr' }[];
   watchingIdentity?: string | null;
   streamSoundEnabled?: boolean;
 }

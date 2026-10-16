@@ -316,6 +316,7 @@ class StreamViewerActivity : AppCompatActivity() {
         val stream = (0 until (streams?.length() ?: 0)).mapNotNull { streams?.optJSONObject(it) }
             .firstOrNull { it.optString("identity") == identity }
         title.text = stream?.optString("name")?.takeIf { it.isNotBlank() } ?: identity.substringAfter(':', identity)
+        if (stream?.optString("dynamicRange") == "hdr") title.append(" · HDR")
         val previousStatus = watchStatus
         watchStatus = state.optString("watchStatus", "connecting")
         updateStatusText()
@@ -334,6 +335,7 @@ class StreamViewerActivity : AppCompatActivity() {
             "paused" -> R.string.stream_paused
             "reconnecting" -> R.string.stream_reconnecting
             "unavailable" -> R.string.stream_unavailable
+            "hdr_unsupported" -> R.string.stream_hdr_unsupported
             else -> R.string.stream_connecting
         })
         status.text = if (watchStatus == "playing" && voiceState.optBoolean("streamSoundEnabled", true)) {
@@ -354,6 +356,7 @@ class StreamViewerActivity : AppCompatActivity() {
 
     private fun initializeRendererIfReady() {
         if (rendererInitialized) return
+        if (session.voiceSnapshot().optString("watchStatus") == "hdr_unsupported") return
         try {
             session.initializeVideoRenderer(renderer)
             rendererInitialized = true

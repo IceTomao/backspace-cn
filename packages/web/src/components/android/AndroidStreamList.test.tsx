@@ -22,3 +22,13 @@ it('offers published streams without subscribing until clicked and removes ended
   view.unmount();
   expect(native.emit).toBeUndefined();
 });
+
+it('recognizes native HDR stream status and shows the unsupported message at the entrance', async () => {
+  native.call.mockImplementation(() => Promise.resolve({ streams: [] }));
+  const view = render(<AndroidStreamList />);
+  await waitFor(() => expect(native.call).toHaveBeenCalledWith('voice'));
+  act(() => native.emit?.({ streams: [{ identity: 'user:Alice', name: 'Alice', videoSid: 'hdr-track', muted: false, dynamicRange: 'hdr' }] }));
+  expect(screen.getByText('HDR')).toBeInTheDocument();
+  expect(screen.getByText('This is an HDR stream. This device cannot currently play it.')).toBeInTheDocument();
+  view.unmount();
+});

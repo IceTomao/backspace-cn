@@ -21,7 +21,8 @@ import { wsSend } from './useWebSocket';
 import { useVoiceStore, type VoiceConnectionQuality } from '../stores/voiceStore';
 import { useAuthStore } from '../stores/authStore';
 import { useUIStore } from '../stores/uiStore';
-import type { User } from '@backspace/shared';
+import type { User, StreamDynamicRange } from '@backspace/shared';
+import { canViewStream, streamDynamicRange } from '../utils/hdrStream';
 import { broadcastVoiceStatus, clearSpaceVoiceForDmCall } from '../utils/voice';
 import { consumeIntentionalCameraOff, markIntentionalCameraOff } from '../utils/voiceActions';
 import { AudioManager } from '../audio/AudioManager';
@@ -81,6 +82,7 @@ export interface ParticipantInfo {
   isDeafened: boolean;
   isCameraOn: boolean;
   isScreenSharing: boolean;
+  dynamicRange?: StreamDynamicRange;
   isLocal: boolean;
   audioTrack: MediaStreamTrack | null;
   videoTrack: MediaStreamTrack | null;
@@ -138,14 +140,20 @@ export function deriveGridTiles(participants: ParticipantInfo[]): GridTile[] {
 }
 
 export function setStreamSubscription(room: Room | null, targetIdentity: string, subscribed: boolean) {
-  if (!room) return;
+  if (!room) return false;
   const rp = room.remoteParticipants.get(targetIdentity);
-  if (!rp) return;
+  if (!rp) return false;
+  const { userId } = parseIdentity(targetIdentity);
+  const range = streamDynamicRange(useVoiceStore.getState().voiceUserStates.get(userId),
+    [...rp.trackPublications.values()].filter(pub => pub.source === Track.Source.ScreenShare).map(pub => pub.trackName));
+  const allowed = canViewStream(range);
   rp.trackPublications.forEach((pub) => {
     if (pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio) {
-      (pub as RemoteTrackPublication).setSubscribed(subscribed);
+      (pub as RemoteTrackPublication).setSubscribed(subscribed && allowed);
     }
   });
+  if (!allowed) useVoiceStore.getState().unwatchStream(userId);
+  return !subscribed || allowed;
 }
 
 export function setCameraSubscription(room: Room | null, targetIdentity: string, subscribed: boolean) {
@@ -310,11 +318,14 @@ function useBrowserLiveKit() {
       let lkScreenTrack: Track | null = null;
       let hasScreenSharePublication = false;
       let hasCameraPublication = false;
+      const dynamicRange = streamDynamicRange(useVoiceStore.getState().voiceUserStates.get(userId),
+        [...p.trackPublications.values()].filter(pub => pub.source === Track.Source.ScreenShare).map(pub => pub.trackName));
       p.trackPublications.forEach((pub) => {
         // Detect screen share publication even if unsubscribed
         if (pub.source === Track.Source.ScreenShare) hasScreenSharePublication = true;
         // Detect camera publication even if unsubscribed (for unwatched cameras)
         if (pub.source === Track.Source.Camera) hasCameraPublication = true;
+        if (!canViewStream(dynamicRange) && (pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio)) return;
 
         const track = pub.track;
         if (!track) return;
@@ -360,6 +371,7 @@ function useBrowserLiveKit() {
         isDeafened: isPartDeafened,
         isCameraOn: hasCameraPublication && p.isCameraEnabled, // True even when unsubscribed
         isScreenSharing: hasScreenSharePublication, // True even when unsubscribed
+        dynamicRange,
         isLocal,
         audioTrack,
         videoTrack,
@@ -834,6 +846,10 @@ function useBrowserLiveKit() {
       newRoom.on(RoomEvent.TrackUnmuted, guardedUpdate);
       newRoom.on(RoomEvent.ParticipantMetadataChanged, guardedUpdate);
       newRoom.on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        if (!canViewStream(streamDynamicRange(useVoiceStore.getState().voiceUserStates.get(parseIdentity(participant.identity).userId),
+          [...participant.trackPublications.values()].filter(pub => pub.source === Track.Source.ScreenShare).map(pub => pub.trackName)))) {
+          setStreamSubscription(newRoom, participant.identity, false);
+        }
         if (
           publication.source !== Track.Source.ScreenShare &&
           publication.source !== Track.Source.ScreenShareAudio
@@ -1076,6 +1092,13 @@ function useBrowserLiveKit() {
   }, []);
 
   useEffect(() => {
+    roomRef.current?.remoteParticipants.forEach(participant => {
+      const { userId } = parseIdentity(participant.identity);
+      if (!canViewStream(streamDynamicRange(voiceUserStates.get(userId),
+        [...participant.trackPublications.values()].filter(pub => pub.source === Track.Source.ScreenShare).map(pub => pub.trackName)))) {
+        setStreamSubscription(roomRef.current, participant.identity, false);
+      }
+    });
     updateParticipants();
   }, [voiceUserStates, isMuted, isDeafened, spaceMutedUserIds, spaceDeafenedUserIds, permissionMutedUserIds, updateParticipants]);
 

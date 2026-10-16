@@ -136,6 +136,24 @@ afterEach(() => {
 });
 
 describe('connectionManager.buildSpaceVoiceState', () => {
+  it('preserves per-stream HDR in snapshots and moderator status changes, and clears it on stop', async () => {
+    const cm = await importManager();
+    seedSpace('sp-hdr');
+    seedChannel('vc-hdr', 'sp-hdr', 'voice');
+    cm.createRoom('vc-hdr', 'space', { type: 'space', spaceId: 'sp-hdr' });
+    cm.joinRoom('vc-hdr', 'hdr-user');
+    cm.joinRoom('vc-hdr', 'sdr-user');
+    cm.setVoiceUserStatus('hdr-user', false, false, false, true, 'hdr');
+    cm.setVoiceUserStatus('sdr-user', false, false, false, true);
+    cm.setVoiceUserStatus('hdr-user', true, false, false, true);
+    const snapshot = cm.buildSpaceVoiceState('sp-hdr', 'owner');
+    expect(snapshot.voiceUserStates['hdr-user']?.dynamicRange).toBe('hdr');
+    expect(snapshot.voiceUserStates['sdr-user']?.dynamicRange).toBeUndefined();
+    cm.setVoiceUserStatus('hdr-user', true, false, false, false);
+    expect(cm.getVoiceUserStatus('hdr-user')?.dynamicRange).toBeUndefined();
+    cm.setVoiceUserStatus('hdr-user', true, false, false, true, 'sdr');
+    expect(cm.getVoiceUserStatus('hdr-user')?.dynamicRange).toBeUndefined();
+  }, 15000);
   it('returns participants, statuses, space-mute and permission-mute for one space', async () => {
     const cm = await importManager();
     const spaceId = 'sp-build-1';

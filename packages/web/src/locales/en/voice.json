@@ -126,6 +126,7 @@
       "h265": "H.265/HEVC"
     },
     "h265Unsupported": "H.265 live encoding is not supported on this device.",
+    "hdrUnavailable": "This client does not have a verified native HDR publisher. Turn off HDR mode before starting a stream.",
     "h265Fallback": "H.265 live encoding is not supported on this device. Switched to VP9.",
     "bitrate": "Bitrate",
     "custom": "Custom",
@@ -156,6 +157,8 @@
     "stopWatching": "Stop Watching",
     "watch": "Watch Stream",
     "watchShort": "Watch",
+    "hdrUnsupported": "This is an HDR stream. This device cannot currently play it.",
+    "hdrRecheck": "Check again",
     "mute": "Mute Stream",
     "isStreaming": "{{name}} is streaming"
   },

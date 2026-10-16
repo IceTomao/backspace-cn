@@ -126,6 +126,7 @@
       "h265": "H.265/HEVC"
     },
     "h265Unsupported": "当前设备不支持 H.265 直播编码。",
+    "hdrUnavailable": "当前客户端尚不具备已验证的原生 HDR 发布能力，无法开启 HDR 直播。请关闭 HDR 模式后再开播。",
     "h265Fallback": "当前设备不支持 H.265 直播编码，已切换为 VP9。",
     "bitrate": "比特率",
     "custom": "自定义",
@@ -156,6 +157,8 @@
     "stopWatching": "停止观看",
     "watch": "观看视频流",
     "watchShort": "观看",
+    "hdrUnsupported": "该直播间为 HDR 直播间，本机设备暂不支持查看",
+    "hdrRecheck": "重新检测",
     "mute": "静音流",
     "isStreaming": "{{name}}正在流式传输"
   },

@@ -26,7 +26,10 @@ export function AndroidStreamList() {
     <div className="flex flex-wrap gap-2">
       {streams.map(stream => <button key={stream.videoSid} disabled={busy || stream.muted}
         className="rounded-lg px-3 py-2 bg-surface-elevated text-txt-primary text-sm disabled:opacity-50"
-        onClick={() => void watch(stream.identity)}>{t(stream.muted ? 'androidStream.paused' : 'androidStream.watch', { name: stream.name || stream.identity.split(':')[1] || stream.identity })}</button>)}
+        onClick={() => void watch(stream.identity)}>
+          {t(stream.muted ? 'androidStream.paused' : 'androidStream.watch', { name: stream.name || stream.identity.split(':')[1] || stream.identity })}
+          {stream.dynamicRange === 'hdr' && <><span className="ml-1.5">HDR</span><span className="block text-xs mt-1">{t('stream.hdrUnsupported')}</span></>}
+        </button>)}
     </div>
   </section>;
 }

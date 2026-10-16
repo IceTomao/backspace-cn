@@ -389,7 +389,7 @@ function handleEvent(origin: string, event: ServerEvent): void {
       // Populate voice user statuses (mute/deafen/camera/screenshare) from server
       if (event.voiceUserStates) {
         for (const [uid, status] of Object.entries(event.voiceUserStates)) {
-          setVoiceUserStatus(uid, status.isMuted, status.isDeafened, status.isCameraOn, status.isScreenSharing);
+          setVoiceUserStatus(uid, status.isMuted, status.isDeafened, status.isCameraOn, status.isScreenSharing, status.dynamicRange);
         }
       }
       // Build new restriction Sets atomically from ready payload, then apply in one setState
@@ -687,7 +687,7 @@ function handleEvent(origin: string, event: ServerEvent): void {
       break;
 
     case 'voice_status_update':
-      setVoiceUserStatus(event.userId, event.isMuted, event.isDeafened, event.isCameraOn, event.isScreenSharing);
+      setVoiceUserStatus(event.userId, event.isMuted, event.isDeafened, event.isCameraOn, event.isScreenSharing, event.dynamicRange);
       break;
 
     case 'space_voice_state':

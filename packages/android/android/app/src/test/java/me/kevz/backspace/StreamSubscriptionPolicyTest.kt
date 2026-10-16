@@ -5,6 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class StreamSubscriptionPolicyTest {
+    @Test fun hdrBlocksOnlyStreamMediaAndKeepsChannelVoice() {
+        assertFalse(StreamSubscriptionPolicy.subscribe(Track.Source.SCREEN_SHARE, "target", "target", true, true, true))
+        assertFalse(StreamSubscriptionPolicy.subscribe(Track.Source.SCREEN_SHARE_AUDIO, "target", "target", true, true, true))
+        assertTrue(StreamSubscriptionPolicy.subscribe(Track.Source.MICROPHONE, "target", "target", true, true, true))
+        assertTrue(StreamSubscriptionPolicy.subscribe(Track.Source.SCREEN_SHARE, "other", "other", true, true, false))
+    }
     @Test fun onlySelectedScreenAndSoundAreReceivedAlongsideChannelVoice() {
         assertTrue(StreamSubscriptionPolicy.subscribe(Track.Source.MICROPHONE, "other", "target", false, false))
         assertTrue(StreamSubscriptionPolicy.subscribe(Track.Source.SCREEN_SHARE, "target", "target", true, true))

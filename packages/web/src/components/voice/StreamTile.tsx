@@ -7,6 +7,7 @@ import { useContextMenuStore, type ContextMenuItem } from '../../stores/contextM
 import { getActiveRoom, setStreamSubscription } from '../../hooks/useLiveKit';
 import { stopScreenShare, changeScreenShare } from '../../utils/screenShare';
 import { encodeStreamWatch } from '../../utils/streamWatchProtocol';
+import { canViewStream } from '../../utils/hdrStream';
 import { AudioManager } from '../../audio/AudioManager';
 import { getSfxVolume } from '../../utils/sfx';
 import { ScreenShareSettingsPopover } from './ScreenShareSettingsPopover';
@@ -205,15 +206,18 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
   const { participant } = tile;
   const isLocal = participant.isLocal;
   const userId = participant.userId;
+  const statusRange = useVoiceStore(s => s.voiceUserStates.get(userId)?.dynamicRange);
+  const dynamicRange = statusRange === 'hdr' || participant.dynamicRange === 'hdr' ? 'hdr' : 'sdr';
+  const hdrBlocked = !canViewStream(dynamicRange);
   const avatarUserId = participant.homeUserId ?? userId;
   const { displayName, avatar, user } = useVoiceParticipantMeta(participant);
 
-  const isWatching = watchingStreams.has(userId);
+  const isWatching = !hdrBlocked && watchingStreams.has(userId);
   const voiceConnectionStatus = useVoiceStore((s) => s.voiceConnectionStatus);
   const localConnectionQuality = useVoiceStore((s) => s.connectionQuality);
   const publisherConnectionQuality = useVoiceStore((s) => s.connectionQualities.get(participant.identity) ?? 'unknown');
 
-  const liveScreenTrack = tile.screenTrack?.readyState === 'live' ? tile.screenTrack : null;
+  const liveScreenTrack = !hdrBlocked && tile.screenTrack?.readyState === 'live' ? tile.screenTrack : null;
   const liveLkScreenTrack = liveScreenTrack ? tile.lkScreenTrack : null;
 
   // Quality badge state: the raw dimensions, rendered through the catalog so a language switch relabels them.
@@ -361,8 +365,8 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
               React.createElement('path', { d: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z' }),
             ),
             onClick: () => {
+              if (!setStreamSubscription(getActiveRoom(), identity, true)) return;
               useVoiceStore.getState().watchStream(userId);
-              setStreamSubscription(getActiveRoom(), identity, true);
               handleViewerWatchToggle(userId, true);
             },
           });
@@ -405,8 +409,8 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
   );
 
   const handleWatch = useCallback(() => {
+    if (!setStreamSubscription(getActiveRoom(), participant.identity, true)) return;
     useVoiceStore.getState().watchStream(userId);
-    setStreamSubscription(getActiveRoom(), participant.identity, true);
     handleViewerWatchToggle(userId, true);
   }, [userId, participant.identity]);
 
@@ -438,13 +442,14 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
               <p className={`text-txt-primary font-semibold ${large ? 'text-sm' : 'text-xs leading-tight line-clamp-2'}`}>
                 {t('voice:stream.isStreaming', { name: displayName })}
               </p>
+              {hdrBlocked && <p className="text-xs text-txt-secondary mt-2">{t('voice:stream.hdrUnsupported')}</p>}
               {!isLocal && (
                 <button
-                  onClick={handleWatch}
-                  aria-label={t('voice:stream.watch')}
+                  onClick={hdrBlocked ? () => forceUpdate(n => n + 1) : handleWatch}
+                  aria-label={t(hdrBlocked ? 'voice:stream.hdrRecheck' : 'voice:stream.watch')}
                   className={`${large ? 'mt-2 px-4 py-1.5' : 'mt-2 w-full min-h-7 px-3 py-1 text-[11px]'} whitespace-nowrap bg-accent-primary hover:bg-accent-primary/80 rounded text-white font-semibold transition-colors`}
                 >
-                  {t(large ? 'voice:stream.watch' : 'voice:stream.watchShort')}
+                  {t(hdrBlocked ? 'voice:stream.hdrRecheck' : large ? 'voice:stream.watch' : 'voice:stream.watchShort')}
                 </button>
               )}
             </div>
@@ -455,6 +460,7 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
       {/* LIVE badge — top left */}
       <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-accent-rose rounded text-[11px] font-bold text-white uppercase tracking-wide">
         {t('voice:badges.live')}
+        {dynamicRange === 'hdr' && <span className="ml-1.5">HDR</span>}
       </div>
 
       {/* Stream status — in focus mode this is the visual peer of the Grid

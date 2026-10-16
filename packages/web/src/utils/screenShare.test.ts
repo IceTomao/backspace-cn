@@ -108,6 +108,7 @@ beforeEach(() => {
       customBitrateKbps: 18_000,
       shareAudio: true,
       codec: 'vp9',
+      hdrEnabled: false,
     },
   });
 });
@@ -138,6 +139,43 @@ describe('H.265 screen-share capability detection', () => {
 });
 
 describe('screen-share media options', () => {
+  it('treats malformed persisted HDR values as disabled', async () => {
+    localStorage.setItem('backspace-voice-settings', JSON.stringify({ version: 16, state: { screenShareConfig: { hdrEnabled: 'true' } } }));
+    await useVoiceStore.persist.rehydrate();
+    expect(useVoiceStore.getState().screenShareConfig.hdrEnabled).toBe(false);
+  });
+  it('defaults/migrates old HDR settings off and retains the SDR codec preference', async () => {
+    expect(useVoiceStore.getInitialState().screenShareConfig.hdrEnabled).toBe(false);
+    localStorage.setItem('backspace-voice-settings', JSON.stringify({ version: 15, state: { screenShareConfig: { codec: 'h264' } } }));
+    await useVoiceStore.persist.rehydrate();
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrEnabled: false, codec: 'h264', height: 1440 });
+    useVoiceStore.getState().setScreenShareConfig({ hdrEnabled: true });
+    expect(buildScreenShareOptions(useVoiceStore.getState().screenShareConfig).publish).toMatchObject({ videoCodec: 'h265', simulcast: false, backupCodec: undefined });
+    await useVoiceStore.persist.rehydrate();
+    expect(useVoiceStore.getState().screenShareConfig.hdrEnabled).toBe(true);
+    useVoiceStore.setState({ isScreenSharing: true });
+    useVoiceStore.getState().setScreenShareConfig({ hdrEnabled: false, height: 1080 });
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrEnabled: true, height: 1080, codec: 'h264' });
+    useVoiceStore.setState({ isScreenSharing: false });
+    useVoiceStore.getState().setScreenShareConfig({ hdrEnabled: false });
+    expect(buildScreenShareOptions(useVoiceStore.getState().screenShareConfig).publish.videoCodec).toBe('h264');
+  });
+
+  it('never silently publishes browser SDR or system audio for a restored HDR request', async () => {
+    useVoiceStore.getState().setScreenShareConfig({ hdrEnabled: true, codec: 'h265' });
+    vi.stubGlobal('RTCRtpSender', undefined);
+    expect(ensureSupportedScreenShareCodec().codec).toBe('h265');
+    const getDisplayMedia = vi.fn();
+    vi.stubGlobal('navigator', { mediaDevices: { getDisplayMedia } });
+    await expect(stageScreenCapture()).rejects.toMatchObject({ name: 'NotSupportedError' });
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+    const room = fakeRoom(), video = makeTrack('video'), audio = makeTrack('audio');
+    expect(await publishScreenShare(room, makeStream(video, audio))).toBe(false);
+    expect(room.localParticipant.publishTrack).not.toHaveBeenCalled();
+    expect(video.stop).toHaveBeenCalled();
+    expect(audio.stop).toHaveBeenCalled();
+    expect(useVoiceStore.getState().isScreenSharing).toBe(false);
+  });
   it('restores and publishes H.265 with a VP8 backup, then keeps the choice after stop', async () => {
     localStorage.setItem('backspace-voice-settings', JSON.stringify({
       version: 15,

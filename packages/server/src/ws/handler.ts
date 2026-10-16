@@ -1,3 +1,4 @@
+import type { VoiceUserState, StreamDynamicRange } from '@backspace/shared';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { verifyJwt } from '../utils/auth.js';
@@ -108,7 +109,7 @@ class ConnectionManager {
   // O(1) reverse index: userId → roomId
   private userToRoom: Map<string, string> = new Map();
   // userId → { isMuted, isDeafened, isCameraOn, isScreenSharing } — voice user status
-  private voiceUserStates: Map<string, { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean }> = new Map();
+  private voiceUserStates: Map<string, VoiceUserState> = new Map();
   // userId → Timeout
   private pendingOfflineTimeouts: Map<string, NodeJS.Timeout> = new Map();
   // Voice has a longer grace than presence so a VPN/network handover can be
@@ -440,13 +441,13 @@ class ConnectionManager {
   buildSpaceVoiceState(spaceId: string, userId: string): {
     voiceStates: Record<string, string[]>;
     voiceChannelElapsedSeconds: Record<string, number>;
-    voiceUserStates: Record<string, { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean }>;
+    voiceUserStates: Record<string, VoiceUserState>;
     spaceVoiceStates: Record<string, { spaceMuted: boolean; spaceDeafened: boolean; permissionMuted: boolean }>;
   } {
     const db = getDb();
     const voiceStates: Record<string, string[]> = {};
     const voiceChannelElapsedSeconds: Record<string, number> = {};
-    const voiceUserStates: Record<string, { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean }> = {};
+    const voiceUserStates: Record<string, VoiceUserState> = {};
     const spaceVoiceStates: Record<string, { spaceMuted: boolean; spaceDeafened: boolean; permissionMuted: boolean }> = {};
 
     // Who is currently in each of this space's voice channels the user can VIEW.
@@ -804,11 +805,16 @@ class ConnectionManager {
 
   // ─── Voice User Status (unchanged) ────────────────────────────────────────
 
-  setVoiceUserStatus(userId: string, isMuted: boolean, isDeafened: boolean, isCameraOn: boolean, isScreenSharing: boolean): void {
-    this.voiceUserStates.set(userId, { isMuted, isDeafened, isCameraOn, isScreenSharing });
+  setVoiceUserStatus(userId: string, isMuted: boolean, isDeafened: boolean, isCameraOn: boolean, isScreenSharing: boolean, dynamicRange?: StreamDynamicRange): void {
+    // Moderator mute/deafen updates omit this argument and retain the current
+    // stream mode. A legacy client status explicitly passes SDR instead.
+    const range = dynamicRange ?? this.voiceUserStates.get(userId)?.dynamicRange;
+    this.voiceUserStates.set(userId, { isMuted, isDeafened, isCameraOn, isScreenSharing,
+      ...(isScreenSharing && range === 'hdr' ? { dynamicRange: 'hdr' as const } : {}),
+    });
   }
 
-  getVoiceUserStatus(userId: string): { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean } | undefined {
+  getVoiceUserStatus(userId: string): VoiceUserState | undefined {
     return this.voiceUserStates.get(userId);
   }
 
@@ -871,7 +877,7 @@ class ConnectionManager {
     return this.permissionMutedUsers.has(`${spaceId}:${userId}`);
   }
 
-  getAllVoiceUserStates(): Map<string, { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean }> {
+  getAllVoiceUserStates(): Map<string, VoiceUserState> {
     return this.voiceUserStates;
   }
 
@@ -1202,7 +1208,7 @@ function buildReadyPayload(userId: string): {
   voiceStates: Record<string, string[]>;
   voiceServiceState: VoiceServiceState | null;
   voiceChannelElapsedSeconds: Record<string, number>;
-  voiceUserStates: Record<string, { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean }>;
+  voiceUserStates: Record<string, VoiceUserState>;
   spaceVoiceStates: Record<string, { spaceMuted: boolean; spaceDeafened: boolean; permissionMuted: boolean }>;
   readStates: ReadState[];
   activeCalls: ActiveCallInfo[];
@@ -1662,7 +1668,7 @@ function buildReadyPayload(userId: string): {
   }
 
   // Build voice user states — includes both space and DM participants now
-  const voiceUserStates: Record<string, { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean }> = {};
+  const voiceUserStates: Record<string, VoiceUserState> = {};
   for (const chId of Object.keys(voiceStates)) {
     const usersInChannel = voiceStates[chId];
     if (usersInChannel) {

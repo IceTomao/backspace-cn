@@ -35,4 +35,5 @@
     <string name="video_saving">Saving video…</string>
     <string name="video_saved">Video saved</string>
     <string name="video_save_failed">Could not save video. Try again.</string>
+    <string name="stream_hdr_unsupported">This is an HDR stream. This device cannot currently play it.</string>
 </resources>

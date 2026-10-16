@@ -55,7 +55,7 @@ export function isH265ScreenShareSupported(): boolean {
 /** Reset unsupported saved choices once, shared by the settings UI and publication. */
 export function ensureSupportedScreenShareCodec(): ScreenShareConfig {
   const { screenShareConfig, setScreenShareConfig } = useVoiceStore.getState();
-  if (screenShareConfig.codec === 'h265' && !isH265ScreenShareSupported()) {
+  if (!screenShareConfig.hdrEnabled && screenShareConfig.codec === 'h265' && !isH265ScreenShareSupported()) {
     setScreenShareConfig({ codec: 'vp9' });
     useUIStore.getState().addToast(
       i18n.t('voice:streamSettings.h265Fallback'),
@@ -172,14 +172,14 @@ export function buildScreenShareOptions(config: ScreenShareConfig): ScreenShareB
   return {
     capture: { width: captureWidth, height: captureHeight, frameRate: fps },
     publish: {
-      videoCodec: config.codec,
+      videoCodec: config.hdrEnabled ? 'h265' : config.codec,
       videoEncoding: { maxBitrate: bps, maxFramerate: fps },
       simulcast: false,
-      backupCodec: {
+      backupCodec: config.hdrEnabled ? undefined : {
         codec: 'vp8' as const,
         encoding: { maxBitrate: backupBps, maxFramerate: backupFps },
       },
-      backupCodecPolicy: BackupCodecPolicy.SIMULCAST,
+      backupCodecPolicy: config.hdrEnabled ? undefined : BackupCodecPolicy.SIMULCAST,
       audioPreset: AudioPresets.musicHighQualityStereo,
       dtx: false,
       red: false,
@@ -318,9 +318,14 @@ export function isCaptureCancellation(err: unknown): boolean {
   return err.name === 'NotAllowedError' || err.name === 'AbortError';
 }
 
+function assertBrowserScreenShareIsSdr(config: ScreenShareConfig): void {
+  if (config.hdrEnabled) throw new DOMException(i18n.t('voice:streamSettings.hdrUnavailable'), 'NotSupportedError');
+}
+
 /** Must run inside a user gesture in browsers (getDisplayMedia requires transient activation). */
 export async function stageScreenCapture(): Promise<MediaStream> {
   const config = useVoiceStore.getState().screenShareConfig;
+  assertBrowserScreenShareIsSdr(config);
   const opts = buildScreenShareOptions(config);
   if (!isScreenCaptureSupported()) {
     throw new DOMException('getDisplayMedia is not available', 'NotSupportedError');
@@ -354,6 +359,7 @@ export async function applyStagedCaptureConfig(stream: MediaStream): Promise<voi
   const track = stream.getVideoTracks()[0];
   if (!track || track.readyState !== 'live') return;
   const config = useVoiceStore.getState().screenShareConfig;
+  assertBrowserScreenShareIsSdr(config);
   const opts = buildScreenShareOptions(config);
   const constraints = buildCaptureConstraints(config, opts).video;
   try {
@@ -402,6 +408,13 @@ export function isScreenShareRepublishing(): boolean {
 let _stopping = false;
 
 export async function publishScreenShare(room: Room, stream: MediaStream): Promise<boolean> {
+  // The WGC/NVENC publisher is still under acceptance in experiments/windows-hdr.
+  // Never convert a restored HDR intent into an 8-bit browser publication.
+  if (useVoiceStore.getState().screenShareConfig.hdrEnabled) {
+    stopStagedCapture(stream);
+    useUIStore.getState().addToast(i18n.t('voice:streamSettings.hdrUnavailable'), 'warning', 8000);
+    return false;
+  }
   const config = ensureSupportedScreenShareCodec();
   const opts = buildScreenShareOptions(config);
   const needsH264SdpPatch = config.codec === 'h264';
@@ -479,6 +492,7 @@ export async function publishScreenShare(room: Room, stream: MediaStream): Promi
  * no second picker prompt.
  */
 export async function republishScreenShare(room: Room): Promise<void> {
+  assertBrowserScreenShareIsSdr(useVoiceStore.getState().screenShareConfig);
   const videoPub = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
   const audioPub = room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio);
   const videoTrack = videoPub?.track?.mediaStreamTrack;

@@ -1,3 +1,4 @@
+import type { VoiceUserState } from '@backspace/shared';
 import { useVoiceStore } from '../stores/voiceStore';
 
 /**
@@ -10,7 +11,7 @@ export interface SpaceVoiceStateSnapshot {
   spaceId: string;
   voiceStates: Record<string, string[]>;
   voiceChannelElapsedSeconds: Record<string, number>;
-  voiceUserStates: Record<string, { isMuted: boolean; isDeafened: boolean; isCameraOn: boolean; isScreenSharing: boolean }>;
+  voiceUserStates: Record<string, VoiceUserState>;
   spaceVoiceStates: Record<string, { spaceMuted: boolean; spaceDeafened: boolean; permissionMuted: boolean }>;
 }
 
@@ -38,7 +39,7 @@ export function applySpaceVoiceState(snapshot: SpaceVoiceStateSnapshot): void {
     setVoiceChannelElapsedSeconds(channelId, elapsedSeconds);
   }
   for (const [userId, status] of Object.entries(snapshot.voiceUserStates)) {
-    setVoiceUserStatus(userId, status.isMuted, status.isDeafened, status.isCameraOn, status.isScreenSharing);
+    setVoiceUserStatus(userId, status.isMuted, status.isDeafened, status.isCameraOn, status.isScreenSharing, status.dynamicRange);
   }
 
   const vs = useVoiceStore.getState();

@@ -291,6 +291,19 @@ class StreamViewerActivityTest {
         assertEquals(View.GONE, activity.view(R.id.stream_message).visibility)
     }
 
+    @Test fun hdrRoomShowsUnsupportedMessageWithoutInitializingRendererOrLeavingVoice() {
+        session.snapshot.put("watchStatus", "hdr_unsupported")
+        session.snapshot.getJSONArray("streams").getJSONObject(0).put("dynamicRange", "hdr")
+        val activity = launch()
+        assertEquals(0, session.initializations)
+        assertEquals("Alice · HDR", activity.findViewById<TextView>(R.id.stream_title).text.toString())
+        assertEquals(activity.getString(R.string.stream_hdr_unsupported), activity.findViewById<TextView>(R.id.stream_message).text.toString())
+        activity.click(R.id.stream_mic_button)
+        assertTrue(session.snapshot.getBoolean("muted"))
+        assertTrue(session.inCall)
+        assertEquals(0, session.stopsWatching)
+    }
+
     @Test fun leftSwipesChangeOnlyWindowBrightnessClampAndSurviveRecreation() {
         var activity = launch()
         activity.layout(393, 800)

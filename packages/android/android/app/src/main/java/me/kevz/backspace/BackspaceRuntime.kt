@@ -209,7 +209,7 @@ class BackspaceRuntime internal constructor(
         emitVoice()
     }
     private fun announceWatching() {
-        val target = watchingIdentity.takeIf { viewerVisible && foreground && voiceStatus == "connected" && streamPublication()?.muted == false }
+        val target = watchingIdentity.takeIf { viewerVisible && foreground && voiceStatus == "connected" && !isHdrStream(watchingIdentity) && streamPublication()?.muted == false }
         if (announcedWatcher == target) return
         val current = room ?: return
         val old = announcedWatcher
@@ -224,7 +224,11 @@ class BackspaceRuntime internal constructor(
     private fun streamPublication(): RemoteTrackPublication? = room?.remoteParticipants?.values
         ?.firstOrNull { it.identity?.value == watchingIdentity }?.trackPublications?.values
         ?.firstOrNull { it.source == Track.Source.SCREEN_SHARE } as? RemoteTrackPublication
-    fun streamVideoTrack(): RemoteVideoTrack? = if (viewerVisible && foreground) streamPublication()?.takeIf { it.isDesired && !it.muted }?.track as? RemoteVideoTrack else null
+    private fun isHdrStream(identity: String?): Boolean = identity != null &&
+        (sockets[voiceOrigin]?.hdrStreamUsers?.contains(identity.substringBefore(':')) == true ||
+            room?.remoteParticipants?.values?.firstOrNull { it.identity?.value == identity }?.trackPublications?.values
+                ?.any { it.source == Track.Source.SCREEN_SHARE && it.name == StreamSubscriptionPolicy.HDR_TRACK_NAME } == true)
+    fun streamVideoTrack(): RemoteVideoTrack? = if (viewerVisible && foreground && !isHdrStream(watchingIdentity)) streamPublication()?.takeIf { it.isDesired && !it.muted }?.track as? RemoteVideoTrack else null
     fun initializeVideoRenderer(renderer: livekit.org.webrtc.SurfaceViewRenderer) {
         (room ?: error("语音连接已结束")).initVideoRenderer(renderer)
     }
@@ -716,6 +720,7 @@ class BackspaceRuntime internal constructor(
         private var latestSequence = 0L
         private var removedSequence = 0L
         val restrictions = mutableMapOf<String, JSONObject>()
+        val hdrStreamUsers = mutableSetOf<String>()
         var incoming: JSONObject? = null
         var incomingTimeout: Job? = null
         val backlog = ArrayDeque<Pair<Long, JSONObject>>()
@@ -899,6 +904,19 @@ class BackspaceRuntime internal constructor(
 
     private fun handleNativeEvent(session: SocketSession, event: JSONObject) {
         val type = event.optString("type")
+        if (type == "ready") session.hdrStreamUsers.clear()
+        fun streamState(userId: String, status: JSONObject) {
+            if (status.optBoolean("isScreenSharing") && status.optString("dynamicRange") == "hdr") session.hdrStreamUsers.add(userId)
+            else session.hdrStreamUsers.remove(userId)
+        }
+        if (type in setOf("ready", "space_voice_state")) event.optJSONObject("voiceUserStates")?.let { states ->
+            for (userId in states.keys()) streamState(userId, states.getJSONObject(userId))
+        }
+        if (type == "voice_status_update") streamState(event.optString("userId"), event)
+        if (type == "voice_state_update" && event.optString("action") == "leave") session.hdrStreamUsers.remove(event.optString("userId"))
+        if (inCall && voiceOrigin == session.origin && type in setOf("ready", "space_voice_state", "voice_status_update")) {
+            syncSubscriptions(); announceWatching(); emitVoice()
+        }
         if (type == "ready") session.restrictions.clear()
         if (type in setOf("ready", "space_voice_state")) {
             event.optJSONObject("spaceVoiceStates")?.let { states ->
@@ -1300,7 +1318,7 @@ class BackspaceRuntime internal constructor(
     }
     private fun syncSubscriptions() {
         val video = streamPublication()
-        val streamAvailable = video != null
+        val streamAvailable = video != null && !isHdrStream(watchingIdentity)
         val selected = room?.remoteParticipants?.values?.firstOrNull { it.identity?.value == watchingIdentity }
         val screenAudio = selected?.trackPublications?.values
             ?.firstOrNull { it.source == Track.Source.SCREEN_SHARE_AUDIO } as? RemoteTrackPublication
@@ -1325,7 +1343,7 @@ class BackspaceRuntime internal constructor(
                     val identity = participant.identity?.value ?: ""
                     val subscribe = StreamSubscriptionPolicy.subscribe(publication.source, identity, watchingIdentity,
                         viewerVisible && foreground && streamAvailable && voiceStatus == "connected",
-                        streamSoundEnabled && video?.muted == false)
+                        streamSoundEnabled && video?.muted == false, isHdrStream(identity))
                     if (publication.isDesired != subscribe) publication.setSubscribed(subscribe)
                     val userId = participant.identity?.value?.substringBefore(":") ?: ""
                     val volume = audioOptions.optJSONObject("volumes")?.optDouble(userId, 100.0) ?: 100.0
@@ -1362,6 +1380,7 @@ class BackspaceRuntime internal constructor(
             current.remoteParticipants.values.forEach { participant ->
                 participant.trackPublications.values.filter { it.source == Track.Source.SCREEN_SHARE }.forEach { publication ->
                     streams.put(JSONObject().put("identity", participant.identity?.value ?: "").put("name", participant.name ?: "")
+                        .put("dynamicRange", if (isHdrStream(participant.identity?.value)) "hdr" else "sdr")
                         .put("videoSid", publication.sid)
                         .put("audioSid", participant.trackPublications.values.firstOrNull { it.source == Track.Source.SCREEN_SHARE_AUDIO }?.sid ?: JSONObject.NULL)
                         .put("muted", publication.muted))
@@ -1381,6 +1400,7 @@ class BackspaceRuntime internal constructor(
             .put("watchStatus", when {
                 watchingIdentity == null -> "stopped"
                 voiceStatus != "connected" -> voiceStatus
+                isHdrStream(watchingIdentity) -> "hdr_unsupported"
                 !viewerVisible || !foreground -> "paused"
                 streamPublication() == null -> "ended"
                 streamPublication()?.subscriptionAllowed == false -> "unavailable"
