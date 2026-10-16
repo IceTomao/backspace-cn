@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFavoriteMediaStore } from '../../stores/favoriteMediaStore';
-import { X } from 'lucide-react';
 import { useContextMenuStore } from '../../stores/contextMenuStore';
 
 interface FavoriteMediaPickerProps {
@@ -57,8 +56,8 @@ export function FavoriteMediaPicker({ onSelect, mobile = false }: FavoriteMediaP
       {items.map((item) => (
         <div
           key={item.id}
-          className="group relative aspect-square min-w-0"
-          data-context-menu={mobile ? true : undefined}
+          className="relative aspect-square min-w-0"
+          data-context-menu
           onTouchStart={mobile ? (event) => {
             cancelLongPress();
             const touch = event.touches[0];
@@ -85,11 +84,11 @@ export function FavoriteMediaPicker({ onSelect, mobile = false }: FavoriteMediaP
             cancelLongPress();
           } : undefined}
           onTouchCancel={mobile ? cancelLongPress : undefined}
-          onContextMenu={mobile ? (event) => {
+          onContextMenu={(event) => {
             event.preventDefault();
             event.stopPropagation();
             showRemove(item.id, event.clientX, event.clientY);
-          } : undefined}
+          }}
         >
           <button
             type="button"
@@ -109,13 +108,6 @@ export function FavoriteMediaPicker({ onSelect, mobile = false }: FavoriteMediaP
           >
             {urls[item.id] && <img src={urls[item.id]} alt={item.name} className="h-full w-full object-contain" draggable={false} />}
           </button>
-          {!mobile && <button
-            type="button"
-            aria-label={t('favorites.remove')}
-            title={t('favorites.remove')}
-            className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded bg-black/70 text-white hover:bg-black desktop:hidden desktop:group-hover:flex"
-            onClick={(event) => { event.stopPropagation(); void remove(item.id); }}
-          ><X className="h-4 w-4" /></button>}
         </div>
       ))}
     </div>

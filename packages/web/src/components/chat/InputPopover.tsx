@@ -5,6 +5,7 @@ import { EmojiPicker } from './EmojiPicker';
 import { GifPicker } from './GifPicker';
 import { FavoriteMediaPicker } from './FavoriteMediaPicker';
 import { useUIStore } from '../../stores/uiStore';
+import { useContextMenuStore } from '../../stores/contextMenuStore';
 import { useDragToClose } from '../../hooks/useDragToClose';
 
 export type InputPopoverTab = 'favorites' | 'emoji' | 'gif';
@@ -63,6 +64,7 @@ function DesktopPopover({
   availableTabs,
 }: DesktopPopoverProps) {
   const floatingRef = useRef<HTMLDivElement>(null);
+  const contextMenuOpen = useContextMenuStore((state) => state.menu !== null);
 
   // Position above the anchor
   const updatePosition = useCallback(() => {
@@ -140,6 +142,7 @@ function DesktopPopover({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (e.defaultPrevented || useContextMenuStore.getState().menu) return;
         e.stopPropagation();
         onClose();
       }
@@ -151,7 +154,8 @@ function DesktopPopover({
   return createPortal(
     <div
       ref={floatingRef}
-      className="fixed z-[300] animate-slide-up"
+      // Keep the context menu and its dismissal backdrop above the picker.
+      className={`fixed ${contextMenuOpen ? 'z-[198]' : 'z-[300]'} animate-slide-up`}
       style={{ top: -9999, left: -9999 }}
     >
       <div className={`glass rounded-xl overflow-hidden flex flex-col max-h-[435px] ${
