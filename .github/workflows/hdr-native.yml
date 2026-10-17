@@ -1,0 +1,43 @@
+name: Windows HDR native checks
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'packages/desktop/native/**'
+      - 'packages/desktop/src/hdr*'
+      - 'packages/desktop/scripts/build-hdr-native.mjs'
+      - 'experiments/windows-hdr/**'
+      - '.github/workflows/hdr-native.yml'
+  pull_request:
+    paths:
+      - 'packages/desktop/native/**'
+      - 'packages/desktop/src/hdr*'
+      - 'packages/desktop/scripts/build-hdr-native.mjs'
+      - 'experiments/windows-hdr/**'
+      - '.github/workflows/hdr-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native-transport:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache-dependency-path: packages/desktop/native/hdr-bridge/go.sum
+      - name: Compile C# helpers and Go bridge (no hardware acceptance)
+        run: node packages/desktop/scripts/build-hdr-native.mjs
+      - name: Fetch pinned local test runtimes
+        run: |
+          node experiments/windows-hdr/setup-runtime.mjs encoder
+          node experiments/windows-hdr/setup-runtime.mjs livekit
+      - name: Verify synthetic Main10/PQ and Opus through a real local SFU
+        run: node experiments/windows-hdr/verify-native.mjs

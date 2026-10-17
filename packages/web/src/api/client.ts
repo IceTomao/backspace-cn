@@ -311,8 +311,8 @@ export class BackspaceApiClient {
 
   readonly livekit: {
     status: () => Promise<LiveKitStatusResponse>;
-    token: (channelId: string) => Promise<LiveKitTokenResponse>;
-    dmToken: (dmChannelId: string) => Promise<LiveKitTokenResponse>;
+    token: (channelId: string, nativeHdr?: import('@backspace/shared').NativeHdrTokenOptions) => Promise<LiveKitTokenResponse>;
+    dmToken: (dmChannelId: string, nativeHdr?: import('@backspace/shared').NativeHdrTokenOptions) => Promise<LiveKitTokenResponse>;
   };
 
   readonly settings: {
@@ -722,10 +722,10 @@ export class BackspaceApiClient {
 
     this.livekit = {
       status: () => request<LiveKitStatusResponse>('GET', '/livekit/status'),
-      token: (channelId: string) =>
-        request<LiveKitTokenResponse>('POST', '/livekit/token', { channelId }),
-      dmToken: (dmChannelId: string) =>
-        request<LiveKitTokenResponse>('POST', '/livekit/token', { dmChannelId }),
+      token: (channelId: string, nativeHdr?: import('@backspace/shared').NativeHdrTokenOptions) =>
+        request<LiveKitTokenResponse>('POST', '/livekit/token', { channelId, ...(nativeHdr ? { nativeHdr } : {}) }),
+      dmToken: (dmChannelId: string, nativeHdr?: import('@backspace/shared').NativeHdrTokenOptions) =>
+        request<LiveKitTokenResponse>('POST', '/livekit/token', { dmChannelId, ...(nativeHdr ? { nativeHdr } : {}) }),
     };
 
     this.settings = {

@@ -54,6 +54,7 @@ interface VoiceState {
   cameraDeviceId: string | null; // null = auto-select on next camera enable
   focusedParticipantId: string | null;
   screenShareConfig: ScreenShareConfig;
+  screenShareDynamicRange: 'sdr' | 'hdr';
   /**
    * The source shared last time, so the setup screen can stage it again
    * without being asked. Desktop only: browsers do not let the page name a
@@ -192,6 +193,7 @@ export const useVoiceStore = create<VoiceState>()(
       isDeafened: false,
       isCameraOn: false,
       isScreenSharing: false,
+      screenShareDynamicRange: 'sdr',
       micPermissionDenied: false,
       participants: [],
       speakingParticipantIds: new Set(),
@@ -604,6 +606,7 @@ export const useVoiceStore = create<VoiceState>()(
         // Per-session media state
         isCameraOn: false,
         isScreenSharing: false,
+        screenShareDynamicRange: 'sdr',
         deafenedUserIds: new Set(),
         streamVolumes: new Map(),
         streamMutes: new Map(),
@@ -656,6 +659,7 @@ export const useVoiceStore = create<VoiceState>()(
             currentVoiceChannelId: null,
             isCameraOn: false,
             isScreenSharing: false,
+            screenShareDynamicRange: 'sdr',
             participants: [],
             speakingParticipantIds: new Set(),
             speakingUserIds: new Set(),
@@ -705,6 +709,7 @@ export const useVoiceStore = create<VoiceState>()(
           currentVoiceChannelId: null,
           isCameraOn: false,
           isScreenSharing: false,
+          screenShareDynamicRange: 'sdr',
           participants: [],
           speakingParticipantIds: new Set(),
           speakingUserIds: new Set(),
@@ -739,6 +744,7 @@ export const useVoiceStore = create<VoiceState>()(
         isDeafened: false,
         isCameraOn: false,
         isScreenSharing: false,
+        screenShareDynamicRange: 'sdr',
         participants: [],
         speakingParticipantIds: new Set(),
         speakingUserIds: new Set(),

@@ -8,6 +8,7 @@ import { getActiveRoom, setStreamSubscription } from '../../hooks/useLiveKit';
 import { stopScreenShare, changeScreenShare } from '../../utils/screenShare';
 import { encodeStreamWatch } from '../../utils/streamWatchProtocol';
 import { canViewStream } from '../../utils/hdrStream';
+import { useNativeHdrStore } from '../../stores/nativeHdrStore';
 import { AudioManager } from '../../audio/AudioManager';
 import { getSfxVolume } from '../../utils/sfx';
 import { ScreenShareSettingsPopover } from './ScreenShareSettingsPopover';
@@ -209,6 +210,8 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
   const statusRange = useVoiceStore(s => s.voiceUserStates.get(userId)?.dynamicRange);
   const dynamicRange = statusRange === 'hdr' || participant.dynamicRange === 'hdr' ? 'hdr' : 'sdr';
   const hdrBlocked = !canViewStream(dynamicRange);
+  const nativeHdr = useNativeHdrStore();
+  const nativeWatching = hdrBlocked && nativeHdr.watchingUserId === userId;
   const avatarUserId = participant.homeUserId ?? userId;
   const { displayName, avatar, user } = useVoiceParticipantMeta(participant);
 
@@ -339,7 +342,9 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
         });
       } else {
         // Remote stream: watch/unwatch, mute, volume, attenuation
-        const currentIsWatching = useVoiceStore.getState().watchingStreams.has(userId);
+        const currentIsWatching = hdrBlocked
+          ? useNativeHdrStore.getState().watchingUserId === userId
+          : useVoiceStore.getState().watchingStreams.has(userId);
         const identity = participant.identity;
 
         if (currentIsWatching) {
@@ -351,6 +356,7 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
               React.createElement('path', { d: 'M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z' }),
             ),
             onClick: () => {
+              if (hdrBlocked) { void useNativeHdrStore.getState().stop('viewer'); return; }
               useVoiceStore.getState().unwatchStream(userId);
               setStreamSubscription(getActiveRoom(), identity, false);
               handleViewerWatchToggle(userId, false);
@@ -365,6 +371,12 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
               React.createElement('path', { d: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z' }),
             ),
             onClick: () => {
+              if (hdrBlocked) {
+                const native = useNativeHdrStore.getState();
+                if (native.available && participant.nativeHdrIdentity) void native.view(userId, participant.nativeHdrIdentity);
+                else void native.refresh();
+                return;
+              }
               if (!setStreamSubscription(getActiveRoom(), identity, true)) return;
               useVoiceStore.getState().watchStream(userId);
               handleViewerWatchToggle(userId, true);
@@ -405,7 +417,7 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
 
       openContextMenu({ x: e.clientX, y: e.clientY }, items);
     },
-    [isLocal, userId, participant.identity, openContextMenu, t],
+    [isLocal, userId, participant.identity, participant.nativeHdrIdentity, hdrBlocked, openContextMenu, t],
   );
 
   const handleWatch = useCallback(() => {
@@ -442,14 +454,18 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
               <p className={`text-txt-primary font-semibold ${large ? 'text-sm' : 'text-xs leading-tight line-clamp-2'}`}>
                 {t('voice:stream.isStreaming', { name: displayName })}
               </p>
-              {hdrBlocked && <p className="text-xs text-txt-secondary mt-2">{t('voice:stream.hdrUnsupported')}</p>}
+              {hdrBlocked && <p className="text-xs text-txt-secondary mt-2">{t(nativeWatching ? 'voice:stream.hdrPlaying' : nativeHdr.available && participant.nativeHdrIdentity ? 'voice:stream.hdrOpenNative' : 'voice:stream.hdrUnsupported')}</p>}
               {!isLocal && (
                 <button
-                  onClick={hdrBlocked ? () => forceUpdate(n => n + 1) : handleWatch}
-                  aria-label={t(hdrBlocked ? 'voice:stream.hdrRecheck' : 'voice:stream.watch')}
+                  onClick={hdrBlocked ? () => {
+                    if (nativeWatching) void nativeHdr.stop('viewer');
+                    else if (nativeHdr.available && participant.nativeHdrIdentity) void nativeHdr.view(userId, participant.nativeHdrIdentity);
+                    else void nativeHdr.refresh();
+                  } : handleWatch}
+                  aria-label={t(nativeWatching ? 'voice:stream.stopWatching' : hdrBlocked && !nativeHdr.available ? 'voice:stream.hdrRecheck' : 'voice:stream.watch')}
                   className={`${large ? 'mt-2 px-4 py-1.5' : 'mt-2 w-full min-h-7 px-3 py-1 text-[11px]'} whitespace-nowrap bg-accent-primary hover:bg-accent-primary/80 rounded text-white font-semibold transition-colors`}
                 >
-                  {t(hdrBlocked ? 'voice:stream.hdrRecheck' : large ? 'voice:stream.watch' : 'voice:stream.watchShort')}
+                  {t(nativeWatching ? 'voice:stream.stopWatching' : hdrBlocked && !nativeHdr.available ? 'voice:stream.hdrRecheck' : large ? 'voice:stream.watch' : 'voice:stream.watchShort')}
                 </button>
               )}
             </div>

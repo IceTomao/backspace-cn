@@ -21,6 +21,7 @@ import { canonicalizeHomeInstance, getOurOrigin, normalizeOriginForCompare } fro
 import { generateFederatedCallToken } from '../routes/livekit.js';
 import { config } from '../config.js';
 import crypto from 'node:crypto';
+import { hasNativeHdrPublication } from '../utils/nativeHdr.js';
 
 /**
  * Re-evaluate SPEAK permission for all participants in voice channels
@@ -827,12 +828,12 @@ function handleVoiceStatus(event: Record<string, unknown>, userId: string, ws: W
   const isDeafened = event.isDeafened === true;
   const isCameraOn = event.isCameraOn === true;
   const isScreenSharing = event.isScreenSharing === true;
-  const dynamicRange = isScreenSharing && event.dynamicRange === 'hdr' ? 'hdr' : 'sdr';
 
   // BUG FIX: uses unified getUserRoom() instead of server-only getUserVoiceChannel()
   // This now works for both server channels AND DM calls.
   const userRoom = connectionManager.getUserRoom(userId);
   if (!userRoom) return;
+  const dynamicRange = isScreenSharing && hasNativeHdrPublication(userId, userRoom.roomId) ? 'hdr' : 'sdr';
   // Space sessions must resume through voice_join so an ordinary tab cannot
   // keep a stale session alive merely by sending status. DM calls have no
   // voice_join event, so voice_status is their explicit resume signal.

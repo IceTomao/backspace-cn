@@ -1,0 +1,40 @@
+{
+  "transportVerified": true,
+  "viewerRemuxVerified": true,
+  "endToEndVerified": false,
+  "hardwareHdrDisplayVerified": false,
+  "video": {
+    "codec": "hevc",
+    "profile": "Main 10",
+    "pixFmt": "yuv420p10le",
+    "primaries": "bt2020",
+    "transfer": "smpte2084"
+  },
+  "highlights": [
+    {
+      "nits": 0,
+      "actual": 64,
+      "expected": 64
+    },
+    {
+      "nits": 80,
+      "actual": 489,
+      "expected": 490
+    },
+    {
+      "nits": 200,
+      "actual": 571,
+      "expected": 571
+    },
+    {
+      "nits": 1000,
+      "actual": 722,
+      "expected": 723
+    }
+  ],
+  "audio": {
+    "codec": "opus",
+    "sampleRate": 48000,
+    "channels": 2
+  }
+}

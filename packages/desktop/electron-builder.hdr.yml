@@ -1,0 +1,8 @@
+# Explicit QA packaging only; normal releases do not ship unaccepted runtimes.
+extends: ./electron-builder.yml
+win:
+  extraResources:
+    - from: hdr-runtime
+      to: hdr
+      filter:
+        - '**/*'

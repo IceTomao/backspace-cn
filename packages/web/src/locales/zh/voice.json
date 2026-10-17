@@ -127,6 +127,19 @@
     },
     "h265Unsupported": "当前设备不支持 H.265 直播编码。",
     "hdrUnavailable": "当前客户端尚不具备已验证的原生 HDR 发布能力，无法开启 HDR 直播。请关闭 HDR 模式后再开播。",
+    "hdrEnabled": "开启 HDR 直播间",
+    "hdrLocked": "停止直播后可修改 HDR 模式",
+    "hdrOnly": "仅上传 HDR 视频；不支持 HDR 的设备无法观看。",
+    "hdrCodec": "HDR 编码 · HEVC Main10 · 10-bit · BT.2020/PQ",
+    "hdrReason": {
+      "validation_pending": "HDR 链路尚未完成硬件验收，暂不可开启。",
+      "native_unavailable": "当前客户端不具备原生 HDR 直播能力。",
+      "system_hdr_off": "请先在 Windows 设置中为所选显示器开启 HDR。",
+      "source_unsupported": "请选择已开启 HDR 的显示器。",
+      "native_failed": "无法确认 HDR 能力，请重新检测。",
+      "server_unsupported": "当前服务器不支持 HDR 直播，请先更新服务器。",
+      "encoder_unavailable": "本机 NVENC 无法完成 HEVC Main10 编码，请检查显卡和驱动"
+    },
     "h265Fallback": "当前设备不支持 H.265 直播编码，已切换为 VP9。",
     "bitrate": "比特率",
     "custom": "自定义",
@@ -160,7 +173,9 @@
     "hdrUnsupported": "该直播间为 HDR 直播间，本机设备暂不支持查看",
     "hdrRecheck": "重新检测",
     "mute": "静音流",
-    "isStreaming": "{{name}}正在流式传输"
+    "isStreaming": "{{name}}正在流式传输",
+    "hdrPlaying": "正在原生 HDR 窗口中观看",
+    "hdrOpenNative": "在 HDR 窗口中观看"
   },
   "streamDiagnostics": {
     "publisherNetwork": "主播的网络不稳定",

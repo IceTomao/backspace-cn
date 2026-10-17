@@ -68,6 +68,7 @@ import { getDesktopLanguage, isDesktopLanguage, saveStoredLanguage, translateDes
 import { DESKTOP_BUILD } from './buildConfig';
 import { ThemeManager, registerThemeStyles, registerThemeControls, windowThemeColors, type ThemeMode } from './theme';
 import { registerFavoriteImages } from './favoriteImages';
+import { registerHdrNative } from './hdrIpc';
 import { ActivityAssetPublisher, registerActivityAssetSession } from './activityAssetPublisher';
 
 function showManagedUpdateNotice(): void {
@@ -130,6 +131,7 @@ let themeManager: ThemeManager | null = null;
 let disposeThemeStyles: (() => void) | null = null;
 let disposeThemeControls: (() => void) | null = null;
 let disposeFavoriteImages: (() => void) | null = null;
+let disposeHdrNative: (() => void) | null = null;
 let disposeActivityAssetSession: (() => void) | null = null;
 
 function getWindowThemeColors(): { color: string; symbolColor: string } {
@@ -445,6 +447,10 @@ function createWindow(): void {
   });
 
   setMainWindow(mainWindow);
+  if (process.platform === 'win32') {
+    disposeHdrNative?.();
+    disposeHdrNative = registerHdrNative(ipcMain, () => mainWindow, getResolvedInstanceUrl);
+  }
   attachRecoveryHandlers(mainWindow);
   keybindManager.setWindow(mainWindow);
 
@@ -1707,6 +1713,7 @@ if (!gotTheLock) {
     disposeThemeStyles?.();
     disposeThemeControls?.();
     disposeFavoriteImages?.();
+    disposeHdrNative?.();
     disposeActivityAssetSession?.();
     stopActivityDetection();
     keybindManager.stop();

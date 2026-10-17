@@ -5,6 +5,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class StreamSubscriptionPolicyTest {
+    @Test fun nativeHdrHelpersBelongToTheirPublisher() {
+        assertEquals("alice", StreamSubscriptionPolicy.nativeHdrOwner("__backspace_hdr_v1__alice:publish:00000000-0000-0000-0000-000000000001"))
+        assertNull(StreamSubscriptionPolicy.nativeHdrOwner("alice:Alice"))
+        assertNull(StreamSubscriptionPolicy.nativeHdrOwner("__backspace_hdr_v1__alice:receive:00000000-0000-0000-0000-000000000001"))
+    }
     @Test fun hdrBlocksOnlyStreamMediaAndKeepsChannelVoice() {
         assertFalse(StreamSubscriptionPolicy.subscribe(Track.Source.SCREEN_SHARE, "target", "target", true, true, true))
         assertFalse(StreamSubscriptionPolicy.subscribe(Track.Source.SCREEN_SHARE_AUDIO, "target", "target", true, true, true))

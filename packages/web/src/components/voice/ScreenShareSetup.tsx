@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { getElectronAPI, isElectron, isElectronMac } from '../../platform/platform';
 import { useVoiceStore } from '../../stores/voiceStore';
+import { useNativeHdrStore } from '../../stores/nativeHdrStore';
 import { useScreenShareSetupStore } from '../../stores/screenShareSetupStore';
 import { usePortalContainer } from '../../hooks/usePortalContainer';
 import { getActiveRoom } from '../../hooks/useLiveKit';
@@ -12,6 +13,7 @@ import {
   applyStagedCaptureConfig,
   stopStagedCapture,
   publishScreenShare,
+  buildScreenShareOptions,
   isScreenCaptureSupported,
   isCaptureCancellation,
 } from '../../utils/screenShare';
@@ -78,6 +80,7 @@ export function ScreenShareSetup() {
   const config = useVoiceStore((s) => s.screenShareConfig);
   const lastSourceId = useVoiceStore((s) => s.lastScreenShareSourceId);
   const isScreenSharing = useVoiceStore((s) => s.isScreenSharing);
+  const nativeHdr = useNativeHdrStore();
 
   const api = getElectronAPI();
   const electron = isElectron();
@@ -123,6 +126,7 @@ export function ScreenShareSetup() {
    * picks can leave the preview showing one surface while the labels name another.
    */
   const stageGenerationRef = useRef(0);
+  const hdrStartingRef = useRef(false);
 
   /**
    * One auto-stage per open. `stage()`'s catch clears `staged`, `staging` and
@@ -194,6 +198,12 @@ export function ScreenShareSetup() {
   /** Electron: a tile was clicked. Resolve an in-flight prompt, or preselect and stage. */
   const stageSource = useCallback(async (sourceId: string) => {
     if (!api) return;
+    if (useVoiceStore.getState().screenShareConfig.hdrEnabled) {
+      stageGenerationRef.current++;
+      replaceStaged(null);
+      setSelectedId(sourceId.startsWith('hdr:') ? sourceId : null);
+      return;
+    }
     const shareAudio = useVoiceStore.getState().screenShareConfig.shareAudio;
     if (promptInFlightRef.current) {
       // Only the first click answers the request; see promptAnsweredRef.
@@ -229,7 +239,7 @@ export function ScreenShareSetup() {
       pendingPromptIdRef.current = sourceId;
     }
     void stage(generation);
-  }, [api, stage]);
+  }, [api, stage, replaceStaged]);
 
   // Ask the desktop who picks, once per open
   useEffect(() => {
@@ -249,6 +259,11 @@ export function ScreenShareSetup() {
   // the user has granted it, and nothing else would re-run this.
   useEffect(() => {
     if (!isOpen || !canListSources || !api?.getScreenSources) return;
+    if (config.hdrEnabled) {
+      setLoadingSources(false);
+      setSources(nativeHdr.displays.filter(d => d.hdrActive).map(d => ({ id: d.id, name: d.name, isScreen: true, thumbnailDataUrl: '', appIconDataUrl: null })));
+      return;
+    }
     let cancelled = false;
     setLoadingSources(true);
     api.getScreenSources()
@@ -256,7 +271,14 @@ export function ScreenShareSetup() {
       .catch((err) => { console.error('[ScreenShareSetup] getScreenSources failed:', err); if (!cancelled) setSources([]); })
       .finally(() => { if (!cancelled) setLoadingSources(false); });
     return () => { cancelled = true; };
-  }, [isOpen, canListSources, api, sourcesNonce]);
+  }, [isOpen, canListSources, api, sourcesNonce, config.hdrEnabled, nativeHdr.displays]);
+
+  useEffect(() => {
+    stageGenerationRef.current++;
+    if (hdrStartingRef.current) { hdrStartingRef.current = false; void useNativeHdrStore.getState().stop('publisher'); setStarting(false); }
+    replaceStaged(null); setSelectedId(null);
+    autoStagedRef.current = false;
+  }, [config.hdrEnabled, replaceStaged]);
 
   // Older desktop: main pushes sources for an in-flight getDisplayMedia
   useEffect(() => {
@@ -353,6 +375,8 @@ export function ScreenShareSetup() {
     // Abandon any capture still being picked. Without this the promise resolves
     // onto a closed screen and the OS keeps capturing forever.
     stageGenerationRef.current++;
+    if (hdrStartingRef.current) { hdrStartingRef.current = false; void useNativeHdrStore.getState().stop('publisher'); }
+    setStarting(false);
     setStaging(false);
     if (promptInFlightRef.current && api) {
       api.selectScreenSource(null);
@@ -379,11 +403,32 @@ export function ScreenShareSetup() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [isOpen, settingsOpen, handleClose]);
-  useEffect(() => () => stopStagedCapture(stagedRef.current), []);
+  useEffect(() => () => {
+    stopStagedCapture(stagedRef.current);
+    if (hdrStartingRef.current) void useNativeHdrStore.getState().stop('publisher');
+  }, []);
 
   const handleStart = useCallback(async () => {
     const stream = stagedRef.current;
     const room = getActiveRoom();
+    const currentConfig = useVoiceStore.getState().screenShareConfig;
+    if (currentConfig.hdrEnabled) {
+      if (!room || !selectedId?.startsWith('hdr:')) { setError('startFailed'); return; }
+      setStarting(true); setError(null);
+      const generation = ++stageGenerationRef.current;
+      hdrStartingRef.current = true;
+      const options = buildScreenShareOptions(currentConfig);
+      const display = useNativeHdrStore.getState().displays.find(d => d.id === selectedId);
+      const ok = await useNativeHdrStore.getState().publish(selectedId, {
+        width: options.capture.width || display?.width || 0, height: options.capture.height || display?.height || 0,
+        fps: currentConfig.fps, bitrateKbps: Math.round(options.publish.videoEncoding.maxBitrate / 1000), shareAudio: currentConfig.shareAudio,
+      });
+      if (generation !== stageGenerationRef.current) return;
+      hdrStartingRef.current = false;
+      setStarting(false);
+      if (!ok) { setError('startFailed'); return; }
+      close(); return;
+    }
     if (!stream || !room) { setError('startFailed'); return; }
     setStarting(true);
     setError(null);
@@ -422,9 +467,9 @@ export function ScreenShareSetup() {
 
   const showGrid = electron && (canListSources || promptInFlight || sources.length > 0);
   const activeSources = activeTab === 'windows' ? windows : screens;
-  const supported = isScreenCaptureSupported();
+  const supported = config.hdrEnabled ? nativeHdr.publisherAvailable : isScreenCaptureSupported();
   const audioNeedsRepick = !!staged && stagedShareAudio !== config.shareAudio;
-  const canStart = !!staged && !staging && !starting;
+  const canStart = (config.hdrEnabled ? nativeHdr.publisherAvailable && !!selectedId?.startsWith('hdr:') : !!staged) && !staging && !starting;
   const chooseHint = !electron
     ? t('voice:screenPicker.chooseHint')
     : systemPicker
@@ -786,12 +831,12 @@ function SourceCard({ source, selected, onClick, onDoubleClick }: {
     >
       {/* Thumbnail */}
       <div className="relative aspect-video bg-black/40 overflow-hidden">
-        <img
+        {source.id.startsWith('hdr:') ? <div className="h-full flex items-center justify-center font-bold text-xl text-txt-primary">HDR</div> : <img
           src={source.thumbnailDataUrl}
           alt={source.name}
           className="w-full h-full object-contain"
           draggable={false}
-        />
+        />}
         {selected && (
           <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent-primary flex items-center justify-center">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="white">

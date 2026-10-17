@@ -1373,13 +1373,17 @@ class BackspaceRuntime internal constructor(
         val streams = JSONArray()
         room?.let { current ->
             (listOf(current.localParticipant) + current.remoteParticipants.values).forEach {
+                if (it.identity?.value?.startsWith(StreamSubscriptionPolicy.HDR_IDENTITY_PREFIX) == true) return@forEach
                 participants.put(JSONObject().put("identity", it.identity?.value ?: "")
                     .put("name", it.name ?: "").put("local", it === current.localParticipant)
                     .put("muted", !it.isMicrophoneEnabled).put("speaking", it.isSpeaking))
             }
             current.remoteParticipants.values.forEach { participant ->
+                val nativeOwner = StreamSubscriptionPolicy.nativeHdrOwner(participant.identity?.value ?: "")
+                val displayName = if (nativeOwner == null) participant.name else
+                    (listOf(current.localParticipant) + current.remoteParticipants.values).firstOrNull { it.identity?.value?.substringBefore(':') == nativeOwner }?.name
                 participant.trackPublications.values.filter { it.source == Track.Source.SCREEN_SHARE }.forEach { publication ->
-                    streams.put(JSONObject().put("identity", participant.identity?.value ?: "").put("name", participant.name ?: "")
+                    streams.put(JSONObject().put("identity", participant.identity?.value ?: "").put("name", displayName ?: "")
                         .put("dynamicRange", if (isHdrStream(participant.identity?.value)) "hdr" else "sdr")
                         .put("videoSid", publication.sid)
                         .put("audioSid", participant.trackPublications.values.firstOrNull { it.source == Track.Source.SCREEN_SHARE_AUDIO }?.sid ?: JSONObject.NULL)

@@ -9,6 +9,7 @@ import {
   isH265ScreenShareSupported,
 } from '../../utils/screenShare';
 import { Toggle } from '../ui/Toggle';
+import { HdrStreamControls } from './HdrStreamControls';
 import { isElectron } from '../../platform/platform';
 import { RESOLUTION_LABELS } from '@backspace/shared/src/constants';
 import i18n from '../../i18n';
@@ -141,6 +142,7 @@ export function StreamQualityControls() {
 
   return (
     <div className="flex flex-col gap-3">
+      <HdrStreamControls />
       {/* Resolution */}
       <div>
         <div className="text-[11px] text-txt-tertiary font-semibold uppercase tracking-wider mb-1.5">
@@ -200,7 +202,7 @@ export function StreamQualityControls() {
         <div className="text-[11px] text-txt-tertiary font-semibold uppercase tracking-wider mb-1.5">
           {t('voice:streamSettings.codec')}
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        {config.hdrEnabled ? <div className="text-xs text-txt-secondary">{t('voice:streamSettings.hdrCodec')}</div> : <div className="flex flex-wrap gap-1.5">
           {CODEC_OPTIONS.map((c) => {
             const isSelected = config.codec === c.value;
             const isDisabled = c.value === 'h265' && !h265Supported;
@@ -217,8 +219,8 @@ export function StreamQualityControls() {
               </button>
             );
           })}
-        </div>
-        {!h265Supported && (
+        </div>}
+        {!config.hdrEnabled && !h265Supported && (
           <div id={h265UnsupportedId} className="text-[10px] text-txt-tertiary mt-1.5">
             {t('voice:streamSettings.h265Unsupported')}
           </div>
@@ -290,7 +292,7 @@ export function StreamQualityControls() {
             <div className="text-[11px] text-txt-tertiary font-semibold uppercase tracking-wider">
               {t('voice:streamSettings.systemAudio')}
             </div>
-            {config.shareAudio && (
+            {config.shareAudio && !config.hdrEnabled && (
               <div className="text-[10px] text-accent-amber/80 mt-0.5">
                 {electronPlatform === 'win32'
                   ? t('voice:streamSettings.electronWindowsAudioNote')

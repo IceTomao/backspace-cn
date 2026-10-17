@@ -7,6 +7,15 @@ using System.Text;
 
 internal static class DisplayProbe
 {
+    // Used by the native player in the same process as its D3D11 swap chain.
+    // The current window's actual output decides eligibility on every tick.
+    public static bool IsHdrMonitor(IntPtr monitor)
+    {
+        var info = new MonitorInfo { Size = (uint)Marshal.SizeOf(typeof(MonitorInfo)) };
+        if (!GetMonitorInfo(monitor, ref info)) return false;
+        int space;
+        return OutputColorSpaces().TryGetValue(info.Device, out space) && space == 12;
+    }
     [StructLayout(LayoutKind.Sequential)]
     private struct Luid { public uint Low; public int High; }
     [StructLayout(LayoutKind.Sequential)]
@@ -46,6 +55,8 @@ internal static class DisplayProbe
     private static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorCallback callback, IntPtr data);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+    [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+    public static void UsePhysicalPixels() { try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { } }
     [DllImport("dxgi.dll")]
     private static extern int CreateDXGIFactory1(ref Guid iid, out IntPtr factory);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
@@ -161,6 +172,7 @@ internal static class DisplayProbe
 
     private static int Main()
     {
+        UsePhysicalPixels();
         try
         {
             var colorSpaces = OutputColorSpaces();
@@ -205,6 +217,9 @@ internal static class DisplayProbe
                         int sourceCode = GetSourceName(ref source);
                         string handle;
                         monitors.TryGetValue(sourceCode == 0 ? source.GdiName : "", out handle);
+                        long numericHandle;
+                        var monitorInfo = new MonitorInfo { Size = (uint)Marshal.SizeOf(typeof(MonitorInfo)) };
+                        bool hasSize = long.TryParse(handle, out numericHandle) && GetMonitorInfo(new IntPtr(numericHandle), ref monitorInfo);
                         int dxgiSpace;
                         bool hasDxgiSpace = colorSpaces.TryGetValue(sourceCode == 0 ? source.GdiName : "", out dxgiSpace);
                         // RGB_FULL_G2084_NONE_P2020 (12) is an active HDR output,
@@ -218,6 +233,8 @@ internal static class DisplayProbe
                             ",\"hmonitor\":" + (handle == null ? "null" : Json(handle)) +
                             ",\"hdrSupported\":" + (hdrCode != 0 ? "null" : (hdr.Flags & 16) != 0 ? "true" : "false") +
                             ",\"hdrActive\":" + hdrActive +
+                            ",\"width\":" + (hasSize ? (monitorInfo.Monitor.Right - monitorInfo.Monitor.Left).ToString() : "null") +
+                            ",\"height\":" + (hasSize ? (monitorInfo.Monitor.Bottom - monitorInfo.Monitor.Top).ToString() : "null") +
                             ",\"dxgiColorSpace\":" + (hasDxgiSpace ? dxgiSpace.ToString() : "null") +
                             ",\"advancedColorSupported\":" + (colorCode == 0 && (color.Flags & 1) != 0 ? "true" : "false") +
                             ",\"advancedColorEnabled\":" + (colorCode == 0 && (color.Flags & 2) != 0 ? "true" : "false") +

@@ -8,6 +8,7 @@ import { activate as activateHwOverdrive, deactivate as deactivateHwOverdrive } 
 import { useUIStore } from '../stores/uiStore';
 import { openScreenShareSetup } from '../stores/screenShareSetupStore';
 import i18n from '../i18n';
+import { useNativeHdrStore } from '../stores/nativeHdrStore';
 import {
   STANDARD_RESOLUTIONS, STANDARD_FRAMERATES, WIDTH_MAP,
   BITRATE_MATRIX_KBPS,
@@ -454,7 +455,7 @@ export async function publishScreenShare(room: Room, stream: MediaStream): Promi
 
     _requestedPublishedScreenShareCodec = opts.publish.videoCodec;
     _publishedScreenShareCodec = null;
-    useVoiceStore.setState({ isScreenSharing: true });
+    useVoiceStore.setState({ isScreenSharing: true, screenShareDynamicRange: 'sdr' });
     scheduleScreenShareOverdrive(room);
     scheduleEncoderDetection(room, config.codec, videoTrack.id);
     return true;
@@ -513,7 +514,7 @@ export async function republishScreenShare(room: Room): Promise<void> {
   const ok = await publishScreenShare(room, stream);
   if (!ok) {
     deactivateHwOverdrive();
-    useVoiceStore.setState({ isScreenSharing: false });
+    useVoiceStore.setState({ isScreenSharing: false, screenShareDynamicRange: 'sdr' });
     // The swap suppressed handleScreenShareUnpublished, and a video publish
     // that never landed emits no rollback unpublish either, so nothing else
     // will carry the stop to the clients outside the LiveKit room. Without
@@ -715,6 +716,10 @@ function scheduleEncoderDetection(
 // ---------------------------------------------------------------------------
 
 export async function stopScreenShare(room: Room): Promise<void> {
+  if (useNativeHdrStore.getState().publication || useVoiceStore.getState().screenShareDynamicRange === 'hdr') {
+    await useNativeHdrStore.getState().stop('publisher');
+    return;
+  }
   _stopping = true;
   try {
     for (const source of [Track.Source.ScreenShare, Track.Source.ScreenShareAudio]) {
@@ -735,7 +740,7 @@ export async function stopScreenShare(room: Room): Promise<void> {
   deactivateHwOverdrive();
   _publishedScreenShareCodec = null;
   _requestedPublishedScreenShareCodec = null;
-  useVoiceStore.setState({ isScreenSharing: false });
+  useVoiceStore.setState({ isScreenSharing: false, screenShareDynamicRange: 'sdr' });
   // `voice_status` is what carries isScreenSharing to people who are not in the
   // LiveKit room (channel lists, join sheets). Every stop path funnels through
   // here or through handleScreenShareUnpublished, so both must broadcast.
@@ -765,7 +770,7 @@ export function handleScreenShareUnpublished(): void {
   deactivateHwOverdrive();
   _publishedScreenShareCodec = null;
   _requestedPublishedScreenShareCodec = null;
-  useVoiceStore.setState({ isScreenSharing: false });
+  useVoiceStore.setState({ isScreenSharing: false, screenShareDynamicRange: 'sdr' });
   // `voice_status` is what carries isScreenSharing to people who are not in the
   // LiveKit room (channel lists, join sheets). Every stop path funnels through
   // here or through handleScreenShareUnpublished, so both must broadcast.

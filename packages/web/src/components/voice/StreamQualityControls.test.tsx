@@ -5,6 +5,7 @@ import { StreamQualityControls } from './StreamQualityControls';
 import { useVoiceStore } from '../../stores/voiceStore';
 import { useUIStore } from '../../stores/uiStore';
 import i18n from '../../i18n';
+import { useNativeHdrStore } from '../../stores/nativeHdrStore';
 
 vi.mock('../../audio/AudioManager', () => ({
   AudioManager: { getInstance: () => ({}) },
@@ -26,6 +27,7 @@ beforeEach(() => {
   });
   localStorage.clear();
   useVoiceStore.setState({ ...useVoiceStore.getInitialState() });
+  useNativeHdrStore.setState({ available: false, publisherAvailable: false });
 });
 
 afterEach(() => {
@@ -35,6 +37,26 @@ afterEach(() => {
 });
 
 describe('screen-share codec controls', () => {
+  it('shows the native HDR gate, fixed Main10 codec and live lock while retaining the SDR preference', () => {
+    vi.spyOn(useNativeHdrStore.getState(), 'refresh').mockResolvedValue();
+    useVoiceStore.getState().setScreenShareConfig({ codec: 'h264' });
+    const { rerender } = render(<StreamQualityControls />);
+    const toggle = screen.getByRole('switch', { name: i18n.t('voice:streamSettings.hdrEnabled') });
+    expect(toggle).toBeDisabled();
+    useNativeHdrStore.setState({ available: true, publisherAvailable: true });
+    rerender(<StreamQualityControls />);
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText(i18n.t('voice:streamSettings.hdrCodec'))).toBeVisible();
+    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('h264');
+    useVoiceStore.setState({ isScreenSharing: true }); rerender(<StreamQualityControls />);
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(i18n.t('voice:streamSettings.hdrLocked'))).toBeVisible();
+    useVoiceStore.setState({ isScreenSharing: false }); rerender(<StreamQualityControls />);
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'H264' })).toHaveAttribute('aria-pressed', 'true');
+  });
   it('offers and persists H.265 when the sender supports it', () => {
     render(<StreamQualityControls />);
     const option = screen.getByRole('button', { name: 'H.265/HEVC' });

@@ -300,6 +300,12 @@ contextBridge.exposeInMainWorld('backspace', {
     ipcRenderer.send('set-badge-count', count);
   },
   favoriteImages: (request: unknown): Promise<unknown> => ipcRenderer.invoke('desktop-favorite-images', request),
+  hdrNative: (request: unknown): Promise<unknown> => ipcRenderer.invoke('hdr-native-request', request),
+  onHdrNativeEvent: (callback: (event: unknown) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: unknown) => callback(event);
+    ipcRenderer.on('hdr-native-event', handler);
+    return () => ipcRenderer.removeListener('hdr-native-event', handler);
+  },
 
   // Auto-update, legacy per-event channels.
   //

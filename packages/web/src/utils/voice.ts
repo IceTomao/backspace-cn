@@ -36,7 +36,10 @@ export function broadcastVoiceStatus(overrideOrigin?: string): void {
   const effectiveMuted = isMuted || spaceMutedUserIds.has(spaceKey);
   const effectiveDeafened = isDeafened || spaceDeafenedUserIds.has(spaceKey);
 
-  wsSend({ type: 'voice_status', isMuted: effectiveMuted, isDeafened: effectiveDeafened, isCameraOn, isScreenSharing }, origin);
+  // The saved toggle is an intent. Only the confirmed native publication can
+  // label a live stream HDR; failed preflight never changes room state.
+  wsSend({ type: 'voice_status', isMuted: effectiveMuted, isDeafened: effectiveDeafened, isCameraOn, isScreenSharing,
+    ...(isScreenSharing && vs.screenShareDynamicRange === 'hdr' ? { dynamicRange: 'hdr' as const } : {}) }, origin);
 }
 
 /**

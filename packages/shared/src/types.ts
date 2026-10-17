@@ -620,11 +620,19 @@ export interface VoiceServiceState {
 
 export interface LiveKitStatusResponse {
   state: VoiceServiceState | null;
+  /** Missing on older servers. Does not certify the client's HDR pipeline. */
+  nativeHdrProtocol?: 1;
+}
+
+export interface NativeHdrTokenOptions {
+  role: 'publish' | 'receive';
+  targetIdentity?: string;
 }
 
 export interface LiveKitTokenResponse {
   token: string;
   url: string;
+  nativeHdr?: { protocol: 1; identity: string; ownerId: string; role: 'publish' | 'receive'; hasAudio?: boolean };
 }
 
 export interface CreateDmRequest {

@@ -22,7 +22,8 @@ import { useVoiceStore, type VoiceConnectionQuality } from '../stores/voiceStore
 import { useAuthStore } from '../stores/authStore';
 import { useUIStore } from '../stores/uiStore';
 import type { User, StreamDynamicRange } from '@backspace/shared';
-import { canViewStream, streamDynamicRange } from '../utils/hdrStream';
+import { canViewStream, streamDynamicRange, nativeHdrOwner, HDR_IDENTITY_PREFIX, HDR_SCREEN_TRACK_NAME } from '../utils/hdrStream';
+import { useNativeHdrStore } from '../stores/nativeHdrStore';
 import { broadcastVoiceStatus, clearSpaceVoiceForDmCall } from '../utils/voice';
 import { consumeIntentionalCameraOff, markIntentionalCameraOff } from '../utils/voiceActions';
 import { AudioManager } from '../audio/AudioManager';
@@ -83,6 +84,7 @@ export interface ParticipantInfo {
   isCameraOn: boolean;
   isScreenSharing: boolean;
   dynamicRange?: StreamDynamicRange;
+  nativeHdrIdentity?: string;
   isLocal: boolean;
   audioTrack: MediaStreamTrack | null;
   videoTrack: MediaStreamTrack | null;
@@ -277,7 +279,7 @@ function useBrowserLiveKit() {
 
     const allParticipants: ParticipantInfo[] = [];
     const processParticipant = (p: Participant, isLocal: boolean) => {
-      if (!p.identity) return;
+      if (!p.identity || p.identity.startsWith(HDR_IDENTITY_PREFIX)) return;
       const { userId: rawId, username } = parseIdentity(p.identity);
 
       // Resolve identity: for federated calls rawId may be homeUserId from another instance.
@@ -318,7 +320,9 @@ function useBrowserLiveKit() {
       let lkScreenTrack: Track | null = null;
       let hasScreenSharePublication = false;
       let hasCameraPublication = false;
-      const dynamicRange = streamDynamicRange(useVoiceStore.getState().voiceUserStates.get(userId),
+      const nativePublisher = [...r.remoteParticipants.values()].find(helper => nativeHdrOwner(helper.identity) === userId &&
+        [...helper.trackPublications.values()].some(pub => pub.source === Track.Source.ScreenShare && pub.trackName === HDR_SCREEN_TRACK_NAME));
+      const dynamicRange = nativePublisher ? 'hdr' : streamDynamicRange(useVoiceStore.getState().voiceUserStates.get(userId),
         [...p.trackPublications.values()].filter(pub => pub.source === Track.Source.ScreenShare).map(pub => pub.trackName));
       p.trackPublications.forEach((pub) => {
         // Detect screen share publication even if unsubscribed
@@ -370,8 +374,9 @@ function useBrowserLiveKit() {
         isMuted: isPartMuted,
         isDeafened: isPartDeafened,
         isCameraOn: hasCameraPublication && p.isCameraEnabled, // True even when unsubscribed
-        isScreenSharing: hasScreenSharePublication, // True even when unsubscribed
+        isScreenSharing: hasScreenSharePublication || !!nativePublisher, // True even when unsubscribed
         dynamicRange,
+        ...(nativePublisher ? { nativeHdrIdentity: nativePublisher.identity } : {}),
         isLocal,
         audioTrack,
         videoTrack,
@@ -912,6 +917,8 @@ function useBrowserLiveKit() {
       });
       newRoom.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
         if (roomRef.current !== newRoom) return;
+        void useNativeHdrStore.getState().stop('publisher');
+        void useNativeHdrStore.getState().stop('viewer');
         const terminal = reason === DisconnectReason.DUPLICATE_IDENTITY
           || reason === DisconnectReason.PARTICIPANT_REMOVED
           || reason === DisconnectReason.ROOM_DELETED;
@@ -1023,6 +1030,8 @@ function useBrowserLiveKit() {
   };
 
   const disconnect = useCallback(async () => {
+    void useNativeHdrStore.getState().stop('publisher');
+    void useNativeHdrStore.getState().stop('viewer');
     recoveryRef.current?.cancel();
     const gen = ++_connectGeneration;
     // Release before SDK teardown, even if token fetching has not made a Room
@@ -1109,7 +1118,7 @@ function useBrowserLiveKit() {
     let superseded = false;
     const updateActiveTracks = async () => {
       if (superseded) return;
-      if (isScreenSharing) {
+      if (isScreenSharing && !screenShareConfig.hdrEnabled) {
         const opts = buildScreenShareOptions(screenShareConfig);
         // Codec changed mid-stream — the codec is baked into SDP negotiation,
         // so republish the same track under the new options (no re-capture).

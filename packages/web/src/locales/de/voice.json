@@ -127,6 +127,19 @@
     },
     "h265Unsupported": "Dieses Gerät unterstützt keine H.265-Kodierung für Livestreams.",
     "hdrUnavailable": "Dieser Client hat keinen verifizierten nativen HDR-Publisher. Deaktiviere HDR vor dem Starten eines Streams.",
+    "hdrEnabled": "HDR-Stream aktivieren",
+    "hdrLocked": "Beende den Stream, um den HDR-Modus zu ändern",
+    "hdrOnly": "Nur HDR-Video hochladen. Geräte ohne HDR können nicht zusehen.",
+    "hdrCodec": "HDR-Kodierung · HEVC Main10 · 10-bit · BT.2020/PQ",
+    "hdrReason": {
+      "validation_pending": "Die HDR-Hardwareprüfung steht noch aus.",
+      "native_unavailable": "Dieser Client hat keine native HDR-Pipeline.",
+      "system_hdr_off": "Aktiviere HDR für den gewählten Bildschirm in Windows.",
+      "source_unsupported": "Wähle einen Bildschirm mit aktiviertem HDR.",
+      "native_failed": "HDR konnte nicht bestätigt werden. Erneut prüfen.",
+      "server_unsupported": "Aktualisiere den Server für HDR-Streams.",
+      "encoder_unavailable": "NVENC kann auf diesem Gerät kein HEVC Main10 kodieren. Grafikkarte und Treiber prüfen."
+    },
     "h265Fallback": "Dieses Gerät unterstützt keine H.265-Kodierung für Livestreams. VP9 wurde ausgewählt.",
     "bitrate": "Bitrate",
     "custom": "Manuell",
@@ -160,7 +173,9 @@
     "hdrUnsupported": "Dies ist ein HDR-Stream. Dieses Gerät kann ihn derzeit nicht wiedergeben.",
     "hdrRecheck": "Erneut prüfen",
     "mute": "Stream stummschalten",
-    "isStreaming": "{{name}} streamt"
+    "isStreaming": "{{name}} streamt",
+    "hdrPlaying": "Wiedergabe im nativen HDR-Fenster",
+    "hdrOpenNative": "Im HDR-Fenster ansehen"
   },
   "streamDiagnostics": {
     "publisherNetwork": "Das Netzwerk des Streamers ist instabil",

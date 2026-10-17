@@ -127,6 +127,19 @@
     },
     "h265Unsupported": "H.265 live encoding is not supported on this device.",
     "hdrUnavailable": "This client does not have a verified native HDR publisher. Turn off HDR mode before starting a stream.",
+    "hdrEnabled": "Enable HDR stream",
+    "hdrLocked": "Stop streaming to change HDR mode",
+    "hdrOnly": "Upload HDR video only. Devices without HDR support cannot watch.",
+    "hdrCodec": "HDR encoding · HEVC Main10 · 10-bit · BT.2020/PQ",
+    "hdrReason": {
+      "validation_pending": "HDR hardware acceptance is pending.",
+      "native_unavailable": "This client does not have a native HDR pipeline.",
+      "system_hdr_off": "Enable HDR for the selected display in Windows Settings.",
+      "source_unsupported": "Select a display with HDR enabled.",
+      "native_failed": "HDR capability could not be confirmed. Check again.",
+      "server_unsupported": "Update the server to enable HDR streaming.",
+      "encoder_unavailable": "NVENC cannot encode HEVC Main10 on this device. Check the GPU and driver."
+    },
     "h265Fallback": "H.265 live encoding is not supported on this device. Switched to VP9.",
     "bitrate": "Bitrate",
     "custom": "Custom",
@@ -160,7 +173,9 @@
     "hdrUnsupported": "This is an HDR stream. This device cannot currently play it.",
     "hdrRecheck": "Check again",
     "mute": "Mute Stream",
-    "isStreaming": "{{name}} is streaming"
+    "isStreaming": "{{name}} is streaming",
+    "hdrPlaying": "Playing in the native HDR window",
+    "hdrOpenNative": "Watch in an HDR window"
   },
   "streamDiagnostics": {
     "publisherNetwork": "The streamer's network is unstable",

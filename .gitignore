@@ -138,3 +138,6 @@ docs/superpowers/plans/2026-09-02-plan-e-remediation.md
 
 # Local machine-translation drafts; never ship these as runtime catalogs.
 translation-draft/
+
+# Compiled Windows HDR runtime (built explicitly for developer/hardware QA).
+packages/desktop/hdr-runtime/
