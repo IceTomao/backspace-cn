@@ -5,8 +5,8 @@
 ## 本次已实现
 
 - 原生只读显示器检测：使用 DisplayConfig、IDXGIOutput6 读取当前输出色彩空间，并将 WCG 与 HDR 区分。旧系统无法确认 HDR 时拒绝采集。按 GDI 名称匹配选中的显示器，使用其 HMONITOR 捕获，不猜测屏幕编号。
-- WGC/D3D11 FP16 scRGB 采集；以 80 cd/m² 为 scRGB 参考白，转换为 BT.2020/PQ、P010 后使用一个 HEVC Main10 NVENC 视频编码器。没有 SDR 转换输出或 VP8 备用视频。可选系统音频使用 WASAPI loopback → Opus，不使用麦克风轨道。
-- CPU/zscale 参考转换与 Vulkan/libplacebo GPU 转换两种实验路径。两者均检查解码后的高光灰阶，GPU 路径通过着色器校正 libplacebo 的参考白，避免只改颜色标签。
+- 原生 `HdrGpu.exe` 在同一个 NVIDIA D3D11 设备内进行 WGC FP16 scRGB 采集 → compute shader 转换 BT.2020/PQ → P010 纹理 → NVENC HEVC Main10。以 80 cd/m² 为 scRGB 参考白，原始像素不读回 CPU，也不通过进程管道来回复制；只有压缩后的 HEVC 交给 LiveKit 桥接程序。没有 SDR 转换输出或 VP8 备用视频。可选系统音频使用 WASAPI loopback → Opus，不使用麦克风轨道。
+- shader 保留浮点精度完成色域与 PQ 转换，再量化到 10-bit；缩放在 GPU 上按比例进行，支持黑边。UHD 使用 NVENC P3，其余使用 P4，均为超低延迟、无 B 帧、无 lookahead、CBR，单个视频编码器。独立 CPU/zimg 参考检查灰阶、饱和色、负 scRGB 分量，另检查动态纹理更新与缩放后的黑边。旧 CPU/zscale、Vulkan/libplacebo 实验保留作参考，不再用于客户端发布。
 - 检查 Annex B HEVC 参数集的 profile、位深、色域和传递函数，而非只检查容器标签。合成图案使用浮点 0/80/200/1000 nit，解码检查其亮度，检测高光是否被截断。
 - 采集中每秒重新检测所选显示器。HDR 关闭、显示器更换/移除、探测失败、原生进程失败或超时均终止此次实验，不自动换屏或回退 SDR。
 - “直播流设置”保存 `hdrEnabled`，默认关闭，旧配置迁移为关闭；直播时锁定开关，HDR 固定 HEVC Main10，保留独立 SDR 编码偏好。原生模式不调用浏览器 SDR 采集。
@@ -15,19 +15,26 @@
 - Windows 播放器先解码本地 Main10/PQ 测试片，再检查 D3D11VA、实际视频颜色参数、D3D11 10-bit 交换链与窗口所在显示器的 PQ 输出，成功后才启动订阅。不能仅凭支持 HEVC 或显示器型号放行。观看中 HDR 关闭、换屏或解码/渲染失败会停止播放；直播音量、静音和关闭声音状态同步至原生播放器。
 - Electron 主进程限制 IPC 来源、可执行文件和原生参数，使用标准输入传递凭据；退出、更换页面或语音会话会停止原生子进程。
 
-视频轨道名为 `backspace-screen-hdr-v1`，系统音频为 `backspace-screen-hdr-audio-v1`。观看端在 WebSocket 状态到达前也按保留轨道名拒绝浏览器订阅。当前颜色转换仍包含 CPU 浮点读回，**已知不能达到实时 4K60**。
+视频轨道名为 `backspace-screen-hdr-v1`，系统音频为 `backspace-screen-hdr-audio-v1`。观看端在 WebSocket 状态到达前也按保留轨道名拒绝浏览器订阅。新 GPU 路径已通过本机 1080p60 / 4K60 动态合成吞吐检查；真实桌面 WGC、HDR 输出与双机直播效果仍待硬件验收。
 
 ## 原生接入的构建与自动验证
 
-需要 Windows x64、Node.js、Go 1.26.8 或更新版本、Windows 自带 .NET Framework C# 编译器与 7-Zip。构建与验证脚本可传 `--go 'D:/Tools/go/bin/go.exe'` 指定 Go。
+需要 Windows x64、Node.js、Go 1.26.8 或更新版本、Windows 自带 .NET Framework C# 编译器与 7-Zip。`setup-gpu-tools.mjs` 下载并校验固定 Zig 0.15.2 编译器到忽略目录，不修改系统安装。GPU 构建检查固定 NVENC API 13.0 头文件的 SHA-256，并将 HLSL 嵌入程序。构建与验证脚本可传 `--go 'D:/Tools/go/bin/go.exe'` 指定 Go，构建可传 `--zig 'D:/Tools/zig/zig.exe'` 指定同一版本编译器。
 
 ```powershell
 node experiments/windows-hdr/setup-runtime.mjs encoder
-node experiments/windows-hdr/setup-runtime.mjs capture
 node experiments/windows-hdr/setup-runtime.mjs livekit
 node experiments/windows-hdr/setup-runtime.mjs player
+node experiments/windows-hdr/setup-gpu-tools.mjs
 node packages/desktop/scripts/build-hdr-native.mjs --assemble-runtime
+node --test experiments/windows-hdr/gpu-guards.test.mjs
 node experiments/windows-hdr/verify-native.mjs
+
+# 需要真实 NVIDIA GPU，但不采集桌面；检查色彩、缩放、帧更新和吞吐。
+node experiments/windows-hdr/gpu-lab.mjs --width 1920 --height 1080 --bitrate 16000 --output experiments/windows-hdr/.artifacts/gpu-1080
+node experiments/windows-hdr/gpu-lab.mjs --width 3840 --height 2160 --bitrate 32000 --output experiments/windows-hdr/.artifacts/gpu-4k
+# 将新 GPU 编码器的合成输出通过真实本地 LiveKit 再验证。
+node experiments/windows-hdr/verify-native.mjs --fixture experiments/windows-hdr/.artifacts/gpu-4k/grey.hevc
 ```
 
 原生联测仅限**未打包的开发客户端**，设置 `$env:BACKSPACE_HDR_LAB = '1'` 后运行 `pnpm --filter @backspace/desktop dev:win`。服务端还需配置原有 LiveKit 凭据与 `LIVEKIT_NATIVE_HDR_ENABLED=true`，SFU 的 `enabled_codecs` 至少包含 `video/h265` 和 `audio/opus`。系统 HDR、所选显示器与真实编码/解码预检仍然生效。
@@ -47,7 +54,20 @@ node experiments/windows-hdr/verify-native.mjs
 
 报告生成在 `.artifacts/native-transport-report.json`，仓库保留无凭据副本 `results/2026-10-18-native-transport.json`。`transportVerified=true` 只表示合成媒体通过 SFU；`endToEndVerified` 和 `hardwareHdrDisplayVerified` 仍为 `false`。
 
-## 在 Windows 上复现
+## 原生 GPU 路径自动检查
+
+RTX 4070 SUPER，驱动 596.21；使用 GPU 生成动态 FP16 图案，分别连续编码 600 帧，并按 60 fps 节奏另测 180 帧。完整报告保存在 `results/2026-10-18-gpu.json`，包含色彩参考、连续帧哈希、实际处理时长及节奏测试。单个编码器，原始像素不读回 CPU；所有视频均为合成内容。
+
+| 合成动态输入 | NVENC | 转换/编码吞吐 | 含进程启动的吞吐 | 60 fps 节奏测试 |
+| --- | --- | ---: | ---: | ---: |
+| 1920×1080，16 Mbps | P4 ULL | 215.33 fps | 196.92 fps | 59.93 fps |
+| 3840×2160，32 Mbps | P3 ULL | 70.56 fps | 68.16 fps | 59.89 fps |
+
+GPU 编码器的灰阶解码值为 64 / 490 / 571 / 723，和 0 / 80 / 200 / 1000 nit 预期一致；四组彩色图案与独立 zimg 参考的误差最大为 2 个亮度码值、1 个色度码值。缩放、黑边和连续动态画面检查通过。其合成输出经真实本地 LiveKit 转发和观看端直接转封装后，Main10/PQ 与上述高光值保持正确，Opus 音频正常。
+
+GitHub 托管 runner 不要求 NVIDIA 硬件，执行原生编译、非法参数拒绝及固定合成流 SFU 验证；上表真实 GPU 检查由本机单独执行。这些结果未包含真实 WGC 采集、另一台电脑的 HDR 屏幕或真实上行带宽。正式开关保持禁用。
+
+## 旧参考实验在 Windows 上复现
 
 需要 Node.js、Windows 自带 .NET Framework C# 编译器、7-Zip，以及支持 Main10 的 NVIDIA 显卡/驱动。依赖下载仅发生在手动执行本工具时；不会随客户端运行或打包。下载按固定 GitHub release asset ID 和 SHA-256 校验，许可证和源码说明保留在解压目录。
 
@@ -79,7 +99,7 @@ node experiments/windows-hdr/lab.mjs inspect --file 'received.hevc' --ffmpeg $hd
 
 实验输出与依赖位于被 Git 忽略的 `.artifacts/`；真实采集会在该目录保存桌面视频。`report.json` 记录颜色信息、高光检查、FFmpeg CPU/内存、GPU 样本、处理时长及文件码率。报告中的 `endToEndVerified` 始终为 false；工具没有自动放行产品开关的功能。
 
-较新的 FFmpeg 二进制要求 NVENC 13.1/驱动 610，本机驱动仅提供 13.0。工具可将新版运行库用于 WGC 采集、旧版用于 NVENC，中间管道仅传递本机浮点像素，仍只有一个压缩视频编码器。没有静默切换编码器或转换为 SDR。
+旧 FFmpeg 实验中，较新二进制要求 NVENC 13.1/驱动 610，本机驱动仅提供 13.0。该参考工具将新版运行库用于 WGC 采集、旧版用于 NVENC，中间管道传递本机浮点像素。新原生 GPU 发布器直接使用 API 13.0，不依赖 FFmpeg WGC 采集库，也不需要升级本机驱动。两条路径均不静默切换编码器或转换为 SDR。
 
 ## 2026-10-17 本机结果
 
@@ -93,13 +113,13 @@ RTX 4070 SUPER，驱动 596.21。G73 的高级色彩受支持，但当前系统 
 | 3840×2160，60 fps | CPU/zscale | 39.49 秒 | 15.26 fps |
 | 3840×2160，60 fps | Vulkan/libplacebo | 31.44 秒 | 约 19 fps |
 
-这是色彩正确性的实验，包含浮点像素跨进程/CPU/GPU 复制。4K60 尚不满足实时要求，需要原生 D3D11 纹理到颜色转换/NVENC 的 GPU 路径。GPU 样本包含机器上其他应用的负载，不是独占性能测量。静态合成图案的文件码率不可用作直播带宽估算。
+这是旧参考路径的色彩正确性实验，包含浮点像素跨进程/CPU/GPU 复制，当时的 4K60 不满足实时要求。新的原生 D3D11 GPU 路径已替代它用于客户端发布，并通过动态合成吞吐检查。新旧图案与负载不同，不应将两组帧率作为严格的性能提升倍数。GPU 样本包含机器上其他应用的负载；合成图案文件码率不可用作直播带宽估算。
 
 ## 仍需实现与验收
 
 正式发布前仍需完成以下工作：
 
-1. 实现避免浮点读回的 D3D11 GPU 色彩转换/NVENC 路径，验证真实桌面 1080p60 和 4K60。
+1. 在新 D3D11 GPU 色彩转换/NVENC 路径上验证真实 WGC 桌面 1080p60 和 4K60，包括不同输入/输出尺寸、静止画面及持续运动。
 2. 两台 Windows HDR 设备通过 LiveKit 联测，确认真实接收码流位深、色彩信息、高光层次、实际 HDR 输出、音画同步和长时间漂移。
 3. 实机覆盖系统 HDR 关闭、跨显示器移动、解码失败、原生进程退出、中途加入、重连、权限撤销，以及同频道 SDR 主播和频道语音互不影响。
 4. 根据硬件结果完善正式发布放行范围，记录编码帧率、延迟、显卡负载与上行带宽，完成运行库分发归档，再更新验收清单。

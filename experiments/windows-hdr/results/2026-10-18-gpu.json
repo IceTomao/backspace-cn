@@ -1,0 +1,416 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-10-17T19:30:28.748Z",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 4070 SUPER",
+    "driver": "596.21",
+    "systemHdrEnabled": false
+  },
+  "nativeExecutableSha256": "90567da22c36430bf6fcaf69636d6017bf5b5f5fa45537f841bd9de69649cfb4",
+  "sourceHashes": {
+    "HdrGpu.cpp": "45962955164e777736f96f928127b6c27edfabba5b5fe4f50633e67896fd82a7",
+    "HdrGpuShader.hlsl": "d187dea2c17659e1156ff7d101c7731fdf0664a0fe7cdb3c208a86fc4312b5e8",
+    "WgcAbi.h": "9d15ce6c81f35c7199017b64831e9471a2e014855eeba8dcd8208ca7b9085999",
+    "vendor/nvEncodeAPI.h": "4fe4094541ef0f8a13249d97a8692dc5f835a6e9dd42eeadb3e2f7321d54dc7e"
+  },
+  "releaseAccepted": false,
+  "syntheticOnly": true,
+  "endToEndVerified": false,
+  "hardwareHdrDisplayVerified": false,
+  "benchmarks": [
+    {
+      "schemaVersion": 1,
+      "createdAt": "2026-10-17T19:29:26.602Z",
+      "pipeline": "d3d11-compute-p010-nvenc",
+      "options": {
+        "width": 1920,
+        "height": 1080,
+        "fps": 60,
+        "bitrateKbps": 16000,
+        "seconds": 10
+      },
+      "syntheticOnly": true,
+      "endToEndVerified": false,
+      "hardwareHdrDisplayVerified": false,
+      "pixelReadback": false,
+      "videoEncoders": 1,
+      "highlights": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 490,
+          "expected": 490
+        },
+        {
+          "nits": 200,
+          "actual": 571,
+          "expected": 571
+        },
+        {
+          "nits": 1000,
+          "actual": 723,
+          "expected": 723
+        }
+      ],
+      "colorPatches": [
+        {
+          "rgb": [
+            4,
+            0,
+            0
+          ],
+          "actual": [
+            428,
+            434,
+            612
+          ],
+          "expected": [
+            429,
+            434,
+            612
+          ]
+        },
+        {
+          "rgb": [
+            0,
+            4,
+            0
+          ],
+          "actual": [
+            570,
+            421,
+            473
+          ],
+          "expected": [
+            572,
+            421,
+            473
+          ]
+        },
+        {
+          "rgb": [
+            0,
+            0,
+            4
+          ],
+          "actual": [
+            305,
+            675,
+            543
+          ],
+          "expected": [
+            306,
+            675,
+            543
+          ]
+        },
+        {
+          "rgb": [
+            -0.1,
+            2.5,
+            12.5
+          ],
+          "actual": [
+            563,
+            594,
+            477
+          ],
+          "expected": [
+            565,
+            595,
+            477
+          ]
+        }
+      ],
+      "aspectFit": {
+        "highlights": [
+          {
+            "nits": 0,
+            "actual": 64,
+            "expected": 64
+          },
+          {
+            "nits": 80,
+            "actual": 490,
+            "expected": 490
+          },
+          {
+            "nits": 200,
+            "actual": 571,
+            "expected": 571
+          },
+          {
+            "nits": 1000,
+            "actual": 723,
+            "expected": 723
+          }
+        ],
+        "blackBars": [
+          64,
+          64
+        ]
+      },
+      "consecutiveFrameHashes": [
+        "caa0caf0c9bcfefb9c6a320fd65f173a",
+        "0714b450feda4c852d0c51f62d07eedd"
+      ],
+      "benchmark": {
+        "file": "dynamic.hevc",
+        "metrics": {
+          "type": "gpu-complete",
+          "frames": 600,
+          "seconds": 2.786449,
+          "fps": 215.328,
+          "encodedBytes": 20037320,
+          "pixelReadback": false,
+          "videoEncoders": 1
+        },
+        "wallSeconds": 3.0468488000000002,
+        "totalFps": 196.92477027412716,
+        "actualFileMbps": 16.029856
+      },
+      "realtime": {
+        "file": "realtime.hevc",
+        "metrics": {
+          "type": "gpu-complete",
+          "frames": 180,
+          "seconds": 3.003693,
+          "fps": 59.926,
+          "encodedBytes": 6041809,
+          "pixelReadback": false,
+          "videoEncoders": 1
+        },
+        "wallSeconds": 3.2874368000000005,
+        "totalFps": 54.753904318403926,
+        "actualFileMbps": 16.111490666666665
+      },
+      "realtimePassed": true,
+      "note": "Synthetic GPU input exercises color conversion and one NVENC encoder. No WGC/HDR output/LiveKit/dual-machine or network bandwidth acceptance is implied. File bitrate is synthetic media only.",
+      "encoderPreset": "P4 ULL"
+    },
+    {
+      "schemaVersion": 1,
+      "createdAt": "2026-10-17T19:29:18.696Z",
+      "pipeline": "d3d11-compute-p010-nvenc",
+      "options": {
+        "width": 3840,
+        "height": 2160,
+        "fps": 60,
+        "bitrateKbps": 32000,
+        "seconds": 10
+      },
+      "syntheticOnly": true,
+      "endToEndVerified": false,
+      "hardwareHdrDisplayVerified": false,
+      "pixelReadback": false,
+      "videoEncoders": 1,
+      "highlights": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 490,
+          "expected": 490
+        },
+        {
+          "nits": 200,
+          "actual": 571,
+          "expected": 571
+        },
+        {
+          "nits": 1000,
+          "actual": 723,
+          "expected": 723
+        }
+      ],
+      "colorPatches": [
+        {
+          "rgb": [
+            4,
+            0,
+            0
+          ],
+          "actual": [
+            428,
+            434,
+            612
+          ],
+          "expected": [
+            429,
+            434,
+            612
+          ]
+        },
+        {
+          "rgb": [
+            0,
+            4,
+            0
+          ],
+          "actual": [
+            570,
+            421,
+            473
+          ],
+          "expected": [
+            572,
+            421,
+            473
+          ]
+        },
+        {
+          "rgb": [
+            0,
+            0,
+            4
+          ],
+          "actual": [
+            305,
+            675,
+            543
+          ],
+          "expected": [
+            306,
+            675,
+            543
+          ]
+        },
+        {
+          "rgb": [
+            -0.1,
+            2.5,
+            12.5
+          ],
+          "actual": [
+            563,
+            594,
+            477
+          ],
+          "expected": [
+            565,
+            595,
+            477
+          ]
+        }
+      ],
+      "aspectFit": {
+        "highlights": [
+          {
+            "nits": 0,
+            "actual": 64,
+            "expected": 64
+          },
+          {
+            "nits": 80,
+            "actual": 490,
+            "expected": 490
+          },
+          {
+            "nits": 200,
+            "actual": 571,
+            "expected": 571
+          },
+          {
+            "nits": 1000,
+            "actual": 723,
+            "expected": 723
+          }
+        ],
+        "blackBars": [
+          64,
+          64
+        ]
+      },
+      "consecutiveFrameHashes": [
+        "f16f88f0dfb9967182d3bdf6a126bc77",
+        "5b807567b83945321d850b8abe62258e"
+      ],
+      "benchmark": {
+        "file": "dynamic.hevc",
+        "metrics": {
+          "type": "gpu-complete",
+          "frames": 600,
+          "seconds": 8.503669,
+          "fps": 70.558,
+          "encodedBytes": 40025726,
+          "pixelReadback": false,
+          "videoEncoders": 1
+        },
+        "wallSeconds": 8.803067,
+        "totalFps": 68.15806354762493,
+        "actualFileMbps": 32.0205808
+      },
+      "realtime": {
+        "file": "realtime.hevc",
+        "metrics": {
+          "type": "gpu-complete",
+          "frames": 180,
+          "seconds": 3.005387,
+          "fps": 59.892,
+          "encodedBytes": 12015300,
+          "pixelReadback": false,
+          "videoEncoders": 1
+        },
+        "wallSeconds": 3.2874472999999997,
+        "totalFps": 54.753729436210286,
+        "actualFileMbps": 32.0408
+      },
+      "realtimePassed": true,
+      "note": "Synthetic GPU input exercises color conversion and one NVENC encoder. No WGC/HDR output/LiveKit/dual-machine or network bandwidth acceptance is implied. File bitrate is synthetic media only.",
+      "encoderPreset": "P3 ULL"
+    }
+  ],
+  "transport": {
+    "transportVerified": true,
+    "viewerRemuxVerified": true,
+    "endToEndVerified": false,
+    "hardwareHdrDisplayVerified": false,
+    "fixture": {
+      "name": "grey.hevc",
+      "sha256": "952892573c58faa8c2d798cad79a4c648ef037cbe7ff771ec926a1c5306d0601"
+    },
+    "video": {
+      "codec": "hevc",
+      "profile": "Main 10",
+      "pixFmt": "yuv420p10le",
+      "primaries": "bt2020",
+      "transfer": "smpte2084"
+    },
+    "highlights": [
+      {
+        "nits": 0,
+        "actual": 64,
+        "expected": 64
+      },
+      {
+        "nits": 80,
+        "actual": 490,
+        "expected": 490
+      },
+      {
+        "nits": 200,
+        "actual": 571,
+        "expected": 571
+      },
+      {
+        "nits": 1000,
+        "actual": 723,
+        "expected": 723
+      }
+    ],
+    "audio": {
+      "codec": "opus",
+      "sampleRate": 48000,
+      "channels": 2
+    }
+  },
+  "limitation": "Synthetic GPU conversion/encoding, aspect fit, consecutive-picture update and local SFU media checks only. Real WGC capture, two-machine HDR output, sustained A/V sync and network bandwidth remain unverified.",
+  "sourceHashForm": "SHA-256 of LF-normalized UTF-8 source"
+}

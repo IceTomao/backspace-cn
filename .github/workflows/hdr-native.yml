@@ -7,6 +7,7 @@ on:
       - 'packages/desktop/native/**'
       - 'packages/desktop/src/hdr*'
       - 'packages/desktop/scripts/build-hdr-native.mjs'
+      - 'packages/desktop/scripts/build-hdr-gpu.mjs'
       - 'experiments/windows-hdr/**'
       - '.github/workflows/hdr-native.yml'
   pull_request:
@@ -14,6 +15,7 @@ on:
       - 'packages/desktop/native/**'
       - 'packages/desktop/src/hdr*'
       - 'packages/desktop/scripts/build-hdr-native.mjs'
+      - 'packages/desktop/scripts/build-hdr-gpu.mjs'
       - 'experiments/windows-hdr/**'
       - '.github/workflows/hdr-native.yml'
 
@@ -33,8 +35,12 @@ jobs:
         with:
           go-version: '1.27.2'
           cache-dependency-path: packages/desktop/native/hdr-bridge/go.sum
-      - name: Compile C# helpers and Go bridge (no hardware acceptance)
+      - name: Fetch pinned native GPU compiler
+        run: node experiments/windows-hdr/setup-gpu-tools.mjs
+      - name: Compile GPU encoder, C# helpers and Go bridge (no hardware acceptance)
         run: node packages/desktop/scripts/build-hdr-native.mjs
+      - name: Reject invalid native GPU inputs before device initialization
+        run: node --test experiments/windows-hdr/gpu-guards.test.mjs
       - name: Fetch pinned local test runtimes
         run: |
           node experiments/windows-hdr/setup-runtime.mjs encoder

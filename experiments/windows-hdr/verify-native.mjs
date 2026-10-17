@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { verifyHdrStream, verifyHighlightPatches } from './pipeline.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -13,6 +14,7 @@ const encoder = path.join(artifacts, 'runtime/ffmpeg-8.0.1-full_build-shared/bin
 const output = path.join(artifacts, 'livekit-received.hevc');
 const args = process.argv.slice(2);
 const go = args.includes('--go') ? args[args.indexOf('--go') + 1] : 'go';
+const fixture = args.includes('--fixture') ? path.resolve(args[args.indexOf('--fixture') + 1]) : path.join(repo, 'packages/desktop/native/hdr-probe.hevc');
 async function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const chunks = []; let size = 0;
@@ -28,7 +30,7 @@ await run(go, ['test', '-count=1', '-v', '-timeout', '60s', './...'], {
   env: { ...process.env,
     HDR_TEST_LIVEKIT: path.join(artifacts, 'runtime/livekit/livekit-server.exe'),
     HDR_TEST_BRIDGE: path.join(repo, 'packages/desktop/hdr-runtime/hdr-bridge.exe'),
-    HDR_TEST_FIXTURE: path.join(repo, 'packages/desktop/native/hdr-probe.hevc'),
+    HDR_TEST_FIXTURE: fixture,
     HDR_TEST_OUTPUT: output,
     HDR_TEST_FFMPEG: path.join(encoder, 'ffmpeg.exe'),
   },
@@ -52,6 +54,7 @@ const audio = (await probe(`${output}.ogg`)).streams;
 if (audio.length !== 1 || audio[0].codec_name !== 'opus' || audio[0].sample_rate !== '48000' || audio[0].channels !== 2) throw new Error('Invalid received system-audio stream');
 await run(path.join(encoder, 'ffmpeg.exe'), ['-v', 'error', '-i', `${output}.ogg`, '-f', 'null', '-']);
 const report = { transportVerified: true, viewerRemuxVerified: true, endToEndVerified: false, hardwareHdrDisplayVerified: false,
+  fixture: { name: path.basename(fixture), sha256: createHash('sha256').update(await fs.readFile(fixture)).digest('hex') },
   video: { codec: video.codec_name, profile: video.profile, pixFmt: video.pix_fmt, primaries: video.color_primaries, transfer: video.color_transfer },
   highlights, audio: { codec: 'opus', sampleRate: 48000, channels: 2 } };
 await fs.writeFile(path.join(artifacts, 'native-transport-report.json'), JSON.stringify(report, null, 2) + '\n');

@@ -20,6 +20,8 @@ async function run(command, args, cwd = desktop) {
   });
 }
 await fs.mkdir(destination, { recursive: true });
+await run(process.execPath, [path.join(desktop, 'scripts/build-hdr-gpu.mjs'),
+  ...(args.includes('--zig') ? ['--zig', args[args.indexOf('--zig') + 1]] : [])]);
 const probe = path.join(repo, 'experiments/windows-hdr/DisplayProbe.cs');
 await run(csc, ['/nologo', '/platform:x64', '/target:exe', `/out:${path.join(destination, 'DisplayProbe.exe')}`, probe]);
 await run(csc, ['/nologo', '/platform:x64', '/target:exe', '/main:HdrPlayer', '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll',
@@ -32,7 +34,7 @@ await fs.copyFile(path.join(native, 'acceptance.json'), path.join(destination, '
 if (args.includes('--assemble-runtime')) {
   // setup-runtime.mjs pins downloads by asset ID and SHA-256 before extraction.
   // Copy DLLs with their matching FFmpeg executable, never mix library versions.
-  for (const [name, directory] of [['capture', 'ffmpeg-8.1.2-full_build-shared'], ['encoder', 'ffmpeg-8.0.1-full_build-shared']]) {
+  for (const [name, directory] of [['encoder', 'ffmpeg-8.0.1-full_build-shared']]) {
     const source = path.join(runtime, directory);
     await fs.mkdir(path.join(destination, name), { recursive: true });
     for (const file of await fs.readdir(path.join(source, 'bin'))) {

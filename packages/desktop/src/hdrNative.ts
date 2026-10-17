@@ -15,7 +15,6 @@ interface NativeDisplay { gdiName: string; name: string; hdrActive: boolean | nu
 interface NativeEvent { type: string; reason?: string; trackSid?: string; identity?: string; sampleRate?: number; channels?: number; format?: string }
 
 const TRACK = 'backspace-screen-hdr-v1';
-const SCRGB_TO_PQ = 'format=gbrpf32le,zscale=primariesin=bt709:transferin=linear:matrixin=gbr:rangein=full:primaries=bt2020:transfer=smpte2084:matrix=bt2020nc:range=limited:npl=80:dither=error_diffusion,format=p010le';
 
 export function validateHdrVideo(config: HdrVideoConfig): void {
   if (!config || ![config.width, config.height, config.fps, config.bitrateKbps].every(Number.isSafeInteger) ||
@@ -25,15 +24,12 @@ export function validateHdrVideo(config: HdrVideoConfig): void {
   }
 }
 
-export function hdrEncoderArgs(config: HdrVideoConfig): string[] {
+export function hdrGpuArgs(config: HdrVideoConfig, monitor?: string): string[] {
   validateHdrVideo(config);
-  return ['-hide_banner', '-loglevel', 'error', '-nostdin', '-f', 'rawvideo', '-pixel_format', 'gbrpf32le',
-    '-video_size', `${config.width}x${config.height}`, '-framerate', String(config.fps), '-i', 'pipe:0',
-    '-vf', SCRGB_TO_PQ, '-map', '0:v:0', '-an', '-sn', '-dn', '-c:v', 'hevc_nvenc', '-profile:v', 'main10', '-pix_fmt', 'p010le',
-    '-preset', 'p4', '-tune', 'ull', '-rc', 'cbr', '-b:v', `${config.bitrateKbps}k`, '-maxrate:v', `${config.bitrateKbps}k`,
-    '-bufsize:v', `${Math.ceil(config.bitrateKbps / 4)}k`, '-bf', '0', '-rc-lookahead', '0', '-g', String(config.fps * 2),
-    '-color_primaries', 'bt2020', '-color_trc', 'smpte2084', '-colorspace', 'bt2020nc', '-color_range', 'tv',
-    '-bsf:v', 'hevc_metadata=aud=insert', '-f', 'hevc', 'pipe:1'];
+  if (monitor !== undefined && (!/^[1-9][0-9]{0,19}$/.test(monitor) || BigInt(monitor) > 0xffffffffffffffffn)) throw new Error('Invalid HDR monitor');
+  return ['--width', String(config.width), '--height', String(config.height), '--fps', String(config.fps),
+    '--bitrate-kbps', String(config.bitrateKbps),
+    ...(monitor === undefined ? ['--synthetic', '--frames', '4'] : ['--monitor', monitor, '--watch-parent'])];
 }
 
 export function assertHdrBitstream(probe: unknown, expected?: Pick<HdrVideoConfig, 'width' | 'height'>): void {
@@ -113,8 +109,8 @@ export class HdrNativeRuntime {
     try {
       const manifest = JSON.parse(fs.readFileSync(this.file('acceptance.json'), 'utf8'));
       if (manifest.protocol !== 1 || (manifest.releaseAccepted !== true && !this.allowUnaccepted)) return 'validation_pending';
-      for (const file of ['DisplayProbe.exe', 'HdrPlayer.exe', 'HdrAudio.exe', 'hdr-bridge.exe', 'libmpv-2.dll', 'hdr-probe.hevc',
-        'capture/ffmpeg.exe', 'encoder/ffmpeg.exe', 'encoder/ffprobe.exe']) if (!fs.statSync(this.file(file)).isFile()) return 'native_unavailable';
+      for (const file of ['DisplayProbe.exe', 'HdrGpu.exe', 'HdrPlayer.exe', 'HdrAudio.exe', 'hdr-bridge.exe', 'libmpv-2.dll', 'hdr-probe.hevc',
+        'encoder/ffmpeg.exe', 'encoder/ffprobe.exe']) if (!fs.statSync(this.file(file)).isFile()) return 'native_unavailable';
       return undefined;
     } catch { return 'native_unavailable'; }
   }
@@ -125,11 +121,11 @@ export class HdrNativeRuntime {
   }
   private async canEncode(): Promise<boolean> {
     // Decode support alone cannot authorize publishing. Exercise the actual
-    // shipped NVENC library/driver and inspect its Main10/PQ output.
+    // shipped GPU shader and driver NVENC API; inspect its Main10/PQ output.
     if (!this.encoderProbe) this.encoderProbe = (async () => {
       try {
         const config = { width: 256, height: 128, fps: 60, bitrateKbps: 1000, shareAudio: false };
-        const encoded = await runBytes(this.file('encoder/ffmpeg.exe'), hdrEncoderArgs(config), Buffer.alloc(256 * 128 * 12 * 2));
+        const encoded = await runBytes(this.file('HdrGpu.exe'), hdrGpuArgs(config));
         assertHdrBitstream(await runJson(this.file('encoder/ffprobe.exe'), ['-v', 'error', '-f', 'hevc', '-show_streams', '-of', 'json', 'pipe:0'], encoded), config);
         return true;
       } catch { return false; }
@@ -232,12 +228,8 @@ export class HdrNativeRuntime {
           if (matches.length !== 1 || matches[0]!.hdrActive !== true || matches[0]!.hmonitor !== target.hmonitor) this.stopOperation(op, 'output_hdr_disabled');
         }, () => this.stopOperation(op, 'hdr_state_unknown')).finally(() => { polling = false; });
       }, 1000);
-      const capture = this.child(op, 'capture/ffmpeg.exe', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-f', 'lavfi', '-i',
-        `gfxcapture=hmonitor=${target.hmonitor}:output_fmt=rgbaf16:max_framerate=${config.fps}:width=${config.width}:height=${config.height}:resize_mode=scale_aspect:display_border=1`,
-        '-vf', 'hwdownload,format=rgbaf16le,format=gbrpf32le', '-map', '0:v:0', '-an', '-r', String(config.fps), '-fps_mode', 'cfr', '-f', 'rawvideo', 'pipe:1']);
-      const encoder = this.child(op, 'encoder/ffmpeg.exe', hdrEncoderArgs(config));
-      capture.stderr.resume(); encoder.stderr.resume();
-      capture.stdout.pipe(encoder.stdin);
+      const encoder = this.child(op, 'HdrGpu.exe', hdrGpuArgs(config, target.hmonitor));
+      this.events(encoder, 'stderr', event => { if (event.type === 'failed') this.stopOperation(op, event.reason); });
       const prefix = await readHdrPrefix(encoder.stdout);
       const bitstream = await runJson(this.file('encoder/ffprobe.exe'), ['-v', 'error', '-f', 'hevc', '-show_streams', '-of', 'json', 'pipe:0'], prefix);
       assertHdrBitstream(bitstream, { width: config.width, height: config.height });

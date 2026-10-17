@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
-import { assertHdrBitstream, hdrEncoderArgs, HdrNativeRuntime, readHdrPrefix, validateHdrVideo } from './hdrNative';
+import { assertHdrBitstream, hdrGpuArgs, HdrNativeRuntime, readHdrPrefix, validateHdrVideo } from './hdrNative';
 
 const video = { width: 3840, height: 2160, fps: 60, bitrateKbps: 20000, shareAudio: false };
 const hdr = { codec_type: 'video', codec_name: 'hevc', profile: 'Main 10', pix_fmt: 'yuv420p10le',
@@ -14,14 +14,11 @@ describe('native HDR publication guards', () => {
     }
     expect(() => assertHdrBitstream({ streams: [hdr, hdr] })).toThrow();
   });
-  it('uses one HEVC encoder, float color conversion and no audio/SDR backup', () => {
-    const args = hdrEncoderArgs(video);
-    expect(args.filter(arg => arg === '-c:v')).toHaveLength(1);
-    expect(args).toContain('hevc_nvenc');
-    expect(args).toContain('main10');
-    expect(args).not.toContain('vp8');
-    expect(args[args.indexOf('-vf') + 1]).toContain('transferin=linear');
-    expect(args[args.indexOf('-vf') + 1]).toContain('npl=80');
+  it('selects the exact native capture monitor without pixel pipes or SDR encoder arguments', () => {
+    const args = hdrGpuArgs(video, '65537');
+    expect(args).toEqual(['--width', '3840', '--height', '2160', '--fps', '60', '--bitrate-kbps', '20000', '--monitor', '65537', '--watch-parent']);
+    for (const monitor of ['0', '-1', '1:window_title=other', '18446744073709551616']) expect(() => hdrGpuArgs(video, monitor)).toThrow();
+    expect(hdrGpuArgs(video)).toContain('--synthetic');
     expect(() => validateHdrVideo({ ...video, width: 3839 })).toThrow();
     expect(() => validateHdrVideo({ ...video, shareAudio: true })).not.toThrow();
   });

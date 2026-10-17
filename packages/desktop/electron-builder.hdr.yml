@@ -6,3 +6,5 @@ win:
       to: hdr
       filter:
         - '**/*'
+        - '!*.h'
+        - '!capture/**'
