@@ -7,6 +7,7 @@ import { AudioManager } from '../audio/AudioManager';
 import { useSpaceStore, getChannelOrigin, getMyUserIdForOrigin } from './spaceStore';
 import { useAuthStore } from './authStore';
 import { isElectron } from '../platform/platform';
+import { isHdrColor } from '../utils/hdrColor';
 
 export interface ScreenShareConfig {
   height: number | 'native';
@@ -17,6 +18,8 @@ export interface ScreenShareConfig {
   codec: 'vp9' | 'h264' | 'h265';
   /** Independent of codec, which always retains the user's SDR preference. */
   hdrEnabled: boolean;
+  hdrExposureEv: number;
+  hdrBrightness: number;
 }
 
 export type VoiceConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
@@ -209,7 +212,7 @@ export const useVoiceStore = create<VoiceState>()(
       outputDeviceId: 'default',
       cameraDeviceId: null,
       focusedParticipantId: null,
-      screenShareConfig: { height: 720, fps: 60, mode: 'gaming', customBitrateKbps: null, shareAudio: !isElectron(), codec: 'vp9', hdrEnabled: false },
+      screenShareConfig: { height: 720, fps: 60, mode: 'gaming', customBitrateKbps: null, shareAudio: !isElectron(), codec: 'vp9', hdrEnabled: false, hdrExposureEv: 0, hdrBrightness: 0 },
       lastScreenShareSourceId: null,
       participantVolumes: new Map(),
       setParticipantVolume: (userId, volume) => {
@@ -506,6 +509,10 @@ export const useVoiceStore = create<VoiceState>()(
           ...state.screenShareConfig, ...config,
           hdrEnabled: state.isScreenSharing ? state.screenShareConfig.hdrEnabled
             : config.hdrEnabled ?? state.screenShareConfig.hdrEnabled,
+          ...(!isHdrColor({ exposureEv: config.hdrExposureEv ?? state.screenShareConfig.hdrExposureEv,
+            brightness: config.hdrBrightness ?? state.screenShareConfig.hdrBrightness }) ? {
+              hdrExposureEv: state.screenShareConfig.hdrExposureEv, hdrBrightness: state.screenShareConfig.hdrBrightness,
+            } : {}),
         },
       })),
       noiseSuppression: true,
@@ -783,7 +790,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: 'backspace-voice-settings',
-      version: 16,
+      version: 17,
       migrate: (persistedState: any, version: number) => {
         if (version === 0) {
           persistedState.streamAttenuationEnabled = false;
@@ -889,6 +896,8 @@ export const useVoiceStore = create<VoiceState>()(
           ...currentState.screenShareConfig,
           ...persistedState?.screenShareConfig,
           hdrEnabled: persistedState?.screenShareConfig?.hdrEnabled === true,
+          hdrExposureEv: isHdrColor({ exposureEv: persistedState?.screenShareConfig?.hdrExposureEv, brightness: 0 }) ? persistedState.screenShareConfig.hdrExposureEv : 0,
+          hdrBrightness: isHdrColor({ exposureEv: 0, brightness: persistedState?.screenShareConfig?.hdrBrightness }) ? persistedState.screenShareConfig.hdrBrightness : 0,
         };
         // Reconstruct non-persisted Sets/Maps to their defaults
         merged.spaceMutedUserIds = currentState.spaceMutedUserIds;

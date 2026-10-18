@@ -422,6 +422,7 @@ export function ScreenShareSetup() {
       const ok = await useNativeHdrStore.getState().publish(selectedId, {
         width: options.capture.width || display?.width || 0, height: options.capture.height || display?.height || 0,
         fps: currentConfig.fps, bitrateKbps: Math.round(options.publish.videoEncoding.maxBitrate / 1000), shareAudio: currentConfig.shareAudio,
+        color: { exposureEv: currentConfig.hdrExposureEv, brightness: currentConfig.hdrBrightness },
       });
       if (generation !== stageGenerationRef.current) return;
       hdrStartingRef.current = false;

@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-10-18T12:44:40.693Z",
+  "pipeline": "d3d11-compute-p010-nvenc",
+  "options": {
+    "width": 3840,
+    "height": 2160,
+    "fps": 60,
+    "bitrateKbps": 32000,
+    "seconds": 10
+  },
+  "syntheticOnly": true,
+  "endToEndVerified": false,
+  "hardwareHdrDisplayVerified": false,
+  "pixelReadback": false,
+  "videoEncoders": 1,
+  "highlights": [
+    {
+      "nits": 0,
+      "actual": 64,
+      "expected": 64
+    },
+    {
+      "nits": 80,
+      "actual": 490,
+      "expected": 490
+    },
+    {
+      "nits": 200,
+      "actual": 571,
+      "expected": 571
+    },
+    {
+      "nits": 1000,
+      "actual": 723,
+      "expected": 723
+    }
+  ],
+  "colorPatches": [
+    {
+      "rgb": [
+        4,
+        0,
+        0
+      ],
+      "actual": [
+        428,
+        434,
+        612
+      ],
+      "expected": [
+        429,
+        434,
+        612
+      ]
+    },
+    {
+      "rgb": [
+        0,
+        4,
+        0
+      ],
+      "actual": [
+        570,
+        421,
+        473
+      ],
+      "expected": [
+        572,
+        421,
+        473
+      ]
+    },
+    {
+      "rgb": [
+        0,
+        0,
+        4
+      ],
+      "actual": [
+        305,
+        675,
+        543
+      ],
+      "expected": [
+        306,
+        675,
+        543
+      ]
+    },
+    {
+      "rgb": [
+        -0.1,
+        2.5,
+        12.5
+      ],
+      "actual": [
+        563,
+        594,
+        477
+      ],
+      "expected": [
+        565,
+        595,
+        477
+      ]
+    }
+  ],
+  "aspectFit": {
+    "highlights": [
+      {
+        "nits": 0,
+        "actual": 64,
+        "expected": 64
+      },
+      {
+        "nits": 80,
+        "actual": 490,
+        "expected": 490
+      },
+      {
+        "nits": 200,
+        "actual": 571,
+        "expected": 571
+      },
+      {
+        "nits": 1000,
+        "actual": 723,
+        "expected": 723
+      }
+    ],
+    "blackBars": [
+      64,
+      64
+    ]
+  },
+  "consecutiveFrameHashes": [
+    "f16f88f0dfb9967182d3bdf6a126bc77",
+    "5b807567b83945321d850b8abe62258e"
+  ],
+  "benchmark": {
+    "metrics": {
+      "type": "gpu-complete",
+      "frames": 600,
+      "seconds": 5.8837,
+      "fps": 101.977,
+      "encodedBytes": 40025726,
+      "pixelReadback": false,
+      "videoEncoders": 1
+    },
+    "wallSeconds": 6.271028699999999,
+    "totalFps": 95.67808228975258,
+    "actualFileMbps": 32.0205808
+  },
+  "realtime": {
+    "metrics": {
+      "type": "gpu-complete",
+      "frames": 180,
+      "seconds": 3.013122,
+      "fps": 59.739,
+      "encodedBytes": 12015300,
+      "pixelReadback": false,
+      "videoEncoders": 1
+    },
+    "wallSeconds": 3.3842775,
+    "totalFps": 53.18712782861334,
+    "actualFileMbps": 32.0408
+  },
+  "realtimePassed": true,
+  "note": "Synthetic GPU input exercises color conversion and one NVENC encoder. No WGC/HDR output/LiveKit/dual-machine or network bandwidth acceptance is implied. File bitrate is synthetic media only."
+}

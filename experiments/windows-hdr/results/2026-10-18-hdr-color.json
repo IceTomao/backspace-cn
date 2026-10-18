@@ -1,0 +1,251 @@
+{
+  "createdAt": "2026-10-18T12:43:52.949Z",
+  "syntheticOnly": true,
+  "hardwareHdrDisplayVerified": false,
+  "frames": 240,
+  "videoEncoders": 1,
+  "pixelReadback": false,
+  "results": [
+    {
+      "type": "color-applied",
+      "revision": 1,
+      "frame": 7,
+      "exposureTenths": 0,
+      "brightness": 0,
+      "patches": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 490,
+          "expected": 490
+        },
+        {
+          "nits": 200,
+          "actual": 571,
+          "expected": 571
+        },
+        {
+          "nits": 1000,
+          "actual": 723,
+          "expected": 723
+        }
+      ]
+    },
+    {
+      "type": "color-applied",
+      "revision": 2,
+      "frame": 19,
+      "exposureTenths": 10,
+      "brightness": 0,
+      "patches": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 551,
+          "expected": 551
+        },
+        {
+          "nits": 200,
+          "actual": 636,
+          "expected": 636
+        },
+        {
+          "nits": 1000,
+          "actual": 789,
+          "expected": 789
+        }
+      ]
+    },
+    {
+      "type": "color-applied",
+      "revision": 3,
+      "frame": 32,
+      "exposureTenths": -10,
+      "brightness": 0,
+      "patches": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 431,
+          "expected": 431
+        },
+        {
+          "nits": 200,
+          "actual": 509,
+          "expected": 509
+        },
+        {
+          "nits": 1000,
+          "actual": 657,
+          "expected": 657
+        }
+      ]
+    },
+    {
+      "type": "color-applied",
+      "revision": 4,
+      "frame": 44,
+      "exposureTenths": 0,
+      "brightness": 50,
+      "patches": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 521,
+          "expected": 521
+        },
+        {
+          "nits": 200,
+          "actual": 597,
+          "expected": 597
+        },
+        {
+          "nits": 1000,
+          "actual": 723,
+          "expected": 723
+        }
+      ]
+    },
+    {
+      "type": "color-applied",
+      "revision": 5,
+      "frame": 57,
+      "exposureTenths": 0,
+      "brightness": -50,
+      "patches": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 443,
+          "expected": 443
+        },
+        {
+          "nits": 200,
+          "actual": 536,
+          "expected": 536
+        },
+        {
+          "nits": 1000,
+          "actual": 723,
+          "expected": 723
+        }
+      ]
+    },
+    {
+      "type": "color-applied",
+      "revision": 6,
+      "frame": 70,
+      "exposureTenths": 30,
+      "brightness": 50,
+      "patches": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 686,
+          "expected": 686
+        },
+        {
+          "nits": 200,
+          "actual": 768,
+          "expected": 768
+        },
+        {
+          "nits": 1000,
+          "actual": 919,
+          "expected": 919
+        }
+      ]
+    },
+    {
+      "type": "color-applied",
+      "revision": 7,
+      "frame": 82,
+      "exposureTenths": -30,
+      "brightness": -50,
+      "patches": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 282,
+          "expected": 282
+        },
+        {
+          "nits": 200,
+          "actual": 346,
+          "expected": 346
+        },
+        {
+          "nits": 1000,
+          "actual": 486,
+          "expected": 486
+        }
+      ]
+    },
+    {
+      "type": "color-applied",
+      "revision": 8,
+      "frame": 94,
+      "exposureTenths": 0,
+      "brightness": 0,
+      "patches": [
+        {
+          "nits": 0,
+          "actual": 64,
+          "expected": 64
+        },
+        {
+          "nits": 80,
+          "actual": 490,
+          "expected": 490
+        },
+        {
+          "nits": 200,
+          "actual": 571,
+          "expected": 571
+        },
+        {
+          "nits": 1000,
+          "actual": 723,
+          "expected": 723
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "type": "gpu-complete",
+    "frames": 240,
+    "seconds": 4.023888,
+    "fps": 59.644,
+    "encodedBytes": 7656,
+    "pixelReadback": false,
+    "videoEncoders": 1
+  }
+}

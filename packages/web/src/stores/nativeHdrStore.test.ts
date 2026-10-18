@@ -11,10 +11,11 @@ import { useVoiceStore } from './voiceStore';
 const config = { width: 1920, height: 1080, fps: 60, bitrateKbps: 16000, shareAudio: false };
 beforeEach(() => {
   useVoiceStore.setState({ ...useVoiceStore.getInitialState(), currentVoiceChannelId: 'voice' });
-  useNativeHdrStore.setState({ available: false, publisherAvailable: false, reason: 'native_unavailable', displays: [], publication: null, watchingUserId: null });
+  useNativeHdrStore.setState({ available: false, publisherAvailable: false, colorControl: false, experimental: false, labMode: false,
+    pendingColor: null, colorError: false, reason: 'native_unavailable', displays: [], publication: null, watchingUserId: null });
   mocks.broadcast.mockReset(); mocks.status.mockResolvedValue({ nativeHdrProtocol: 1 });
 });
-afterEach(() => { delete window.backspace; vi.restoreAllMocks(); });
+afterEach(async () => { await useNativeHdrStore.getState().stop('publisher'); delete window.backspace; vi.restoreAllMocks(); vi.useRealTimers(); });
 
 it('keeps HDR unavailable on older servers and clients even if HEVC exists', async () => {
   window.backspace = { platform: 'win32', hdrNative: vi.fn().mockResolvedValue({ protocol: 1, available: true, displays: [] }) } as any;
@@ -91,4 +92,64 @@ it('does not reactivate a cancelled startup or let an old process stop a newer s
   onEvent({ kind: 'publisher', state: 'stopped', requestId: currentId });
   expect(useNativeHdrStore.getState().publication).toBeNull();
   expect(useVoiceStore.getState().screenShareDynamicRange).toBe('sdr');
+});
+
+it('coalesces live color changes, persists acknowledged values and never restarts publication', async () => {
+  vi.useFakeTimers();
+  const native = vi.fn().mockImplementation(async request => request.action === 'publish' ?
+    { identity: '__backspace_hdr_v1__alice:publish:session', trackSid: 'video' } : { ok: true });
+  window.backspace = { platform: 'win32', hdrNative: native } as any;
+  useVoiceStore.getState().setScreenShareConfig({ hdrEnabled: true });
+  useNativeHdrStore.setState({ publisherAvailable: true, colorControl: true });
+  await useNativeHdrStore.getState().publish('hdr:display', config);
+  const owner = native.mock.calls[0]![0].requestId;
+  useNativeHdrStore.getState().setColor({ exposureEv: 1, brightness: 10 });
+  useNativeHdrStore.getState().setColor({ exposureEv: 1.5, brightness: 20 });
+  expect(useVoiceStore.getState().screenShareConfig.hdrExposureEv).toBe(0);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(native.mock.calls.filter(([request]) => request.action === 'publisher-color')).toEqual([
+    [{ action: 'publisher-color', requestId: owner, color: { exposureEv: 1.5, brightness: 20 } }],
+  ]);
+  expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: 1.5, hdrBrightness: 20 });
+  expect(native.mock.calls.filter(([request]) => request.action === 'publish')).toHaveLength(1);
+});
+
+it('keeps confirmed values on failure and discards pending updates on stop', async () => {
+  vi.useFakeTimers();
+  let finish!: (value: unknown) => void;
+  const native = vi.fn().mockImplementation(async request => request.action === 'publish' ?
+    { identity: '__backspace_hdr_v1__alice:publish:session', trackSid: 'video' } :
+    request.action === 'publisher-color' ? new Promise(resolve => { finish = resolve; }) : { ok: true });
+  window.backspace = { platform: 'win32', hdrNative: native } as any;
+  useVoiceStore.getState().setScreenShareConfig({ hdrEnabled: true, hdrExposureEv: 0.5 });
+  useNativeHdrStore.setState({ publisherAvailable: true, colorControl: true });
+  await useNativeHdrStore.getState().publish('hdr:display', { ...config, color: { exposureEv: 0.5, brightness: 0 } });
+  useNativeHdrStore.getState().setColor({ exposureEv: 2, brightness: 50 });
+  await vi.advanceTimersByTimeAsync(100);
+  await useNativeHdrStore.getState().stop('publisher');
+  finish({ ok: true }); await Promise.resolve();
+  expect(useVoiceStore.getState().screenShareConfig.hdrExposureEv).toBe(0.5);
+  expect(useNativeHdrStore.getState().pendingColor).toBeNull();
+  await useNativeHdrStore.getState().publish('hdr:display', { ...config, color: { exposureEv: 0.5, brightness: 0 } });
+  native.mockImplementation(async () => { throw new Error('control failed'); });
+  useNativeHdrStore.getState().setColor({ exposureEv: 2, brightness: 50 });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(useNativeHdrStore.getState().colorError).toBe(true);
+  expect(useVoiceStore.getState().screenShareConfig.hdrExposureEv).toBe(0.5);
+});
+
+it('never sends HDR color controls for SDR, invalid values or an old native client', async () => {
+  vi.useFakeTimers();
+  const native = vi.fn(); window.backspace = { platform: 'win32', hdrNative: native } as any;
+  useNativeHdrStore.getState().setColor({ exposureEv: 1, brightness: 10 });
+  useVoiceStore.setState({ isScreenSharing: true, screenShareDynamicRange: 'sdr' });
+  useNativeHdrStore.getState().setColor({ exposureEv: 1, brightness: 10 });
+  useVoiceStore.setState({ isScreenSharing: false });
+  useVoiceStore.getState().setScreenShareConfig({ hdrEnabled: true });
+  useNativeHdrStore.getState().setColor({ exposureEv: 100, brightness: 10 });
+  useVoiceStore.setState({ isScreenSharing: true, screenShareDynamicRange: 'hdr' });
+  useNativeHdrStore.setState({ publication: { identity: 'hdr-owner', trackSid: 'video' }, colorControl: false });
+  useNativeHdrStore.getState().setColor({ exposureEv: 1, brightness: 10 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(native).not.toHaveBeenCalled();
 });

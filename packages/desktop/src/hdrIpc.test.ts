@@ -10,7 +10,7 @@ vi.mock('./hdrNative', () => ({ HdrNativeRuntime: class {
   capabilities = vi.fn().mockResolvedValue({ available: false });
   startPublisher = vi.fn().mockResolvedValue({ identity: '__backspace_hdr_v1__alice:publish:session', trackSid: 'video' });
   startViewer = vi.fn().mockResolvedValue(undefined);
-  stop = vi.fn(); dispose = vi.fn(); setViewerAudio = vi.fn();
+  stop = vi.fn(); dispose = vi.fn(); setViewerAudio = vi.fn(); setPublisherColor = vi.fn().mockResolvedValue(undefined);
   constructor(_root: string, readonly notify: (value: unknown) => void) { state.runtime = this; }
 } }));
 import { registerHdrNative } from './hdrIpc';
@@ -68,4 +68,16 @@ it('fails closed on an old server or rejected publication confirmation', async (
   await expect(handle(event, publish)).rejects.toThrow('not confirmed');
   expect(state.runtime.stop).toHaveBeenCalledWith('publisher');
   expect(JSON.parse(fetch.mock.calls.at(-1)![1].body)).toEqual({ identity, trackSid: null });
+});
+it('binds color control to the exact publisher lease and rejects invalid settings', async () => {
+  const adjustment = { action: 'publisher-color', requestId: 'start-1', color: { exposureEv: 1.2, brightness: 25 } };
+  await expect(handle(event, adjustment)).rejects.toThrow('expired');
+  await handle(event, publish);
+  await expect(handle(event, { ...adjustment, requestId: 'old-session' })).rejects.toThrow('expired');
+  await expect(handle(event, { ...adjustment, color: { exposureEv: 10, brightness: 25 } })).rejects.toThrow('Invalid');
+  expect(state.runtime.setPublisherColor).not.toHaveBeenCalled();
+  await expect(handle(event, adjustment)).resolves.toEqual({ ok: true });
+  expect(state.runtime.setPublisherColor).toHaveBeenCalledWith(adjustment.color);
+  await handle(event, { action: 'stop', kind: 'publisher' });
+  await expect(handle(event, adjustment)).rejects.toThrow('expired');
 });

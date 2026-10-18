@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { app, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron';
 import { HdrNativeRuntime, type HdrVideoConfig } from './hdrNative';
+import { validateHdrColor } from './hdrColor';
 
 /** The webpage can select sources, never executables, shell arguments or paths. */
 export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow | null, getInstance: () => string): () => void {
@@ -30,7 +31,16 @@ export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow |
     const owner = trusted(event);
     if (!input || typeof input !== 'object' || !('action' in input)) throw new Error('Invalid HDR request');
     const request = input as Record<string, unknown>;
-    if (request.action === 'capabilities') return runtime.capabilities();
+    if (request.action === 'capabilities') return runtime.capabilities(request.probeEncoder === true);
+    if (request.action === 'publisher-color') {
+      const lease = leases.get('publisher');
+      if (!lease || request.requestId !== lease.requestId) throw new Error('HDR publisher session expired');
+      validateHdrColor(request.color);
+      await runtime.setPublisherColor(request.color);
+      trusted(event);
+      if (leases.get('publisher') !== lease) throw new Error('HDR publisher session expired');
+      return { ok: true };
+    }
     if (request.action === 'viewer-audio') {
       runtime.setViewerAudio(request.volume as number, request.muted as boolean); return { ok: true };
     }

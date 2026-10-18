@@ -139,6 +139,20 @@ describe('H.265 screen-share capability detection', () => {
 });
 
 describe('screen-share media options', () => {
+  it('migrates, saves and validates HDR picture controls independently of SDR preferences', async () => {
+    localStorage.setItem('backspace-voice-settings', JSON.stringify({ version: 16, state: {
+      screenShareConfig: { hdrEnabled: false, codec: 'h264', hdrExposureEv: '1', hdrBrightness: 51 },
+    } }));
+    await useVoiceStore.persist.rehydrate();
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: 0, hdrBrightness: 0, codec: 'h264' });
+    useVoiceStore.getState().setScreenShareConfig({ hdrExposureEv: -1.5, hdrBrightness: 20 });
+    await useVoiceStore.persist.rehydrate();
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: -1.5, hdrBrightness: 20, hdrEnabled: false });
+    for (const invalid of [{ hdrExposureEv: NaN }, { hdrExposureEv: 0.05 }, { hdrBrightness: -51 }, { hdrBrightness: 0.5 }]) {
+      useVoiceStore.getState().setScreenShareConfig(invalid);
+      expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: -1.5, hdrBrightness: 20 });
+    }
+  });
   it('treats malformed persisted HDR values as disabled', async () => {
     localStorage.setItem('backspace-voice-settings', JSON.stringify({ version: 16, state: { screenShareConfig: { hdrEnabled: 'true' } } }));
     await useVoiceStore.persist.rehydrate();

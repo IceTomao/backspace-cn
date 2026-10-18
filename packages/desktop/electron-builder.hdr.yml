@@ -1,4 +1,5 @@
-# Explicit QA packaging only; normal releases do not ship unaccepted runtimes.
+# Experimental Windows HDR runtime. HDR remains opt-in and unaccepted in the
+# manifest; actual source/output/codec checks are still mandatory at runtime.
 extends: ./electron-builder.yml
 win:
   extraResources:
@@ -7,4 +8,5 @@ win:
       filter:
         - '**/*'
         - '!*.h'
+        - '!*.pdb'
         - '!capture/**'

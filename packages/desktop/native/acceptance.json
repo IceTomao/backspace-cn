@@ -1,6 +1,7 @@
 {
   "protocol": 1,
   "releaseAccepted": false,
+  "experimentalAllowed": true,
   "validatedWindowsBuilds": [],
   "evidence": null
 }

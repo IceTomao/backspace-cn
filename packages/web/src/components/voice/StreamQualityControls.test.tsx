@@ -1,5 +1,5 @@
 import React, { StrictMode } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StreamQualityControls } from './StreamQualityControls';
 import { useVoiceStore } from '../../stores/voiceStore';
@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe('screen-share codec controls', () => {
-  it('shows the native HDR gate, fixed Main10 codec and live lock while retaining the SDR preference', () => {
+  it('shows the native HDR gate, fixed Main10 codec and live lock while retaining the SDR preference', async () => {
     vi.spyOn(useNativeHdrStore.getState(), 'refresh').mockResolvedValue();
     useVoiceStore.getState().setScreenShareConfig({ codec: 'h264' });
     const { rerender } = render(<StreamQualityControls />);
@@ -46,7 +46,7 @@ describe('screen-share codec controls', () => {
     useNativeHdrStore.setState({ available: true, publisherAvailable: true });
     rerender(<StreamQualityControls />);
     expect(toggle).toBeEnabled();
-    fireEvent.click(toggle);
+    await act(async () => { fireEvent.click(toggle); });
     expect(toggle).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByText(i18n.t('voice:streamSettings.hdrCodec'))).toBeVisible();
     expect(useVoiceStore.getState().screenShareConfig.codec).toBe('h264');
@@ -56,6 +56,21 @@ describe('screen-share codec controls', () => {
     useVoiceStore.setState({ isScreenSharing: false }); rerender(<StreamQualityControls />);
     fireEvent.click(toggle);
     expect(screen.getByRole('button', { name: 'H264' })).toHaveAttribute('aria-pressed', 'true');
+  });
+  it('persists HDR adjustments and resets without native control traffic before streaming', async () => {
+    vi.spyOn(useNativeHdrStore.getState(), 'refresh').mockResolvedValue();
+    useNativeHdrStore.setState({ publisherAvailable: true, experimental: true, colorControl: true, pendingColor: null });
+    useVoiceStore.getState().setScreenShareConfig({ hdrEnabled: true });
+    render(<StreamQualityControls />);
+    const exposure = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.hdrExposure') });
+    const brightness = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.hdrBrightness') });
+    fireEvent.change(exposure, { target: { value: '1.5' } });
+    fireEvent.change(brightness, { target: { value: '25' } });
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: 1.5, hdrBrightness: 25 });
+    await useVoiceStore.persist.rehydrate();
+    expect(useVoiceStore.getState().screenShareConfig.hdrExposureEv).toBe(1.5);
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('voice:streamSettings.hdrReset') }));
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: 0, hdrBrightness: 0 });
   });
   it('offers and persists H.265 when the sender supports it', () => {
     render(<StreamQualityControls />);

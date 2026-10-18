@@ -5,14 +5,15 @@ import { createServer, type Server } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { PassThrough } from 'node:stream';
+import { hdrColorPacket, validateHdrColor, type HdrColor } from './hdrColor';
 
 export type HdrFailure = 'validation_pending' | 'native_unavailable' | 'system_hdr_off' | 'source_unsupported' | 'native_failed' | 'encoder_unavailable';
 export interface HdrDisplay { id: string; name: string; hdrActive: boolean; width: number; height: number }
-export interface HdrCapabilities { protocol: 1; available: boolean; publisherAvailable?: boolean; reason?: HdrFailure; displays: HdrDisplay[]; labMode?: boolean }
-export interface HdrVideoConfig { width: number; height: number; fps: number; bitrateKbps: number; shareAudio: boolean }
+export interface HdrCapabilities { protocol: 1; available: boolean; publisherAvailable?: boolean; colorControl?: 1; experimental?: boolean; reason?: HdrFailure; displays: HdrDisplay[]; labMode?: boolean }
+export interface HdrVideoConfig { width: number; height: number; fps: number; bitrateKbps: number; shareAudio: boolean; color?: HdrColor }
 export interface HdrCredentials { url: string; token: string; identity: string; hasAudio?: boolean }
 interface NativeDisplay { gdiName: string; name: string; hdrActive: boolean | null; hmonitor: string; width: number; height: number }
-interface NativeEvent { type: string; reason?: string; trackSid?: string; identity?: string; sampleRate?: number; channels?: number; format?: string }
+interface NativeEvent { type: string; reason?: string; trackSid?: string; identity?: string; sampleRate?: number; channels?: number; format?: string; revision?: number }
 
 const TRACK = 'backspace-screen-hdr-v1';
 
@@ -22,6 +23,7 @@ export function validateHdrVideo(config: HdrVideoConfig): void {
       config.fps < 1 || config.fps > 120 || config.bitrateKbps < 500 || config.bitrateKbps > 200000 || typeof config.shareAudio !== 'boolean') {
     throw new Error('Invalid HDR configuration');
   }
+  if (config.color !== undefined) validateHdrColor(config.color);
 }
 
 export function hdrGpuArgs(config: HdrVideoConfig, monitor?: string): string[] {
@@ -29,6 +31,7 @@ export function hdrGpuArgs(config: HdrVideoConfig, monitor?: string): string[] {
   if (monitor !== undefined && (!/^[1-9][0-9]{0,19}$/.test(monitor) || BigInt(monitor) > 0xffffffffffffffffn)) throw new Error('Invalid HDR monitor');
   return ['--width', String(config.width), '--height', String(config.height), '--fps', String(config.fps),
     '--bitrate-kbps', String(config.bitrateKbps),
+    ...(config.color ? ['--exposure-tenths', String(Math.round(config.color.exposureEv * 10)), '--brightness', String(config.color.brightness)] : []),
     ...(monitor === undefined ? ['--synthetic', '--frames', '4'] : ['--monitor', monitor, '--watch-parent'])];
 }
 
@@ -95,6 +98,9 @@ interface Operation {
   timer?: ReturnType<typeof setInterval>;
   server?: Server;
   player?: ChildProcessWithoutNullStreams;
+  encoder?: ChildProcessWithoutNullStreams;
+  colorRevision?: number;
+  colorWaiters?: Map<number, { resolve: () => void; reject: (error: Error) => void }>;
 }
 
 /** One publisher and one viewer owned by the current desktop/voice session. */
@@ -108,7 +114,7 @@ export class HdrNativeRuntime {
   private availability(): HdrFailure | undefined {
     try {
       const manifest = JSON.parse(fs.readFileSync(this.file('acceptance.json'), 'utf8'));
-      if (manifest.protocol !== 1 || (manifest.releaseAccepted !== true && !this.allowUnaccepted)) return 'validation_pending';
+      if (manifest.protocol !== 1 || (manifest.releaseAccepted !== true && manifest.experimentalAllowed !== true && !this.allowUnaccepted)) return 'validation_pending';
       for (const file of ['DisplayProbe.exe', 'HdrGpu.exe', 'HdrPlayer.exe', 'HdrAudio.exe', 'hdr-bridge.exe', 'libmpv-2.dll', 'hdr-probe.hevc',
         'encoder/ffmpeg.exe', 'encoder/ffprobe.exe']) if (!fs.statSync(this.file(file)).isFile()) return 'native_unavailable';
       return undefined;
@@ -132,14 +138,18 @@ export class HdrNativeRuntime {
     })().finally(() => { this.encoderProbe = null; });
     return this.encoderProbe;
   }
-  async capabilities(): Promise<HdrCapabilities> {
+  async capabilities(probeEncoder = false): Promise<HdrCapabilities> {
     const reason = this.availability();
     if (reason) return { protocol: 1, available: false, reason, displays: [] };
     try {
       const displays = (await this.displays()).map(d => ({ id: `hdr:${d.gdiName}`, name: d.name, hdrActive: d.hdrActive === true, width: d.width, height: d.height }));
       const available = displays.some(d => d.hdrActive);
-      const publisherAvailable = available && await this.canEncode();
-      return { protocol: 1, available, publisherAvailable, ...(!available ? { reason: 'system_hdr_off' as const } : !publisherAvailable ? { reason: 'encoder_unavailable' as const } : {}), displays, labMode: this.allowUnaccepted };
+      // Opening SDR settings performs display detection only. Exercise NVENC
+      // only after an explicit HDR enable/start request.
+      const publisherAvailable = available && (!probeEncoder || await this.canEncode());
+      const manifest = JSON.parse(fs.readFileSync(this.file('acceptance.json'), 'utf8'));
+      return { protocol: 1, available, publisherAvailable, colorControl: 1, experimental: manifest.releaseAccepted !== true,
+        ...(!available ? { reason: 'system_hdr_off' as const } : !publisherAvailable ? { reason: 'encoder_unavailable' as const } : {}), displays, labMode: this.allowUnaccepted };
     } catch { return { protocol: 1, available: false, reason: 'native_failed', displays: [] }; }
   }
 
@@ -229,14 +239,19 @@ export class HdrNativeRuntime {
         }, () => this.stopOperation(op, 'hdr_state_unknown')).finally(() => { polling = false; });
       }, 1000);
       const encoder = this.child(op, 'HdrGpu.exe', hdrGpuArgs(config, target.hmonitor));
-      this.events(encoder, 'stderr', event => { if (event.type === 'failed') this.stopOperation(op, event.reason); });
+      op.encoder = encoder; op.colorRevision = 0; op.colorWaiters = new Map();
+      this.events(encoder, 'stderr', event => {
+        if (event.type === 'failed') this.stopOperation(op, event.reason);
+        if (event.type === 'color-applied' && typeof event.revision === 'number') op.colorWaiters?.get(event.revision)?.resolve();
+      });
       const prefix = await readHdrPrefix(encoder.stdout);
       const bitstream = await runJson(this.file('encoder/ffprobe.exe'), ['-v', 'error', '-f', 'hevc', '-show_streams', '-of', 'json', 'pipe:0'], prefix);
       assertHdrBitstream(bitstream, { width: config.width, height: config.height });
       const transport = this.child(op, 'hdr-bridge.exe', []);
       transport.stdout.resume();
       const streaming = this.waitEvent(op, transport, 'stderr', 'streaming');
-      transport.stdin.write(`${JSON.stringify({ protocol: 1, mode: 'publish', url: credentials.url, token: credentials.token, ...config, audioUrl })}\n`);
+      const { color: _color, ...video } = config;
+      transport.stdin.write(`${JSON.stringify({ protocol: 1, mode: 'publish', url: credentials.url, token: credentials.token, ...video, audioUrl })}\n`);
       transport.stdin.write(prefix);
       encoder.stdout.pipe(transport.stdin);
       const event = await streaming;
@@ -303,6 +318,8 @@ export class HdrNativeRuntime {
     if (op.stopped) return;
     op.stopped = true;
     clearInterval(op.timer);
+    for (const waiter of op.colorWaiters?.values() ?? []) waiter.reject(new Error('HDR publisher stopped'));
+    op.colorWaiters?.clear();
     op.server?.closeAllConnections(); op.server?.close();
     for (const child of op.children) { child.stdin.destroy(); child.kill(); }
     const kind = this.publisher === op ? 'publisher' : 'viewer';
@@ -311,6 +328,29 @@ export class HdrNativeRuntime {
     this.notify({ kind, state: 'stopped', ...(reason ? { reason } : {}) });
   }
   stop(kind: 'publisher' | 'viewer'): void { const op = kind === 'publisher' ? this.publisher : this.viewer; if (op) this.stopOperation(op); }
+  async setPublisherColor(color: HdrColor): Promise<void> {
+    validateHdrColor(color);
+    const op = this.publisher;
+    if (!op || op.stopped || !op.encoder || !op.colorWaiters) throw new Error('HDR publisher unavailable');
+    if (op.colorWaiters.size) throw new Error('HDR color update busy');
+    const revision = (op.colorRevision ?? 0) + 1;
+    const packet = hdrColorPacket(color, revision); op.colorRevision = revision;
+    await new Promise<void>((resolve, reject) => {
+      const done = (error?: Error) => {
+        clearTimeout(timeout); op.colorWaiters?.delete(revision);
+        if (error) reject(error); else resolve();
+      };
+      const timeout = setTimeout(() => {
+        done(new Error('HDR color update timed out'));
+        // Do not keep streaming with an unknown applied state after timeout.
+        this.stopOperation(op, 'color_update_timeout');
+      }, 3000);
+      op.colorWaiters!.set(revision, { resolve: () => done(), reject: done });
+      op.encoder!.stdin.write(packet, error => {
+        if (error) { done(new Error('HDR control pipe closed')); this.stopOperation(op, 'color_control_failed'); }
+      });
+    });
+  }
   setViewerAudio(volume: number, muted: boolean): void {
     if (!Number.isFinite(volume) || volume < 0 || volume > 400 || typeof muted !== 'boolean') throw new Error('Invalid viewer audio settings');
     this.viewer?.player?.stdin.write(`${JSON.stringify({ action: 'audio', volume, muted })}\n`);

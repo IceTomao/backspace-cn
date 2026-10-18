@@ -2,7 +2,8 @@
 // Quantize only after the gamut and transfer transforms. No SDR intermediate.
 cbuffer Parameters : register(b0) {
     uint Width, Height, SourceWidth, SourceHeight;
-    uint FrameIndex, Pattern, Padding0, Padding1;
+    uint FrameIndex, Pattern;
+    float ExposureGain, Brightness;
 };
 Texture2D<float4> Source : register(t0);
 SamplerState LinearClamp : register(s0);
@@ -14,6 +15,13 @@ float3 pq(float3 scRgb) {
         dot(scRgb, float3(0.627403896, 0.329283038, 0.043313066)),
         dot(scRgb, float3(0.069097289, 0.919540395, 0.011362316)),
         dot(scRgb, float3(0.016391439, 0.088013308, 0.895595253)));
+    rgb2020 *= ExposureGain;
+    // Lift/darken shadows and midtones in linear light. Absolute black stays
+    // black; luminance >= 1000 nit is unchanged by the brightness control.
+    // The bounded quadratic gain is monotonic for Brightness in [-.5, .5].
+    float nits = dot(max(rgb2020, 0), float3(0.2627, 0.6780, 0.0593)) * 80.0;
+    float weight = 1.0 - saturate(nits / 1000.0);
+    rgb2020 *= 1.0 + Brightness * weight * weight;
     float3 p = pow(saturate(rgb2020 * (80.0 / 10000.0)), 2610.0 / 16384.0);
     return pow((3424.0 / 4096.0 + (2413.0 / 128.0) * p) /
         (1.0 + (2392.0 / 128.0) * p), 2523.0 / 32.0);

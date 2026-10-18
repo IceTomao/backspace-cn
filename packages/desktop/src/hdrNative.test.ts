@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
+import fs from 'node:fs';
 import { assertHdrBitstream, hdrGpuArgs, HdrNativeRuntime, readHdrPrefix, validateHdrVideo } from './hdrNative';
 
 const video = { width: 3840, height: 2160, fps: 60, bitrateKbps: 20000, shareAudio: false };
@@ -7,6 +8,21 @@ const hdr = { codec_type: 'video', codec_name: 'hevc', profile: 'Main 10', pix_f
   color_primaries: 'bt2020', color_transfer: 'smpte2084', color_space: 'bt2020nc', color_range: 'tv', width: 3840, height: 2160 };
 
 describe('native HDR publication guards', () => {
+  it('allows explicit experimental testing but never starts an encoder for ordinary settings detection', async () => {
+    const runtime = new HdrNativeRuntime('/test-hdr-runtime', vi.fn());
+    const read = vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ protocol: 1, releaseAccepted: false, experimentalAllowed: true }));
+    const stat = vi.spyOn(fs, 'statSync').mockReturnValue({ isFile: () => true } as any);
+    vi.spyOn(runtime as any, 'displays').mockResolvedValue([{ gdiName: 'test', name: 'test', hdrActive: true, width: 3840, height: 2160 }]);
+    const encode = vi.spyOn(runtime as any, 'canEncode').mockResolvedValue(false);
+    try {
+      expect(await runtime.capabilities()).toMatchObject({ publisherAvailable: true, experimental: true, colorControl: 1 });
+      expect(encode).not.toHaveBeenCalled();
+      expect(await runtime.capabilities(true)).toMatchObject({ publisherAvailable: false, reason: 'encoder_unavailable' });
+      expect(encode).toHaveBeenCalledTimes(1);
+      read.mockReturnValue(JSON.stringify({ protocol: 1, releaseAccepted: false }));
+      expect(await runtime.capabilities()).toMatchObject({ available: false, reason: 'validation_pending' });
+    } finally { read.mockRestore(); stat.mockRestore(); runtime.dispose(); }
+  });
   it('requires actual Main10/PQ/BT.2020 bitstream metadata, dimensions and one video', () => {
     expect(() => assertHdrBitstream({ streams: [hdr] }, video)).not.toThrow();
     for (const patch of [{ pix_fmt: 'yuv420p' }, { color_transfer: 'bt709' }, { profile: 'Main' }, { width: 1920 }]) {
@@ -21,6 +37,11 @@ describe('native HDR publication guards', () => {
     expect(hdrGpuArgs(video)).toContain('--synthetic');
     expect(() => validateHdrVideo({ ...video, width: 3839 })).toThrow();
     expect(() => validateHdrVideo({ ...video, shareAudio: true })).not.toThrow();
+    expect(hdrGpuArgs({ ...video, color: { exposureEv: -1.5, brightness: 20 } }, '65537')).toEqual([
+      '--width', '3840', '--height', '2160', '--fps', '60', '--bitrate-kbps', '20000',
+      '--exposure-tenths', '-15', '--brightness', '20', '--monitor', '65537', '--watch-parent',
+    ]);
+    expect(() => hdrGpuArgs({ ...video, color: { exposureEv: NaN, brightness: 0 } })).toThrow();
   });
   it('preserves a fragmented Annex B prefix without losing bytes at a pipe boundary', async () => {
     const input = new PassThrough();

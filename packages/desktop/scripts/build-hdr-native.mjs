@@ -48,4 +48,4 @@ if (args.includes('--assemble-runtime')) {
   await run(path.join(destination, 'HdrPlayer.exe'), ['--check-runtime']);
 }
 console.log(`Native HDR build: ${destination}`);
-console.log('Release acceptance remains false. Developer testing requires BACKSPACE_HDR_LAB=1 and an unpackaged app.');
+console.log('HDR hardware acceptance remains false; experimental availability is controlled by acceptance.json.');

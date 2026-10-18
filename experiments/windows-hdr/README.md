@@ -37,9 +37,9 @@ node experiments/windows-hdr/gpu-lab.mjs --width 3840 --height 2160 --bitrate 32
 node experiments/windows-hdr/verify-native.mjs --fixture experiments/windows-hdr/.artifacts/gpu-4k/grey.hevc
 ```
 
-原生联测仅限**未打包的开发客户端**，设置 `$env:BACKSPACE_HDR_LAB = '1'` 后运行 `pnpm --filter @backspace/desktop dev:win`。服务端还需配置原有 LiveKit 凭据与 `LIVEKIT_NATIVE_HDR_ENABLED=true`，SFU 的 `enabled_codecs` 至少包含 `video/h265` 和 `audio/opus`。系统 HDR、所选显示器与真实编码/解码预检仍然生效。
+早期原生联测使用**未打包的开发客户端**，设置 `$env:BACKSPACE_HDR_LAB = '1'` 后运行 `pnpm --filter @backspace/desktop dev:win`。服务端还需配置原有 LiveKit 凭据与 `LIVEKIT_NATIVE_HDR_ENABLED=true`，SFU 的 `enabled_codecs` 至少包含 `video/h265` 和 `audio/opus`。系统 HDR、所选显示器与真实编码/解码预检仍然生效。
 
-服务端默认关闭 HDR 协议；旧服务端或缺少原生能力的客户端禁用开关。正式打包客户端忽略上述开发环境变量。`electron-builder.hdr.yml` 仅供显式开发打包，正常发布不自动包含未验收的原生依赖。公开分发前还需完成 `packages/desktop/native/THIRD_PARTY_NOTICES.md` 所记录的许可证和对应完整源码/构建依赖归档。
+服务端默认关闭 HDR 协议；旧服务端或缺少原生能力的客户端禁用开关。正式打包客户端忽略上述开发环境变量。`electron-builder.hdr.yml` 从 1.4.10 起用于 Windows 实验性 HDR 打包；发布脚本附带依赖许可证、源码索引和原生源码资产。`releaseAccepted` 仍为 false，`experimentalAllowed` 明确允许默认关闭的线上测试。详见 `docs/releases/1.4.10.md`。
 
 ## 2026-10-18 自动检查结果
 
@@ -65,7 +65,7 @@ RTX 4070 SUPER，驱动 596.21；使用 GPU 生成动态 FP16 图案，分别连
 
 GPU 编码器的灰阶解码值为 64 / 490 / 571 / 723，和 0 / 80 / 200 / 1000 nit 预期一致；四组彩色图案与独立 zimg 参考的误差最大为 2 个亮度码值、1 个色度码值。缩放、黑边和连续动态画面检查通过。其合成输出经真实本地 LiveKit 转发和观看端直接转封装后，Main10/PQ 与上述高光值保持正确，Opus 音频正常。
 
-GitHub 托管 runner 不要求 NVIDIA 硬件，执行原生编译、非法参数拒绝及固定合成流 SFU 验证；上表真实 GPU 检查由本机单独执行。这些结果未包含真实 WGC 采集、另一台电脑的 HDR 屏幕或真实上行带宽。正式开关保持禁用。
+GitHub 托管 runner 不要求 NVIDIA 硬件，执行原生编译、非法参数拒绝及固定合成流 SFU 验证；上表真实 GPU 检查由本机单独执行。这些结果未包含真实 WGC 采集、另一台电脑的 HDR 屏幕或真实上行带宽。正式 HDR 验收保持未通过；1.4.10 明确开放默认关闭的实验开关，保留系统 HDR、所选显示器及真实编解码/渲染检查。
 
 ## 旧参考实验在 Windows 上复现
 
@@ -115,14 +115,20 @@ RTX 4070 SUPER，驱动 596.21。G73 的高级色彩受支持，但当前系统 
 
 这是旧参考路径的色彩正确性实验，包含浮点像素跨进程/CPU/GPU 复制，当时的 4K60 不满足实时要求。新的原生 D3D11 GPU 路径已替代它用于客户端发布，并通过动态合成吞吐检查。新旧图案与负载不同，不应将两组帧率作为严格的性能提升倍数。GPU 样本包含机器上其他应用的负载；合成图案文件码率不可用作直播带宽估算。
 
-## 仍需实现与验收
+## 仍需硬件验收
 
-正式发布前仍需完成以下工作：
+实验开关上线后，转为已验收 HDR 功能前仍需完成以下工作：
 
 1. 在新 D3D11 GPU 色彩转换/NVENC 路径上验证真实 WGC 桌面 1080p60 和 4K60，包括不同输入/输出尺寸、静止画面及持续运动。
 2. 两台 Windows HDR 设备通过 LiveKit 联测，确认真实接收码流位深、色彩信息、高光层次、实际 HDR 输出、音画同步和长时间漂移。
 3. 实机覆盖系统 HDR 关闭、跨显示器移动、解码失败、原生进程退出、中途加入、重连、权限撤销，以及同频道 SDR 主播和频道语音互不影响。
 4. 根据硬件结果完善正式发布放行范围，记录编码帧率、延迟、显卡负载与上行带宽，完成运行库分发归档，再更新验收清单。
-5. 验收通过后发布客户端，并同步部署服务器网页。桌面外壳更新不能替代服务器网页更新。
+5. 硬件验收后再更新正式放行范围。线上实验测试也需同步部署服务器网页，桌面外壳更新不能替代服务器网页更新。
 
 参考：[Microsoft WGC HDR 捕获](https://learn.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture)、[FFmpeg gfxcapture](https://ffmpeg.org/ffmpeg-filters.html#gfxcapture)、[Microsoft DXGI_OUTPUT_DESC1](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_6/ns-dxgi1_6-dxgi_output_desc1)。
+
+## HDR 曝光与亮度自动检查（1.4.10）
+
+`node experiments/windows-hdr/gpu-color.mjs` 在一个持续运行的编码器中依次改变曝光、亮度、边界组合并恢复默认。240 帧合成视频完整，8 个调整均在实际编码帧后确认，32 个灰阶测量与独立 PQ 参考一致。黑色保持黑色；亮度控制保留 1000 nit 以上高光，曝光控制按 2^EV 调整线性光。报告为 `results/2026-10-18-hdr-color.json`。没有桌面采集或物理 HDR 显示验收。
+
+增加调节后的 4K60 合成 GPU 检查通过，原始报告为 `results/2026-10-18-hdr-color-4k60.json`；吞吐数字受本机其他负载和驱动状态影响，不与早期结果做严格提升比较。直播调节只发送本地二进制控制消息，不增加视频编码器、SDR 转换或上传流。

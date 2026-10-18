@@ -11,12 +11,16 @@
 #include <io.h>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <memory>
+#include <mutex>
 #include "WgcAbi.h"
 #include "vendor/nvEncodeAPI.h"
 #include "HdrGpuShader.h"
@@ -53,6 +57,7 @@ static void closeCapture(IUnknown* value) {
 struct Options {
     UINT width = 1920, height = 1080, fps = 60, bitrate = 16000, frames = 0, pattern = 0;
     UINT syntheticWidth = 0, syntheticHeight = 0;
+    int exposureTenths = 0, brightness = 0;
     HMONITOR monitor = nullptr;
     bool synthetic = false, watchParent = false, realtime = false;
 };
@@ -69,6 +74,14 @@ static Options options(int argc, char** argv) {
         if (key == "--watch-parent") { o.watchParent = true; continue; }
         if (key == "--realtime") { o.realtime = true; continue; }
         if (++i >= argc) throw std::runtime_error("missing_argument");
+        if (key == "--exposure-tenths" || key == "--brightness") {
+            const char* text = argv[i]; const char* digits = *text == '-' ? text + 1 : text;
+            auto amount = number(digits);
+            if (amount > (key == "--exposure-tenths" ? 30u : 50u)) throw std::runtime_error("invalid_hdr_color");
+            int value = static_cast<int>(amount) * (*text == '-' ? -1 : 1);
+            if (key == "--exposure-tenths") o.exposureTenths = value; else o.brightness = value;
+            continue;
+        }
         auto n = number(argv[i]);
         if (key == "--monitor") {
             if (!n) throw std::runtime_error("invalid_monitor");
@@ -93,8 +106,19 @@ static Options options(int argc, char** argv) {
     return o;
 }
 
+struct ColorState {
+    std::mutex mutex;
+    uint32_t revision = 0;
+    int exposureTenths = 0, brightness = 0;
+};
+struct ColorPacket { char magic[4]; uint32_t revision; int32_t exposureTenths, brightness; };
+static_assert(sizeof(ColorPacket) == 16, "HDR stdin protocol size");
+
 class Pipeline {
     Options o;
+    std::shared_ptr<ColorState> color = std::make_shared<ColorState>();
+    uint32_t appliedRevision = 0, reportedRevision = 0;
+    int appliedExposure = 0, appliedBrightness = 0;
     Ptr<IDXGIAdapter1> adapter;
     Ptr<ID3D11Device> device;
     Ptr<ID3D11DeviceContext> context;
@@ -289,8 +313,15 @@ class Pipeline {
         closeCapture(newest.get()); return true;
     }
     void convert(UINT frame) {
-        UINT params[8] = {o.width, o.height, sourceWidth, sourceHeight, frame, o.pattern, 0, 0};
-        context->UpdateSubresource(parameters.get(), 0, nullptr, params, 0, 0);
+        {
+            std::lock_guard<std::mutex> guard(color->mutex);
+            appliedRevision = color->revision; appliedExposure = color->exposureTenths; appliedBrightness = color->brightness;
+        }
+        struct Parameters { UINT width, height, sourceWidth, sourceHeight, frame, pattern; float exposureGain, brightness; };
+        static_assert(sizeof(Parameters) == 32, "HLSL constant buffer layout");
+        Parameters params = {o.width, o.height, sourceWidth, sourceHeight, frame, o.pattern,
+            std::exp2(appliedExposure / 10.0f), appliedBrightness / 100.0f};
+        context->UpdateSubresource(parameters.get(), 0, nullptr, &params, 0, 0);
         auto cb = parameters.get(); context->CSSetConstantBuffers(0, 1, &cb);
         ID3D11UnorderedAccessView* empty[2] = {nullptr, nullptr};
         if (o.synthetic) {
@@ -325,7 +356,7 @@ class Pipeline {
         nvCheck(nv.nvEncUnmapInputResource(encoder, map.mappedResource), "nvenc_unmap_texture");
     }
 public:
-    explicit Pipeline(Options options) : o(options) {}
+    explicit Pipeline(Options options) : o(options) { color->exposureTenths = o.exposureTenths; color->brightness = o.brightness; }
     ~Pipeline() {
         closeCapture(session.get()); closeCapture(pool.get());
         if (encoder) {
@@ -346,9 +377,24 @@ public:
         else createCapture();
         createTextures(); createEncoder();
         if (o.watchParent) {
-            // Only the live capture path uses the parent lifetime pipe. The
-            // process terminates immediately when Electron's pipe disappears.
-            std::thread([] { while (getchar() != EOF) {} ExitProcess(0); }).detach();
+            // A private, fixed-size control pipe also binds process lifetime.
+            // No executable paths, JSON, credentials or image pixels enter it.
+            _setmode(_fileno(stdin), _O_BINARY);
+            auto state = color;
+            std::thread([state] {
+                ColorPacket packet;
+                for (;;) {
+                    size_t count = fread(&packet, 1, sizeof(packet), stdin);
+                    if (!count) ExitProcess(0);
+                    if (count != sizeof(packet) || memcmp(packet.magic, "HDC1", 4) || !packet.revision ||
+                        packet.exposureTenths < -30 || packet.exposureTenths > 30 || packet.brightness < -50 || packet.brightness > 50) {
+                        fprintf(stderr, "{\"type\":\"failed\",\"reason\":\"invalid_color_control\"}\n"); fflush(stderr); ExitProcess(1);
+                    }
+                    std::lock_guard<std::mutex> guard(state->mutex);
+                    if (packet.revision <= state->revision) continue;
+                    state->revision = packet.revision; state->exposureTenths = packet.exposureTenths; state->brightness = packet.brightness;
+                }
+            }).detach();
         }
         fprintf(stderr, "{\"type\":\"gpu-ready\",\"pixelReadback\":false,\"videoEncoders\":1}\n"); fflush(stderr);
         using clock = std::chrono::steady_clock;
@@ -365,7 +411,13 @@ public:
                 }
                 if (clock::now() - lastCheck >= std::chrono::seconds(1)) { requireHdrOutput(); lastCheck = clock::now(); }
             }
-            convert(frames); encode(frames); frames++;
+            convert(frames); encode(frames);
+            if (appliedRevision != reportedRevision) {
+                reportedRevision = appliedRevision;
+                fprintf(stderr, "{\"type\":\"color-applied\",\"revision\":%u,\"frame\":%u,\"exposureTenths\":%d,\"brightness\":%d}\n",
+                    appliedRevision, frames, appliedExposure, appliedBrightness); fflush(stderr);
+            }
+            frames++;
             if (!o.synthetic || o.realtime) std::this_thread::sleep_until(start + std::chrono::nanoseconds(static_cast<UINT64>(frames) * 1000000000 / o.fps));
         }
         double seconds = std::chrono::duration<double>(clock::now() - start).count();

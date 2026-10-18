@@ -89,6 +89,21 @@ jobs:
           } > "$notes"
           gh release create "$TAG" --draft --title "Backspace CN $version" --notes-file "$notes"
 
+      - name: Setup Go for native HDR bridge
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache-dependency-path: packages/desktop/native/hdr-bridge/go.sum
+
+      - name: Build experimental native HDR runtime and preserve sources
+        run: |
+          node experiments/windows-hdr/setup-gpu-tools.mjs
+          node experiments/windows-hdr/setup-runtime.mjs encoder
+          node experiments/windows-hdr/setup-runtime.mjs player
+          node packages/desktop/scripts/build-hdr-native.mjs --assemble-runtime
+          node --test experiments/windows-hdr/gpu-guards.test.mjs
+          node packages/desktop/scripts/prepare-hdr-release.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -100,7 +115,7 @@ jobs:
 
       - name: Build and upload Windows x64 updater assets
         working-directory: packages/desktop
-        run: pnpm exec electron-builder --win nsis --x64 --publish always
+        run: pnpm exec electron-builder --config electron-builder.hdr.yml --win nsis --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -133,6 +148,15 @@ jobs:
           if (!latest.includes(`version: ${version}`) || !latest.includes(installer)) {
             throw new Error('latest.yml does not describe the expected Windows x64 installer');
           }
+          const hdr = 'packages/desktop/dist-electron/win-unpacked/resources/hdr/';
+          for (const file of ['HdrGpu.exe', 'HdrPlayer.exe', 'HdrAudio.exe', 'hdr-bridge.exe', 'DisplayProbe.exe',
+            'hdr-probe.hevc', 'libmpv-2.dll', 'encoder/ffmpeg.exe', 'encoder/ffprobe.exe', 'encoder/LICENSE',
+            'MPV-LICENSE.GPL', 'SOURCES.txt', 'source-index.json']) {
+            if (!fs.statSync(hdr + file).isFile()) throw new Error(`Missing packaged HDR resource: ${file}`);
+          }
+          if (!fs.statSync(hdr + 'dependency-licenses').isDirectory()) throw new Error('Missing Go dependency notices');
+          const manifest = JSON.parse(fs.readFileSync(hdr + 'acceptance.json', 'utf8'));
+          if (manifest.releaseAccepted !== false || manifest.experimentalAllowed !== true) throw new Error('Experimental HDR gate changed');
           const config = fs.readFileSync('packages/desktop/dist/buildConfig.js', 'utf8');
           if (!config.includes('updatesEnabled: true')) throw new Error('Packaged distribution still disables updates');
           NODE
@@ -153,6 +177,14 @@ jobs:
             }
           }
 
+      - name: Upload native HDR source asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" "packages/desktop/dist-electron/Backspace-CN-${TAG#v}-HDR-sources.zip" --repo "$GH_REPO"
+
       - name: Validate uploaded assets
         shell: bash
         env:
@@ -162,7 +194,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          expected="$(printf '%s\n' "Backspace-CN-${version}-win-x64.exe" "Backspace-CN-${version}-win-x64.exe.blockmap" "latest.yml" | sort)"
+          expected="$(printf '%s\n' "Backspace-CN-${version}-win-x64.exe" "Backspace-CN-${version}-win-x64.exe.blockmap" "latest.yml" "Backspace-CN-${version}-HDR-sources.zip" | sort)"
           actual="$(gh release view "$TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' | sort)"
           if [ "$actual" != "$expected" ]; then
             echo "::error::Release assets do not match the updater contract."

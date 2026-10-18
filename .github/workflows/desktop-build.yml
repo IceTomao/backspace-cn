@@ -31,6 +31,21 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - name: Setup Go for native HDR bridge
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache-dependency-path: packages/desktop/native/hdr-bridge/go.sum
+
+      - name: Build experimental native HDR runtime and preserve sources
+        run: |
+          node experiments/windows-hdr/setup-gpu-tools.mjs
+          node experiments/windows-hdr/setup-runtime.mjs encoder
+          node experiments/windows-hdr/setup-runtime.mjs player
+          node packages/desktop/scripts/build-hdr-native.mjs --assemble-runtime
+          node --test experiments/windows-hdr/gpu-guards.test.mjs
+          node packages/desktop/scripts/prepare-hdr-release.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -42,7 +57,7 @@ jobs:
 
       - name: Build Windows x64 installer
         working-directory: packages/desktop
-        run: pnpm exec electron-builder --win nsis --x64 --publish never
+        run: pnpm exec electron-builder --config electron-builder.hdr.yml --win nsis --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
@@ -50,6 +65,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: backspace-desktop-win-x64-${{ github.sha }}
-          path: packages/desktop/dist-electron/Backspace-CN-*-win-x64.exe
+          path: |
+            packages/desktop/dist-electron/Backspace-CN-*-win-x64.exe
+            packages/desktop/dist-electron/Backspace-CN-*-HDR-sources.zip
           if-no-files-found: error
           retention-days: 14
