@@ -16,16 +16,20 @@ const args = process.argv.slice(2);
 const go = args.includes('--go') ? args[args.indexOf('--go') + 1] : 'go';
 const fixture = args.includes('--fixture') ? path.resolve(args[args.indexOf('--fixture') + 1]) : path.join(repo, 'packages/desktop/native/hdr-probe.hevc');
 async function run(command, args, options = {}) {
+  const { capture, timeoutMs = 60000, ...spawnOptions } = options;
   return new Promise((resolve, reject) => {
     const chunks = []; let size = 0;
-    const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', options.capture ? 'pipe' : 'inherit', 'inherit'], ...options });
-    const timeout = setTimeout(() => { child.kill(); reject(new Error('Native verification timed out')); }, 60000);
+    const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'], ...spawnOptions });
+    const timeout = setTimeout(() => { child.kill(); reject(new Error(`Native verification timed out: ${path.basename(command)}`)); }, timeoutMs);
     child.stdout?.on('data', chunk => { size += chunk.length; if (size > 4 * 1024 * 1024) child.kill(); else chunks.push(chunk); });
     child.once('error', error => { clearTimeout(timeout); reject(error); });
     child.once('close', code => { clearTimeout(timeout); code === 0 && size <= 4 * 1024 * 1024 ? resolve(Buffer.concat(chunks)) : reject(new Error(`${path.basename(command)} failed (${code})`)); });
   });
 }
 await run(go, ['test', '-count=1', '-v', '-timeout', '60s', './...'], {
+  // A fresh Windows runner may spend >60 seconds compiling test-only Go
+  // dependencies. The test binary still has its own 60-second execution cap.
+  timeoutMs: 240000,
   cwd: path.join(repo, 'packages/desktop/native/hdr-bridge'),
   env: { ...process.env,
     HDR_TEST_LIVEKIT: path.join(artifacts, 'runtime/livekit/livekit-server.exe'),
