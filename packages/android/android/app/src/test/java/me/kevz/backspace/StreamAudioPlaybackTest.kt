@@ -44,8 +44,9 @@ class StreamAudioPlaybackTest {
         data.putShort(0, 32000) // The native callback buffer may be reused immediately.
         await { outputs.firstOrNull()?.samples()?.size == 2 }
         assertEquals(listOf(500, -500), outputs.single().samples())
-        shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(StreamAudioStatus.PLAYING, playback.status)
+        // The fake output exposes the samples before the worker returns from
+        // write() and posts PLAYING. Wait for that separate main-thread event.
+        await { shadowOf(Looper.getMainLooper()).idle(); playback.status == StreamAudioStatus.PLAYING }
         playback.update(source, 1.0)
         assertEquals(1, source.attaches)
         source.sink!!.onData(pcm(2000, -2000), 16, 48_000, 2, 1, 0)
@@ -58,8 +59,7 @@ class StreamAudioPlaybackTest {
         create().update(source, 1.0)
         source.send(0, rate = 48_000)
         await { outputs.firstOrNull()?.samples()?.size == 1 }
-        shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(StreamAudioStatus.PLAYING, controller!!.status)
+        await { shadowOf(Looper.getMainLooper()).idle(); controller!!.status == StreamAudioStatus.PLAYING }
         source.send(0, rate = 44_100)
         await { outputs.size == 2 && outputs[1].samples().size == 1 }
         assertTrue(outputs[0].closed)
