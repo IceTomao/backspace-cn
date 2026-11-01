@@ -7,7 +7,14 @@ import { AudioManager } from '../audio/AudioManager';
 import { useSpaceStore, getChannelOrigin, getMyUserIdForOrigin } from './spaceStore';
 import { useAuthStore } from './authStore';
 import { isElectron } from '../platform/platform';
-import { isHdrColor } from '../utils/hdrColor';
+import { isExposureEv } from '../utils/hdrColor';
+import {
+  cloneStreamColor,
+  DEFAULT_STREAM_COLOR,
+  isStreamColor,
+  sanitizeStreamColor,
+  type StreamColorSettings,
+} from '../utils/streamColor';
 
 export interface ScreenShareConfig {
   height: number | 'native';
@@ -19,7 +26,7 @@ export interface ScreenShareConfig {
   /** Independent of codec, which always retains the user's SDR preference. */
   hdrEnabled: boolean;
   hdrExposureEv: number;
-  hdrBrightness: number;
+  streamColor: StreamColorSettings;
 }
 
 export type VoiceConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
@@ -212,7 +219,17 @@ export const useVoiceStore = create<VoiceState>()(
       outputDeviceId: 'default',
       cameraDeviceId: null,
       focusedParticipantId: null,
-      screenShareConfig: { height: 720, fps: 60, mode: 'gaming', customBitrateKbps: null, shareAudio: !isElectron(), codec: 'vp9', hdrEnabled: false, hdrExposureEv: 0, hdrBrightness: 0 },
+      screenShareConfig: {
+        height: 720,
+        fps: 60,
+        mode: 'gaming',
+        customBitrateKbps: null,
+        shareAudio: !isElectron(),
+        codec: 'vp9',
+        hdrEnabled: false,
+        hdrExposureEv: 0,
+        streamColor: cloneStreamColor(DEFAULT_STREAM_COLOR),
+      },
       lastScreenShareSourceId: null,
       participantVolumes: new Map(),
       setParticipantVolume: (userId, volume) => {
@@ -509,10 +526,12 @@ export const useVoiceStore = create<VoiceState>()(
           ...state.screenShareConfig, ...config,
           hdrEnabled: state.isScreenSharing ? state.screenShareConfig.hdrEnabled
             : config.hdrEnabled ?? state.screenShareConfig.hdrEnabled,
-          ...(!isHdrColor({ exposureEv: config.hdrExposureEv ?? state.screenShareConfig.hdrExposureEv,
-            brightness: config.hdrBrightness ?? state.screenShareConfig.hdrBrightness }) ? {
-              hdrExposureEv: state.screenShareConfig.hdrExposureEv, hdrBrightness: state.screenShareConfig.hdrBrightness,
-            } : {}),
+          hdrExposureEv: config.hdrExposureEv !== undefined
+            ? (isExposureEv(config.hdrExposureEv) ? config.hdrExposureEv : state.screenShareConfig.hdrExposureEv)
+            : state.screenShareConfig.hdrExposureEv,
+          streamColor: config.streamColor !== undefined
+            ? (isStreamColor(config.streamColor) ? cloneStreamColor(config.streamColor) : state.screenShareConfig.streamColor)
+            : state.screenShareConfig.streamColor,
         },
       })),
       noiseSuppression: true,
@@ -790,7 +809,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: 'backspace-voice-settings',
-      version: 17,
+      version: 18,
       migrate: (persistedState: any, version: number) => {
         if (version === 0) {
           persistedState.streamAttenuationEnabled = false;
@@ -862,6 +881,9 @@ export const useVoiceStore = create<VoiceState>()(
         if (version < 16 && persistedState.screenShareConfig) {
           persistedState.screenShareConfig.hdrEnabled = false;
         }
+        if (version < 18 && persistedState.screenShareConfig) {
+          delete persistedState.screenShareConfig.hdrBrightness;
+        }
         return persistedState;
       },
       storage: createJSONStorage(() => appStorage),
@@ -892,12 +914,14 @@ export const useVoiceStore = create<VoiceState>()(
       }),
       merge: (persistedState: any, currentState: VoiceState) => {
         const merged = { ...currentState, ...persistedState };
+        const persistedCfg = persistedState?.screenShareConfig;
+        const { hdrBrightness: _legacyHdrBrightness, ...restPersistedCfg } = persistedCfg ?? {};
         merged.screenShareConfig = {
           ...currentState.screenShareConfig,
-          ...persistedState?.screenShareConfig,
-          hdrEnabled: persistedState?.screenShareConfig?.hdrEnabled === true,
-          hdrExposureEv: isHdrColor({ exposureEv: persistedState?.screenShareConfig?.hdrExposureEv, brightness: 0 }) ? persistedState.screenShareConfig.hdrExposureEv : 0,
-          hdrBrightness: isHdrColor({ exposureEv: 0, brightness: persistedState?.screenShareConfig?.hdrBrightness }) ? persistedState.screenShareConfig.hdrBrightness : 0,
+          ...restPersistedCfg,
+          hdrEnabled: persistedCfg?.hdrEnabled === true,
+          hdrExposureEv: isExposureEv(persistedCfg?.hdrExposureEv) ? persistedCfg.hdrExposureEv : 0,
+          streamColor: sanitizeStreamColor(persistedCfg?.streamColor),
         };
         // Reconstruct non-persisted Sets/Maps to their defaults
         merged.spaceMutedUserIds = currentState.spaceMutedUserIds;

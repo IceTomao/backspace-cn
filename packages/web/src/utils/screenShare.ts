@@ -9,6 +9,8 @@ import { useUIStore } from '../stores/uiStore';
 import { openScreenShareSetup } from '../stores/screenShareSetupStore';
 import i18n from '../i18n';
 import { useNativeHdrStore } from '../stores/nativeHdrStore';
+import { DEFAULT_STREAM_COLOR } from './streamColor';
+import { attachStreamColorProcessor, getUnderlyingCaptureTrack } from './streamColorProcessor';
 import {
   STANDARD_RESOLUTIONS, STANDARD_FRAMERATES, WIDTH_MAP,
   BITRATE_MATRIX_KBPS,
@@ -207,8 +209,9 @@ export function resolveNativeOverdrive(
 ): void {
   const limits = getStreamingLimits();
   const effectiveCustom = limits.allowCustomBitrate ? config.customBitrateKbps : null;
-  if (config.height !== 'native' || effectiveCustom != null || !mediaTrack) return;
-  const settings = mediaTrack.getSettings();
+  const sourceTrack = getUnderlyingCaptureTrack(mediaTrack);
+  if (config.height !== 'native' || effectiveCustom != null || !sourceTrack) return;
+  const settings = sourceTrack.getSettings();
   if (!settings.width || !settings.height) return;
 
   const nativeKbps = computeNativeBitrate(settings.width, settings.height, config.fps, limits.bitrateMatrixOverrides);
@@ -332,10 +335,18 @@ export async function stageScreenCapture(): Promise<MediaStream> {
     throw new DOMException('getDisplayMedia is not available', 'NotSupportedError');
   }
   try {
-    const stream = await navigator.mediaDevices.getDisplayMedia(buildCaptureConstraints(config, opts));
-    const video = stream.getVideoTracks()[0];
+    const rawStream = await navigator.mediaDevices.getDisplayMedia(buildCaptureConstraints(config, opts));
+    const video = rawStream.getVideoTracks()[0];
     if (video) video.contentHint = opts.contentHint;
-    return stream;
+    return attachStreamColorProcessor(rawStream, {
+      getColor: () => useVoiceStore.getState().screenShareConfig.streamColor ?? DEFAULT_STREAM_COLOR,
+      subscribe: (listener) =>
+        useVoiceStore.subscribe((next, prev) => {
+          if (next.screenShareConfig.streamColor !== prev.screenShareConfig.streamColor) {
+            listener(next.screenShareConfig.streamColor ?? DEFAULT_STREAM_COLOR);
+          }
+        }),
+    });
   } catch (err) {
     // Loopback unsupported (Linux without pulse, macOS without Catap) makes
     // the whole getDisplayMedia call reject. No auto-retry: the picker
@@ -357,8 +368,9 @@ export async function stageScreenCapture(): Promise<MediaStream> {
  * reflect quality changes in the preview before anything is sent.
  */
 export async function applyStagedCaptureConfig(stream: MediaStream): Promise<void> {
-  const track = stream.getVideoTracks()[0];
-  if (!track || track.readyState !== 'live') return;
+  const outerTrack = stream.getVideoTracks()[0];
+  const track = getUnderlyingCaptureTrack(outerTrack);
+  if (!outerTrack || !track || track.readyState !== 'live') return;
   const config = useVoiceStore.getState().screenShareConfig;
   assertBrowserScreenShareIsSdr(config);
   const opts = buildScreenShareOptions(config);
@@ -369,6 +381,7 @@ export async function applyStagedCaptureConfig(stream: MediaStream): Promise<voi
     console.warn('[ScreenShare] Failed to apply staged constraints:', err);
   }
   track.contentHint = opts.contentHint;
+  outerTrack.contentHint = opts.contentHint;
 }
 
 export function stopStagedCapture(stream: MediaStream | null | undefined): void {
@@ -549,7 +562,8 @@ export function scheduleScreenShareOverdrive(room: Room): void {
     const screenPub = room.localParticipant.getTrackPublications()
       .find(p => p.source === Track.Source.ScreenShare);
     if (screenPub?.track?.mediaStreamTrack) {
-      const mediaTrack = screenPub.track.mediaStreamTrack;
+      const publishedTrack = screenPub.track.mediaStreamTrack;
+      const mediaTrack = getUnderlyingCaptureTrack(publishedTrack) ?? publishedTrack;
       if (!captureConfigured) {
         captureConfigured = true;
         try {
@@ -567,6 +581,7 @@ export function scheduleScreenShareOverdrive(room: Room): void {
             });
           }
           mediaTrack.contentHint = freshOpts.contentHint;
+          publishedTrack.contentHint = freshOpts.contentHint;
         } catch (err) {
           // Capture constraints and sender parameters are independent. A browser
           // rejecting one constraint must not cancel the bounded sender retry.

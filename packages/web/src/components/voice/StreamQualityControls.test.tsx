@@ -6,6 +6,7 @@ import { useVoiceStore } from '../../stores/voiceStore';
 import { useUIStore } from '../../stores/uiStore';
 import i18n from '../../i18n';
 import { useNativeHdrStore } from '../../stores/nativeHdrStore';
+import { DEFAULT_STREAM_COLOR } from '../../utils/streamColor';
 
 vi.mock('../../audio/AudioManager', () => ({
   AudioManager: { getInstance: () => ({}) },
@@ -36,7 +37,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('screen-share codec controls', () => {
+describe('screen-share codec & color controls', () => {
   it('shows the native HDR gate, fixed Main10 codec and live lock while retaining the SDR preference', async () => {
     vi.spyOn(useNativeHdrStore.getState(), 'refresh').mockResolvedValue();
     useVoiceStore.getState().setScreenShareConfig({ codec: 'h264' });
@@ -57,21 +58,75 @@ describe('screen-share codec controls', () => {
     fireEvent.click(toggle);
     expect(screen.getByRole('button', { name: 'H264' })).toHaveAttribute('aria-pressed', 'true');
   });
-  it('persists HDR adjustments and resets without native control traffic before streaming', async () => {
+
+  it('persists HDR exposure adjustments and resets without native control traffic before streaming', async () => {
     vi.spyOn(useNativeHdrStore.getState(), 'refresh').mockResolvedValue();
     useNativeHdrStore.setState({ publisherAvailable: true, experimental: true, colorControl: true, pendingColor: null });
     useVoiceStore.getState().setScreenShareConfig({ hdrEnabled: true });
     render(<StreamQualityControls />);
     const exposure = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.hdrExposure') });
-    const brightness = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.hdrBrightness') });
     fireEvent.change(exposure, { target: { value: '1.5' } });
-    fireEvent.change(brightness, { target: { value: '25' } });
-    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: 1.5, hdrBrightness: 25 });
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: 1.5 });
     await useVoiceStore.persist.rehydrate();
     expect(useVoiceStore.getState().screenShareConfig.hdrExposureEv).toBe(1.5);
     fireEvent.click(screen.getByRole('button', { name: i18n.t('voice:streamSettings.hdrReset') }));
-    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: 0, hdrBrightness: 0 });
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: 0 });
   });
+
+  it('expands Color Channels, preserves per-channel R/G/B curves independently from All Channels, supports double-click single reset and full reset', async () => {
+    render(<StreamQualityControls />);
+
+    const headerBtn = screen.getByRole('button', { name: i18n.t('voice:streamSettings.colorChannels.title') });
+    expect(headerBtn).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('slider', { name: i18n.t('voice:streamSettings.colorChannels.brightness') })).toBeNull();
+
+    fireEvent.click(headerBtn);
+    expect(headerBtn).toHaveAttribute('aria-expanded', 'true');
+
+    const allTab = screen.getByRole('button', { name: i18n.t('voice:streamSettings.colorChannels.channel.all') });
+    const redTab = screen.getByRole('button', { name: i18n.t('voice:streamSettings.colorChannels.channel.red') });
+    expect(allTab).toHaveAttribute('aria-pressed', 'true');
+
+    // Adjust Red channel independently
+    fireEvent.click(redTab);
+    expect(redTab).toHaveAttribute('aria-pressed', 'true');
+    const brightnessSlider = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.colorChannels.brightness') });
+    const gammaSlider = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.colorChannels.gamma') });
+    fireEvent.change(brightnessSlider, { target: { value: '72' } });
+    fireEvent.change(gammaSlider, { target: { value: '1.45' } });
+
+    // Switch back to All Channels and adjust Contrast + global Digital Vibrance + Hue
+    fireEvent.click(allTab);
+    expect(brightnessSlider).toHaveValue('50');
+    const contrastSlider = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.colorChannels.contrast') });
+    const vibranceSlider = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.colorChannels.digitalVibrance') });
+    const hueSlider = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.colorChannels.hue') });
+
+    fireEvent.change(contrastSlider, { target: { value: '64' } });
+    fireEvent.change(vibranceSlider, { target: { value: '80' } });
+    fireEvent.change(hueSlider, { target: { value: '120' } });
+
+    const saved = useVoiceStore.getState().screenShareConfig.streamColor;
+    expect(saved.red).toEqual({ brightness: 72, contrast: 50, gamma: 1.45 });
+    expect(saved.all).toEqual({ brightness: 50, contrast: 64, gamma: 1 });
+    expect(saved.digitalVibrance).toBe(80);
+    expect(saved.hue).toBe(120);
+    expect(screen.getByText(i18n.t('voice:streamSettings.colorChannels.modified'))).toBeVisible();
+
+    // Rehydrate from localStorage and confirm persistence
+    await useVoiceStore.persist.rehydrate();
+    expect(useVoiceStore.getState().screenShareConfig.streamColor.red.gamma).toBe(1.45);
+
+    // Double-click Hue slider resets only Hue back to 0
+    fireEvent.doubleClick(hueSlider);
+    expect(useVoiceStore.getState().screenShareConfig.streamColor.hue).toBe(0);
+    expect(useVoiceStore.getState().screenShareConfig.streamColor.digitalVibrance).toBe(80);
+
+    // Reset all restores DEFAULT_STREAM_COLOR
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('voice:streamSettings.colorChannels.reset') }));
+    expect(useVoiceStore.getState().screenShareConfig.streamColor).toEqual(DEFAULT_STREAM_COLOR);
+  });
+
   it('offers and persists H.265 when the sender supports it', () => {
     render(<StreamQualityControls />);
     const option = screen.getByRole('button', { name: 'H.265/HEVC' });

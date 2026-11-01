@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import { assertHdrBitstream, hdrGpuArgs, HdrNativeRuntime, readHdrPrefix, validateHdrVideo } from './hdrNative';
+import { DEFAULT_STREAM_COLOR } from './hdrColor';
 
 const video = { width: 3840, height: 2160, fps: 60, bitrateKbps: 20000, shareAudio: false };
 const hdr = { codec_type: 'video', codec_name: 'hevc', profile: 'Main 10', pix_fmt: 'yuv420p10le',
@@ -15,7 +16,7 @@ describe('native HDR publication guards', () => {
     vi.spyOn(runtime as any, 'displays').mockResolvedValue([{ gdiName: 'test', name: 'test', hdrActive: true, width: 3840, height: 2160 }]);
     const encode = vi.spyOn(runtime as any, 'canEncode').mockResolvedValue(false);
     try {
-      expect(await runtime.capabilities()).toMatchObject({ publisherAvailable: true, experimental: true, colorControl: 1 });
+      expect(await runtime.capabilities()).toMatchObject({ publisherAvailable: true, experimental: true, colorControl: 2 });
       expect(encode).not.toHaveBeenCalled();
       expect(await runtime.capabilities(true)).toMatchObject({ publisherAvailable: false, reason: 'encoder_unavailable' });
       expect(encode).toHaveBeenCalledTimes(1);
@@ -37,11 +38,23 @@ describe('native HDR publication guards', () => {
     expect(hdrGpuArgs(video)).toContain('--synthetic');
     expect(() => validateHdrVideo({ ...video, width: 3839 })).toThrow();
     expect(() => validateHdrVideo({ ...video, shareAudio: true })).not.toThrow();
-    expect(hdrGpuArgs({ ...video, color: { exposureEv: -1.5, brightness: 20 } }, '65537')).toEqual([
+    expect(hdrGpuArgs({
+      ...video,
+      color: {
+        exposureEv: -1.5,
+        streamColor: {
+          ...DEFAULT_STREAM_COLOR,
+          red: { brightness: 65, contrast: 50, gamma: 1.25 },
+          digitalVibrance: 80,
+          hue: 120,
+        },
+      },
+    }, '65537')).toEqual([
       '--width', '3840', '--height', '2160', '--fps', '60', '--bitrate-kbps', '20000',
-      '--exposure-tenths', '-15', '--brightness', '20', '--monitor', '65537', '--watch-parent',
+      '--exposure-tenths', '-15', '--red-brightness', '65', '--red-gamma', '125', '--vibrance', '80', '--hue', '120',
+      '--monitor', '65537', '--watch-parent',
     ]);
-    expect(() => hdrGpuArgs({ ...video, color: { exposureEv: NaN, brightness: 0 } })).toThrow();
+    expect(() => hdrGpuArgs({ ...video, color: { exposureEv: NaN, streamColor: DEFAULT_STREAM_COLOR } })).toThrow();
   });
   it('preserves a fragmented Annex B prefix without losing bytes at a pipe boundary', async () => {
     const input = new PassThrough();

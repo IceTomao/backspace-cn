@@ -5,6 +5,12 @@ import { useVoiceStore } from './voiceStore';
 import { getChannelOrigin, getMyUserIdForOrigin, useSpaceStore } from './spaceStore';
 import { broadcastVoiceStatus } from '../utils/voice';
 import { isHdrColor, type HdrColor } from '../utils/hdrColor';
+import {
+  cloneStreamColor,
+  COLOR_CHANNEL_KEYS,
+  DEFAULT_STREAM_COLOR,
+  type StreamColorSettings,
+} from '../utils/streamColor';
 
 export interface HdrDisplay { id: string; name: string; hdrActive: boolean; width: number; height: number }
 export type HdrUnavailableReason = 'validation_pending' | 'native_unavailable' | 'system_hdr_off' | 'source_unsupported' | 'native_failed' | 'server_unsupported' | 'encoder_unavailable';
@@ -25,6 +31,22 @@ interface NativeHdrState {
   publish: (sourceId: string, config: { width: number; height: number; fps: number; bitrateKbps: number; shareAudio: boolean; color?: HdrColor }) => Promise<boolean>;
   stop: (kind: 'publisher' | 'viewer') => Promise<void>;
   view: (userId: string, publisher: string) => Promise<boolean>;
+}
+
+function sameStreamColor(a: StreamColorSettings, b: StreamColorSettings): boolean {
+  if (a.digitalVibrance !== b.digitalVibrance || a.hue !== b.hue) return false;
+  for (const key of COLOR_CHANNEL_KEYS) {
+    const ca = a[key];
+    const cb = b[key];
+    if (
+      ca.brightness !== cb.brightness ||
+      ca.contrast !== cb.contrast ||
+      Math.round(ca.gamma * 100) !== Math.round(cb.gamma * 100)
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function voiceSession() {
@@ -63,7 +85,7 @@ async function flushColor() {
     const result = await window.backspace?.hdrNative?.({ action: 'publisher-color', requestId, color }) as { ok?: boolean } | undefined;
     if (generation !== colorGeneration || requestIds.publisher !== requestId) return;
     if (result?.ok !== true) throw new Error('HDR color not applied');
-    useVoiceStore.getState().setScreenShareConfig({ hdrExposureEv: color.exposureEv, hdrBrightness: color.brightness });
+    useVoiceStore.getState().setScreenShareConfig({ hdrExposureEv: color.exposureEv, streamColor: color.streamColor });
     if (useNativeHdrStore.getState().pendingColor === color) useNativeHdrStore.setState({ pendingColor: null });
   } catch {
     if (generation === colorGeneration) useNativeHdrStore.setState({ pendingColor: null, colorError: true });
@@ -139,7 +161,7 @@ export const useNativeHdrStore = create<NativeHdrState>((set, get) => ({
       if (server.nativeHdrProtocol !== 1) { set({ available: false, publisherAvailable: false, experimental: false, colorControl: false, reason: 'server_unsupported', displays: [] }); return; }
       if (local.protocol !== 1 || !Array.isArray(local.displays)) throw new Error('Invalid HDR capability response');
       set({ available: local.available === true, publisherAvailable: local.publisherAvailable === true, labMode: local.labMode === true,
-        experimental: local.experimental === true, colorControl: local.colorControl === 1, reason: local.reason ?? 'native_unavailable', displays: local.displays });
+        experimental: local.experimental === true, colorControl: local.colorControl === 2, reason: local.reason ?? 'native_unavailable', displays: local.displays });
     } catch { set({ available: false, publisherAvailable: false, experimental: false, colorControl: false, reason: 'native_failed', displays: [] }); }
   },
   setColor: color => {
@@ -147,11 +169,11 @@ export const useNativeHdrStore = create<NativeHdrState>((set, get) => ({
     const voice = useVoiceStore.getState();
     if (!voice.screenShareConfig.hdrEnabled) return;
     if (!voice.isScreenSharing) {
-      voice.setScreenShareConfig({ hdrExposureEv: color.exposureEv, hdrBrightness: color.brightness });
+      voice.setScreenShareConfig({ hdrExposureEv: color.exposureEv, streamColor: color.streamColor });
       set({ colorError: false }); return;
     }
     if (voice.screenShareDynamicRange !== 'hdr' || !get().publication || !get().colorControl) return;
-    set({ pendingColor: color, colorError: false }); queueColor();
+    set({ pendingColor: { exposureEv: color.exposureEv, streamColor: cloneStreamColor(color.streamColor) }, colorError: false }); queueColor();
   },
   publish: async (sourceId, config) => {
     bindEvents();
@@ -170,8 +192,11 @@ export const useNativeHdrStore = create<NativeHdrState>((set, get) => ({
       set({ publication: { identity: result.identity, trackSid: result.trackSid } });
       useVoiceStore.setState({ isScreenSharing: true, screenShareDynamicRange: 'hdr' });
       const latest = useVoiceStore.getState().screenShareConfig;
-      if (latest.hdrExposureEv !== (config.color?.exposureEv ?? 0) || latest.hdrBrightness !== (config.color?.brightness ?? 0))
-        get().setColor({ exposureEv: latest.hdrExposureEv, brightness: latest.hdrBrightness });
+      const startedExposure = config.color?.exposureEv ?? 0;
+      const startedStreamColor = config.color?.streamColor ?? DEFAULT_STREAM_COLOR;
+      if (latest.hdrExposureEv !== startedExposure || !sameStreamColor(latest.streamColor, startedStreamColor)) {
+        get().setColor({ exposureEv: latest.hdrExposureEv, streamColor: latest.streamColor });
+      }
       broadcastVoiceStatus();
       return true;
     } catch { if (revision === revisions.publisher) await get().stop('publisher'); return false; }

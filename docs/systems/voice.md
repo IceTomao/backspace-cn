@@ -271,9 +271,19 @@ ScreenShareConfig {
   mode: 'gaming' | 'text',         // Content hint and degradation priority
   customBitrateKbps: number | null, // Admin override (if allowed)
   shareAudio: boolean,              // System audio loopback (see Platform Support below)
-  codec: 'vp9' | 'h264'             // Persisted codec preference
+  codec: 'vp9' | 'h264' | 'h265',  // Persisted SDR codec preference
+  hdrEnabled: boolean,              // Windows native HDR Main10 mode
+  hdrExposureEv: number,            // HDR linear exposure adjustment (-3.0 to +3.0 EV)
+  streamColor: StreamColorSettings  // Outgoing GPU color channels (all/red/green/blue curves + vibrance + hue)
 }
 ```
+
+### Stream Color Channels (`StreamColorControls`, `streamColorProcessor`, `HdrGpu`)
+- **UI & state (`StreamColorControls.tsx`, `utils/streamColor.ts`, `voiceStore` persist v18):** Collapsible **Color Channels** section inside `StreamQualityControls`, modeled after NVIDIA Desktop Color Settings:
+  - Channel tabs: `all` (master curve) plus independent per-channel curves `red`, `green`, `blue`. Each channel stores `brightness` (`0–100%`, default `50%`), `contrast` (`0–100%`, default `50%`), and `gamma` (`0.30–2.80`, default `1.00`); per-channel adjustments compose on top of `all` without overwriting each other when switching tabs.
+  - Global controls below the divider: `digitalVibrance` (`0–100%`, default `50%`; `0%` grayscale, `100%` adaptive vibrance boost) and `hue` (`0–359°`, default `0°`, luminance- and neutral-grey-preserving rotation).
+- **SDR pipeline (`utils/streamColorProcessor.ts`):** `stageScreenCapture()` wraps the captured `MediaStream` via `attachStreamColorProcessor()`, using `MediaStreamTrackProcessor` + `TransformStream` + `MediaStreamTrackGenerator` + `OffscreenCanvas` WebGL2 fragment shader (with `<canvas>.captureStream()` and raw-stream fallbacks). When `streamColor` is at default values, `TransformStream` forwards the original `VideoFrame` reference with zero WebGL passes. `getUnderlyingCaptureTrack()` maps synthetic generator tracks back to the real OS capture track so `applyConstraints`, `contentHint`, native resolution inspection, and `stop()`/`ended` lifecycle events always operate on the underlying capture source. Both pre-stream preview (`ScreenShareSetup`) and published WebRTC tracks reflect slider updates in real time without SDP renegotiation.
+- **Windows native HDR pipeline (`nativeHdrStore.ts`, `packages/desktop/src/hdrColor.ts`, `HdrGpu.cpp`, `HdrGpuShader.hlsl`):** Coalesces live `{ exposureEv, streamColor }` updates every 100 ms (`colorControl === 2`) into a fixed 40-byte little-endian `HDC2` binary stdin packet. `HdrGpuShader.hlsl` applies `ExposureGain` in linear BT.2020 light and, when `streamColor` is non-default, evaluates the composed channel curves, Digital Vibrance, and Hue matrix in perceptual SMPTE ST 2084 PQ space before P010 quantization and NVENC Main10 encoding.
 
 ### Build Pipeline (`buildScreenShareOptions()`)
 1. Resolve bitrate from matrix (custom > override > default > native estimate)

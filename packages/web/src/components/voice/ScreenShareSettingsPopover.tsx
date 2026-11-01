@@ -50,24 +50,24 @@ export function ScreenShareSettingsPopover({ open, onClose, anchorRef, onStopSha
     <div
       ref={popoverRef}
       style={style}
-      className="w-[260px] glass rounded-lg overflow-hidden"
+      className="w-[300px] glass rounded-lg overflow-hidden flex flex-col"
     >
-      <div className="px-3 py-2 border-b border-border-hard">
+      <div className="px-3 py-2 border-b border-border-hard flex-shrink-0">
         <span className="text-[14px] font-bold text-txt-primary">{t('voice:streamSettings.title')}</span>
       </div>
 
-      <div className="px-3 py-3">
+      <div className="px-3 py-3 max-h-[min(calc(68*var(--app-vh)),520px)] overflow-y-auto scrollbar-thin">
         <StreamQualityControls />
       </div>
 
       {/* Footer — computed stats */}
-      <div className="px-3 py-2 border-t border-border-hard">
+      <div className="px-3 py-2 border-t border-border-hard flex-shrink-0">
         <StreamSummary />
       </div>
 
       {/* Stop sharing — only when the host surface has no other stop control */}
       {onStopSharing && (
-        <div className="px-3 pb-3 pt-1">
+        <div className="px-3 pb-3 pt-1 flex-shrink-0">
           <button
             onClick={onStopSharing}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-accent-rose hover:bg-accent-rose/80 text-white text-[13px] font-semibold transition-colors"

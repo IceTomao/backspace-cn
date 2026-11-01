@@ -54,10 +54,38 @@ static void closeCapture(IUnknown* value) {
     Ptr<wgc::Closable> closable;
     if (SUCCEEDED(value->QueryInterface(__uuidof(wgc::Closable), reinterpret_cast<void**>(closable.put())))) closable->Close();
 }
+
+struct ChannelCurve {
+    uint16_t brightness = 50;
+    uint16_t contrast = 50;
+    uint16_t gamma = 100;
+};
+struct ColorSettings {
+    int16_t exposureTenths = 0;
+    ChannelCurve all{}, red{}, green{}, blue{};
+    uint16_t digitalVibrance = 50;
+    uint16_t hueDegrees = 0;
+};
+static bool isValidCurve(const ChannelCurve& c) {
+    return c.brightness <= 100 && c.contrast <= 100 && c.gamma >= 30 && c.gamma <= 280;
+}
+static bool isValidColorSettings(const ColorSettings& s) {
+    return s.exposureTenths >= -30 && s.exposureTenths <= 30 &&
+        isValidCurve(s.all) && isValidCurve(s.red) && isValidCurve(s.green) && isValidCurve(s.blue) &&
+        s.digitalVibrance <= 100 && s.hueDegrees <= 359;
+}
+static bool isDefaultCurve(const ChannelCurve& c) {
+    return c.brightness == 50 && c.contrast == 50 && c.gamma == 100;
+}
+static bool hasNonDefaultStreamColor(const ColorSettings& s) {
+    return !isDefaultCurve(s.all) || !isDefaultCurve(s.red) || !isDefaultCurve(s.green) || !isDefaultCurve(s.blue) ||
+        s.digitalVibrance != 50 || s.hueDegrees != 0;
+}
+
 struct Options {
     UINT width = 1920, height = 1080, fps = 60, bitrate = 16000, frames = 0, pattern = 0;
     UINT syntheticWidth = 0, syntheticHeight = 0;
-    int exposureTenths = 0, brightness = 0;
+    ColorSettings color{};
     HMONITOR monitor = nullptr;
     bool synthetic = false, watchParent = false, realtime = false;
 };
@@ -65,6 +93,11 @@ static unsigned long long number(const char* value) {
     if (!*value || strspn(value, "0123456789") != strlen(value) || strlen(value) > 20) throw std::runtime_error("invalid_numeric_argument");
     try { return std::stoull(value); }
     catch (...) { throw std::runtime_error("invalid_numeric_argument"); }
+}
+static uint16_t colorUint16(const char* value, unsigned long long minVal, unsigned long long maxVal) {
+    auto n = number(value);
+    if (n < minVal || n > maxVal) throw std::runtime_error("invalid_hdr_color");
+    return static_cast<uint16_t>(n);
 }
 static Options options(int argc, char** argv) {
     Options o;
@@ -74,14 +107,27 @@ static Options options(int argc, char** argv) {
         if (key == "--watch-parent") { o.watchParent = true; continue; }
         if (key == "--realtime") { o.realtime = true; continue; }
         if (++i >= argc) throw std::runtime_error("missing_argument");
-        if (key == "--exposure-tenths" || key == "--brightness") {
+        if (key == "--exposure-tenths") {
             const char* text = argv[i]; const char* digits = *text == '-' ? text + 1 : text;
             auto amount = number(digits);
-            if (amount > (key == "--exposure-tenths" ? 30u : 50u)) throw std::runtime_error("invalid_hdr_color");
-            int value = static_cast<int>(amount) * (*text == '-' ? -1 : 1);
-            if (key == "--exposure-tenths") o.exposureTenths = value; else o.brightness = value;
+            if (amount > 30u) throw std::runtime_error("invalid_hdr_color");
+            o.color.exposureTenths = static_cast<int16_t>(static_cast<int>(amount) * (*text == '-' ? -1 : 1));
             continue;
         }
+        if (key == "--all-brightness") { o.color.all.brightness = colorUint16(argv[i], 0, 100); continue; }
+        if (key == "--all-contrast") { o.color.all.contrast = colorUint16(argv[i], 0, 100); continue; }
+        if (key == "--all-gamma") { o.color.all.gamma = colorUint16(argv[i], 30, 280); continue; }
+        if (key == "--red-brightness") { o.color.red.brightness = colorUint16(argv[i], 0, 100); continue; }
+        if (key == "--red-contrast") { o.color.red.contrast = colorUint16(argv[i], 0, 100); continue; }
+        if (key == "--red-gamma") { o.color.red.gamma = colorUint16(argv[i], 30, 280); continue; }
+        if (key == "--green-brightness") { o.color.green.brightness = colorUint16(argv[i], 0, 100); continue; }
+        if (key == "--green-contrast") { o.color.green.contrast = colorUint16(argv[i], 0, 100); continue; }
+        if (key == "--green-gamma") { o.color.green.gamma = colorUint16(argv[i], 30, 280); continue; }
+        if (key == "--blue-brightness") { o.color.blue.brightness = colorUint16(argv[i], 0, 100); continue; }
+        if (key == "--blue-contrast") { o.color.blue.contrast = colorUint16(argv[i], 0, 100); continue; }
+        if (key == "--blue-gamma") { o.color.blue.gamma = colorUint16(argv[i], 30, 280); continue; }
+        if (key == "--vibrance") { o.color.digitalVibrance = colorUint16(argv[i], 0, 100); continue; }
+        if (key == "--hue") { o.color.hueDegrees = colorUint16(argv[i], 0, 359); continue; }
         auto n = number(argv[i]);
         if (key == "--monitor") {
             if (!n) throw std::runtime_error("invalid_monitor");
@@ -109,16 +155,80 @@ static Options options(int argc, char** argv) {
 struct ColorState {
     std::mutex mutex;
     uint32_t revision = 0;
-    int exposureTenths = 0, brightness = 0;
+    ColorSettings settings{};
 };
-struct ColorPacket { char magic[4]; uint32_t revision; int32_t exposureTenths, brightness; };
-static_assert(sizeof(ColorPacket) == 16, "HDR stdin protocol size");
+struct ColorPacket {
+    char magic[4];
+    uint32_t revision;
+    int16_t exposureTenths;
+    uint16_t allBrightness, allContrast, allGamma;
+    uint16_t redBrightness, redContrast, redGamma;
+    uint16_t greenBrightness, greenContrast, greenGamma;
+    uint16_t blueBrightness, blueContrast, blueGamma;
+    uint16_t digitalVibrance;
+    uint16_t hueDegrees;
+    uint16_t reserved;
+};
+static_assert(sizeof(ColorPacket) == 40, "HDR stdin protocol size");
+
+struct ShaderParameters {
+    UINT width, height, sourceWidth, sourceHeight;
+    UINT frame, pattern, hasColorAdjust, pad0;
+    float exposureGain, vibrance, pad1, pad2;
+    float contrast[4];
+    float brightnessOffset[4];
+    float invGamma[4];
+    float hueRow0[4];
+    float hueRow1[4];
+    float hueRow2[4];
+};
+static_assert(sizeof(ShaderParameters) == 144, "HLSL constant buffer layout");
+
+static void fillShaderColorParameters(const ColorSettings& s, ShaderParameters& p) {
+    p.hasColorAdjust = hasNonDefaultStreamColor(s) ? 1u : 0u;
+    p.exposureGain = std::exp2(s.exposureTenths / 10.0f);
+    p.vibrance = (static_cast<int>(s.digitalVibrance) - 50) / 50.0f;
+    const ChannelCurve channels[3] = {s.red, s.green, s.blue};
+    const float allContrast = s.all.contrast / 50.0f;
+    const float allBrightness = (static_cast<int>(s.all.brightness) - 50) / 100.0f;
+    const float allGamma = s.all.gamma / 100.0f;
+    for (int i = 0; i < 3; i++) {
+        p.contrast[i] = allContrast * (channels[i].contrast / 50.0f);
+        p.brightnessOffset[i] = allBrightness + (static_cast<int>(channels[i].brightness) - 50) / 100.0f;
+        float g = std::min(7.84f, std::max(0.09f, allGamma * (channels[i].gamma / 100.0f)));
+        p.invGamma[i] = 1.0f / g;
+    }
+    p.contrast[3] = 0.0f;
+    p.brightnessOffset[3] = 0.0f;
+    p.invGamma[3] = 1.0f;
+    if (s.hueDegrees == 0) {
+        p.hueRow0[0] = 1.0f; p.hueRow0[1] = 0.0f; p.hueRow0[2] = 0.0f; p.hueRow0[3] = 0.0f;
+        p.hueRow1[0] = 0.0f; p.hueRow1[1] = 1.0f; p.hueRow1[2] = 0.0f; p.hueRow1[3] = 0.0f;
+        p.hueRow2[0] = 0.0f; p.hueRow2[1] = 0.0f; p.hueRow2[2] = 1.0f; p.hueRow2[3] = 0.0f;
+    } else {
+        constexpr float pi = 3.14159265358979323846f;
+        float rad = s.hueDegrees * (pi / 180.0f);
+        float c = std::cos(rad), sn = std::sin(rad);
+        p.hueRow0[0] = 0.213f + 0.787f * c - 0.213f * sn;
+        p.hueRow0[1] = 0.715f - 0.715f * c - 0.715f * sn;
+        p.hueRow0[2] = 0.072f - 0.072f * c + 0.928f * sn;
+        p.hueRow0[3] = 0.0f;
+        p.hueRow1[0] = 0.213f - 0.213f * c + 0.143f * sn;
+        p.hueRow1[1] = 0.715f + 0.285f * c + 0.140f * sn;
+        p.hueRow1[2] = 0.072f - 0.072f * c - 0.283f * sn;
+        p.hueRow1[3] = 0.0f;
+        p.hueRow2[0] = 0.213f - 0.213f * c - 0.787f * sn;
+        p.hueRow2[1] = 0.715f - 0.715f * c + 0.715f * sn;
+        p.hueRow2[2] = 0.072f + 0.928f * c + 0.072f * sn;
+        p.hueRow2[3] = 0.0f;
+    }
+}
 
 class Pipeline {
     Options o;
     std::shared_ptr<ColorState> color = std::make_shared<ColorState>();
     uint32_t appliedRevision = 0, reportedRevision = 0;
-    int appliedExposure = 0, appliedBrightness = 0;
+    ColorSettings appliedColor{};
     Ptr<IDXGIAdapter1> adapter;
     Ptr<ID3D11Device> device;
     Ptr<ID3D11DeviceContext> context;
@@ -234,7 +344,7 @@ class Pipeline {
         check(modern->CreateUnorderedAccessView1(output.get(), &view, plane.put()), "p010_luma_view"); query(plane.get(), luma);
         view.Format = DXGI_FORMAT_R16G16_UINT; view.Texture2D.PlaneSlice = 1;
         check(modern->CreateUnorderedAccessView1(output.get(), &view, plane.put()), "p010_chroma_view"); query(plane.get(), chroma);
-        D3D11_BUFFER_DESC buffer = {}; buffer.ByteWidth = 32; buffer.Usage = D3D11_USAGE_DEFAULT; buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        D3D11_BUFFER_DESC buffer = {}; buffer.ByteWidth = sizeof(ShaderParameters); buffer.Usage = D3D11_USAGE_DEFAULT; buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         check(device->CreateBuffer(&buffer, nullptr, parameters.put()), "shader_parameters");
         D3D11_SAMPLER_DESC sample = {}; sample.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
         sample.AddressU = sample.AddressV = sample.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sample.MaxLOD = D3D11_FLOAT32_MAX;
@@ -315,12 +425,17 @@ class Pipeline {
     void convert(UINT frame) {
         {
             std::lock_guard<std::mutex> guard(color->mutex);
-            appliedRevision = color->revision; appliedExposure = color->exposureTenths; appliedBrightness = color->brightness;
+            appliedRevision = color->revision;
+            appliedColor = color->settings;
         }
-        struct Parameters { UINT width, height, sourceWidth, sourceHeight, frame, pattern; float exposureGain, brightness; };
-        static_assert(sizeof(Parameters) == 32, "HLSL constant buffer layout");
-        Parameters params = {o.width, o.height, sourceWidth, sourceHeight, frame, o.pattern,
-            std::exp2(appliedExposure / 10.0f), appliedBrightness / 100.0f};
+        ShaderParameters params = {};
+        params.width = o.width;
+        params.height = o.height;
+        params.sourceWidth = sourceWidth;
+        params.sourceHeight = sourceHeight;
+        params.frame = frame;
+        params.pattern = o.pattern;
+        fillShaderColorParameters(appliedColor, params);
         context->UpdateSubresource(parameters.get(), 0, nullptr, &params, 0, 0);
         auto cb = parameters.get(); context->CSSetConstantBuffers(0, 1, &cb);
         ID3D11UnorderedAccessView* empty[2] = {nullptr, nullptr};
@@ -356,7 +471,7 @@ class Pipeline {
         nvCheck(nv.nvEncUnmapInputResource(encoder, map.mappedResource), "nvenc_unmap_texture");
     }
 public:
-    explicit Pipeline(Options options) : o(options) { color->exposureTenths = o.exposureTenths; color->brightness = o.brightness; }
+    explicit Pipeline(Options options) : o(options) { color->settings = o.color; }
     ~Pipeline() {
         closeCapture(session.get()); closeCapture(pool.get());
         if (encoder) {
@@ -386,13 +501,22 @@ public:
                 for (;;) {
                     size_t count = fread(&packet, 1, sizeof(packet), stdin);
                     if (!count) ExitProcess(0);
-                    if (count != sizeof(packet) || memcmp(packet.magic, "HDC1", 4) || !packet.revision ||
-                        packet.exposureTenths < -30 || packet.exposureTenths > 30 || packet.brightness < -50 || packet.brightness > 50) {
+                    ColorSettings next{};
+                    next.exposureTenths = packet.exposureTenths;
+                    next.all = {packet.allBrightness, packet.allContrast, packet.allGamma};
+                    next.red = {packet.redBrightness, packet.redContrast, packet.redGamma};
+                    next.green = {packet.greenBrightness, packet.greenContrast, packet.greenGamma};
+                    next.blue = {packet.blueBrightness, packet.blueContrast, packet.blueGamma};
+                    next.digitalVibrance = packet.digitalVibrance;
+                    next.hueDegrees = packet.hueDegrees;
+                    if (count != sizeof(packet) || memcmp(packet.magic, "HDC2", 4) || !packet.revision ||
+                        packet.reserved != 0 || !isValidColorSettings(next)) {
                         fprintf(stderr, "{\"type\":\"failed\",\"reason\":\"invalid_color_control\"}\n"); fflush(stderr); ExitProcess(1);
                     }
                     std::lock_guard<std::mutex> guard(state->mutex);
                     if (packet.revision <= state->revision) continue;
-                    state->revision = packet.revision; state->exposureTenths = packet.exposureTenths; state->brightness = packet.brightness;
+                    state->revision = packet.revision;
+                    state->settings = next;
                 }
             }).detach();
         }
@@ -414,8 +538,14 @@ public:
             convert(frames); encode(frames);
             if (appliedRevision != reportedRevision) {
                 reportedRevision = appliedRevision;
-                fprintf(stderr, "{\"type\":\"color-applied\",\"revision\":%u,\"frame\":%u,\"exposureTenths\":%d,\"brightness\":%d}\n",
-                    appliedRevision, frames, appliedExposure, appliedBrightness); fflush(stderr);
+                fprintf(stderr, "{\"type\":\"color-applied\",\"revision\":%u,\"frame\":%u,\"exposureTenths\":%d,\"allBrightness\":%u,\"allContrast\":%u,\"allGamma\":%u,\"vibrance\":%u,\"hue\":%u}\n",
+                    appliedRevision, frames, static_cast<int>(appliedColor.exposureTenths),
+                    static_cast<unsigned>(appliedColor.all.brightness),
+                    static_cast<unsigned>(appliedColor.all.contrast),
+                    static_cast<unsigned>(appliedColor.all.gamma),
+                    static_cast<unsigned>(appliedColor.digitalVibrance),
+                    static_cast<unsigned>(appliedColor.hueDegrees));
+                fflush(stderr);
             }
             frames++;
             if (!o.synthetic || o.realtime) std::this_thread::sleep_until(start + std::chrono::nanoseconds(static_cast<UINT64>(frames) * 1000000000 / o.fps));

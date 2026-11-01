@@ -28,6 +28,7 @@ import { broadcastVoiceStatus, clearSpaceVoiceForDmCall } from '../utils/voice';
 import { consumeIntentionalCameraOff, markIntentionalCameraOff } from '../utils/voiceActions';
 import { AudioManager } from '../audio/AudioManager';
 import { SpeakingDetector } from '../audio/SpeakingDetector';
+import { getUnderlyingCaptureTrack } from '../utils/streamColorProcessor';
 import {
   CAMERA_OVERDRIVE,
   buildScreenShareOptions,
@@ -1111,6 +1112,16 @@ function useBrowserLiveKit() {
     updateParticipants();
   }, [voiceUserStates, isMuted, isDeafened, spaceMutedUserIds, spaceDeafenedUserIds, permissionMutedUserIds, updateParticipants]);
 
+  const {
+    height: shareHeight,
+    fps: shareFps,
+    mode: shareMode,
+    customBitrateKbps: shareCustomBitrate,
+    shareAudio: shareAudioEnabled,
+    codec: shareCodec,
+    hdrEnabled: shareHdrEnabled,
+  } = screenShareConfig;
+
   useEffect(() => {
     if (!room) return;
     // Superseded by a newer run (config changed again, or the room went away)
@@ -1118,8 +1129,9 @@ function useBrowserLiveKit() {
     let superseded = false;
     const updateActiveTracks = async () => {
       if (superseded) return;
-      if (isScreenSharing && !screenShareConfig.hdrEnabled) {
-        const opts = buildScreenShareOptions(screenShareConfig);
+      const currentShareConfig = useVoiceStore.getState().screenShareConfig;
+      if (isScreenSharing && !currentShareConfig.hdrEnabled) {
+        const opts = buildScreenShareOptions(currentShareConfig);
         // Codec changed mid-stream — the codec is baked into SDP negotiation,
         // so republish the same track under the new options (no re-capture).
         const publishedCodec = getRequestedPublishedScreenShareCodec();
@@ -1130,7 +1142,8 @@ function useBrowserLiveKit() {
 
         const screenPub = room.localParticipant.getTrackPublications().find(p => p.source === Track.Source.ScreenShare);
         if (screenPub?.videoTrack) {
-          const mediaTrack = getMediaStreamTrack(screenPub.videoTrack);
+          const publishedMediaTrack = getMediaStreamTrack(screenPub.videoTrack);
+          const mediaTrack = getUnderlyingCaptureTrack(publishedMediaTrack) ?? publishedMediaTrack;
           if (mediaTrack) {
             if (opts.capture.width > 0 && opts.capture.height > 0) {
               // Standard mode: apply resolution + frameRate together
@@ -1140,9 +1153,10 @@ function useBrowserLiveKit() {
               await mediaTrack.applyConstraints({ frameRate: { ideal: opts.capture.frameRate, min: 15 } });
             }
             mediaTrack.contentHint = opts.contentHint;
+            if (publishedMediaTrack) publishedMediaTrack.contentHint = opts.contentHint;
           }
           // For native mode, recompute overdrive bitrate from actual track dimensions
-          resolveNativeOverdrive(mediaTrack ?? null, screenShareConfig, opts);
+          resolveNativeOverdrive(mediaTrack ?? null, currentShareConfig, opts);
           await applyOverdrive(room, Track.Source.ScreenShare, opts.overdrive);
         }
       }
@@ -1150,7 +1164,7 @@ function useBrowserLiveKit() {
     };
     _activeTrackUpdate = _activeTrackUpdate.then(updateActiveTracks).catch(() => {});
     return () => { superseded = true; };
-  }, [room, screenShareConfig, isScreenSharing, isCameraOn]);
+  }, [room, shareHeight, shareFps, shareMode, shareCustomBitrate, shareAudioEnabled, shareCodec, shareHdrEnabled, isScreenSharing, isCameraOn]);
 
   useEffect(() => {
     return () => {

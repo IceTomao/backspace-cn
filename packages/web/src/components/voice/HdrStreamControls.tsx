@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVoiceStore } from '../../stores/voiceStore';
 import { useNativeHdrStore } from '../../stores/nativeHdrStore';
+import { DEFAULT_STREAM_COLOR } from '../../utils/streamColor';
 import { Toggle } from '../ui/Toggle';
 
 export function HdrStreamControls() {
@@ -10,12 +11,12 @@ export function HdrStreamControls() {
   const live = useVoiceStore(s => s.isScreenSharing);
   const setConfig = useVoiceStore(s => s.setScreenShareConfig);
   const exposureEv = useVoiceStore(s => s.screenShareConfig.hdrExposureEv);
-  const brightness = useVoiceStore(s => s.screenShareConfig.hdrBrightness);
+  const streamColor = useVoiceStore(s => s.screenShareConfig.streamColor);
   const { publisherAvailable: available, labMode, experimental, reason, refresh, colorControl, pendingColor, colorError, setColor } = useNativeHdrStore();
   const [checking, setChecking] = useState(false);
   const id = useId();
-  const color = pendingColor ?? { exposureEv, brightness };
-  const colorDisabled = !colorControl;
+  const color = pendingColor ?? { exposureEv, streamColor: streamColor ?? DEFAULT_STREAM_COLOR };
+  const colorDisabled = live && !colorControl;
   useEffect(() => { void refresh(); }, [refresh]);
   const toggleHdr = async (value: boolean) => {
     if (!value) { setConfig({ hdrEnabled: false }); return; }
@@ -40,21 +41,16 @@ export function HdrStreamControls() {
           <span>{t('streamSettings.hdrExposure')}</span><span>{color.exposureEv > 0 ? '+' : ''}{color.exposureEv.toFixed(1)} EV</span>
         </label>
         <input id={`${id}-exposure`} aria-label={t('streamSettings.hdrExposure')} type="range" min={-3} max={3} step={0.1} value={color.exposureEv}
+          onDoubleClick={() => setColor({ exposureEv: 0, streamColor: color.streamColor })}
           className="w-full accent-[var(--color-accent-primary)]"
-          onChange={event => setColor({ ...color, exposureEv: Number(event.target.value) })} />
-      </div>
-      <div>
-        <label htmlFor={`${id}-brightness`} className="flex justify-between text-xs text-txt-secondary">
-          <span>{t('streamSettings.hdrBrightness')}</span><span>{color.brightness > 0 ? '+' : ''}{color.brightness}</span>
-        </label>
-        <input id={`${id}-brightness`} aria-label={t('streamSettings.hdrBrightness')} type="range" min={-50} max={50} step={1} value={color.brightness}
-          className="w-full accent-[var(--color-accent-primary)]"
-          onChange={event => setColor({ ...color, brightness: Number(event.target.value) })} />
+          onChange={event => setColor({ exposureEv: Number(event.target.value), streamColor: color.streamColor })} />
       </div>
       <p className="text-[10px] text-txt-tertiary">{t('streamSettings.hdrColorHint')}</p>
-      <button type="button" className="text-xs text-accent-primary" onClick={() => setColor({ exposureEv: 0, brightness: 0 })}>{t('streamSettings.hdrReset')}</button>
+      <button type="button" disabled={colorDisabled || color.exposureEv === 0}
+        className="text-xs text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed"
+        onClick={() => setColor({ exposureEv: 0, streamColor: color.streamColor })}>{t('streamSettings.hdrReset')}</button>
       {colorDisabled && <p className="text-[10px] text-accent-amber">{t('streamSettings.hdrColorUnsupported')}</p>}
-      {colorError && <p className="text-xs text-accent-red" role="alert">{t('streamSettings.hdrColorFailed')}</p>}
+      {colorError && <p className="text-xs text-accent-rose" role="alert">{t('streamSettings.hdrColorFailed')}</p>}
     </fieldset>}
     {!live && !available && <button type="button" className="text-xs text-accent-primary mt-1" onClick={() => void refresh()}>{t('stream.hdrRecheck')}</button>}
   </div>;

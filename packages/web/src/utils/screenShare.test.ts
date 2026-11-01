@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioPresets, BackupCodecPolicy, Track } from 'livekit-client';
 import { useVoiceStore } from '../stores/voiceStore';
 import { useUIStore } from '../stores/uiStore';
+import { cloneStreamColor, DEFAULT_STREAM_COLOR } from './streamColor';
 import i18n from '../i18n';
 import {
   buildScreenShareOptions,
@@ -109,6 +110,8 @@ beforeEach(() => {
       shareAudio: true,
       codec: 'vp9',
       hdrEnabled: false,
+      hdrExposureEv: 0,
+      streamColor: cloneStreamColor(DEFAULT_STREAM_COLOR),
     },
   });
 });
@@ -139,18 +142,37 @@ describe('H.265 screen-share capability detection', () => {
 });
 
 describe('screen-share media options', () => {
-  it('migrates, saves and validates HDR picture controls independently of SDR preferences', async () => {
-    localStorage.setItem('backspace-voice-settings', JSON.stringify({ version: 16, state: {
-      screenShareConfig: { hdrEnabled: false, codec: 'h264', hdrExposureEv: '1', hdrBrightness: 51 },
+  it('migrates, saves and validates HDR exposure & streamColor independently of SDR preferences', async () => {
+    localStorage.setItem('backspace-voice-settings', JSON.stringify({ version: 17, state: {
+      screenShareConfig: { hdrEnabled: false, codec: 'h264', hdrExposureEv: '1', hdrBrightness: 25 },
     } }));
     await useVoiceStore.persist.rehydrate();
-    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: 0, hdrBrightness: 0, codec: 'h264' });
-    useVoiceStore.getState().setScreenShareConfig({ hdrExposureEv: -1.5, hdrBrightness: 20 });
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({
+      hdrExposureEv: 0,
+      streamColor: DEFAULT_STREAM_COLOR,
+      codec: 'h264',
+    });
+    expect('hdrBrightness' in useVoiceStore.getState().screenShareConfig).toBe(false);
+
+    const customColor = cloneStreamColor(DEFAULT_STREAM_COLOR);
+    customColor.red = { brightness: 65, contrast: 55, gamma: 1.3 };
+    customColor.digitalVibrance = 75;
+    customColor.hue = 45;
+    useVoiceStore.getState().setScreenShareConfig({ hdrExposureEv: -1.5, streamColor: customColor });
     await useVoiceStore.persist.rehydrate();
-    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: -1.5, hdrBrightness: 20, hdrEnabled: false });
-    for (const invalid of [{ hdrExposureEv: NaN }, { hdrExposureEv: 0.05 }, { hdrBrightness: -51 }, { hdrBrightness: 0.5 }]) {
+    expect(useVoiceStore.getState().screenShareConfig).toMatchObject({
+      hdrExposureEv: -1.5,
+      streamColor: customColor,
+      hdrEnabled: false,
+    });
+    for (const invalid of [
+      { hdrExposureEv: NaN },
+      { hdrExposureEv: 0.05 },
+      { streamColor: { ...customColor, hue: 360 } },
+      { streamColor: { ...customColor, digitalVibrance: -1 } },
+    ]) {
       useVoiceStore.getState().setScreenShareConfig(invalid);
-      expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: -1.5, hdrBrightness: 20 });
+      expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: -1.5, streamColor: customColor });
     }
   });
   it('treats malformed persisted HDR values as disabled', async () => {

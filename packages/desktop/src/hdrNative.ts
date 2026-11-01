@@ -5,11 +5,11 @@ import { createServer, type Server } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { PassThrough } from 'node:stream';
-import { hdrColorPacket, validateHdrColor, type HdrColor } from './hdrColor';
+import { hdrColorCliArgs, hdrColorPacket, validateHdrColor, type HdrColor } from './hdrColor';
 
 export type HdrFailure = 'validation_pending' | 'native_unavailable' | 'system_hdr_off' | 'source_unsupported' | 'native_failed' | 'encoder_unavailable';
 export interface HdrDisplay { id: string; name: string; hdrActive: boolean; width: number; height: number }
-export interface HdrCapabilities { protocol: 1; available: boolean; publisherAvailable?: boolean; colorControl?: 1; experimental?: boolean; reason?: HdrFailure; displays: HdrDisplay[]; labMode?: boolean }
+export interface HdrCapabilities { protocol: 1; available: boolean; publisherAvailable?: boolean; colorControl?: 2; experimental?: boolean; reason?: HdrFailure; displays: HdrDisplay[]; labMode?: boolean }
 export interface HdrVideoConfig { width: number; height: number; fps: number; bitrateKbps: number; shareAudio: boolean; color?: HdrColor }
 export interface HdrCredentials { url: string; token: string; identity: string; hasAudio?: boolean }
 interface NativeDisplay { gdiName: string; name: string; hdrActive: boolean | null; hmonitor: string; width: number; height: number }
@@ -31,7 +31,7 @@ export function hdrGpuArgs(config: HdrVideoConfig, monitor?: string): string[] {
   if (monitor !== undefined && (!/^[1-9][0-9]{0,19}$/.test(monitor) || BigInt(monitor) > 0xffffffffffffffffn)) throw new Error('Invalid HDR monitor');
   return ['--width', String(config.width), '--height', String(config.height), '--fps', String(config.fps),
     '--bitrate-kbps', String(config.bitrateKbps),
-    ...(config.color ? ['--exposure-tenths', String(Math.round(config.color.exposureEv * 10)), '--brightness', String(config.color.brightness)] : []),
+    ...(config.color ? hdrColorCliArgs(config.color) : []),
     ...(monitor === undefined ? ['--synthetic', '--frames', '4'] : ['--monitor', monitor, '--watch-parent'])];
 }
 
@@ -148,7 +148,7 @@ export class HdrNativeRuntime {
       // only after an explicit HDR enable/start request.
       const publisherAvailable = available && (!probeEncoder || await this.canEncode());
       const manifest = JSON.parse(fs.readFileSync(this.file('acceptance.json'), 'utf8'));
-      return { protocol: 1, available, publisherAvailable, colorControl: 1, experimental: manifest.releaseAccepted !== true,
+      return { protocol: 1, available, publisherAvailable, colorControl: 2, experimental: manifest.releaseAccepted !== true,
         ...(!available ? { reason: 'system_hdr_off' as const } : !publisherAvailable ? { reason: 'encoder_unavailable' as const } : {}), displays, labMode: this.allowUnaccepted };
     } catch { return { protocol: 1, available: false, reason: 'native_failed', displays: [] }; }
   }

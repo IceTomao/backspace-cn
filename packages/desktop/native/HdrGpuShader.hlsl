@@ -2,29 +2,44 @@
 // Quantize only after the gamut and transfer transforms. No SDR intermediate.
 cbuffer Parameters : register(b0) {
     uint Width, Height, SourceWidth, SourceHeight;
-    uint FrameIndex, Pattern;
-    float ExposureGain, Brightness;
+    uint FrameIndex, Pattern, HasColorAdjust, Pad0;
+    float ExposureGain, Vibrance, Pad1, Pad2;
+    float4 Contrast;
+    float4 BrightnessOffset;
+    float4 InvGamma;
+    float4 HueRow0;
+    float4 HueRow1;
+    float4 HueRow2;
 };
 Texture2D<float4> Source : register(t0);
 SamplerState LinearClamp : register(s0);
 RWTexture2D<uint> Luma : register(u0);
 RWTexture2D<uint2> Chroma : register(u1);
 
+float3 applyColorChannels(float3 c) {
+    if (HasColorAdjust == 0) return c;
+    float3 curved = pow(saturate((c - 0.5) * Contrast.rgb + 0.5 + BrightnessOffset.rgb), InvGamma.rgb);
+    if (Vibrance != 0.0) {
+        float luma = dot(curved, float3(0.2126, 0.7152, 0.0722));
+        float sat = max(curved.r, max(curved.g, curved.b)) - min(curved.r, min(curved.g, curved.b));
+        float scale = Vibrance < 0.0 ? (1.0 + Vibrance) : (1.0 + Vibrance * (2.0 - sat));
+        curved = saturate(luma + (curved - luma) * scale);
+    }
+    return saturate(float3(
+        dot(HueRow0.rgb, curved),
+        dot(HueRow1.rgb, curved),
+        dot(HueRow2.rgb, curved)));
+}
 float3 pq(float3 scRgb) {
     float3 rgb2020 = float3(
         dot(scRgb, float3(0.627403896, 0.329283038, 0.043313066)),
         dot(scRgb, float3(0.069097289, 0.919540395, 0.011362316)),
         dot(scRgb, float3(0.016391439, 0.088013308, 0.895595253)));
     rgb2020 *= ExposureGain;
-    // Lift/darken shadows and midtones in linear light. Absolute black stays
-    // black; luminance >= 1000 nit is unchanged by the brightness control.
-    // The bounded quadratic gain is monotonic for Brightness in [-.5, .5].
-    float nits = dot(max(rgb2020, 0), float3(0.2627, 0.6780, 0.0593)) * 80.0;
-    float weight = 1.0 - saturate(nits / 1000.0);
-    rgb2020 *= 1.0 + Brightness * weight * weight;
     float3 p = pow(saturate(rgb2020 * (80.0 / 10000.0)), 2610.0 / 16384.0);
-    return pow((3424.0 / 4096.0 + (2413.0 / 128.0) * p) /
+    float3 encoded = pow((3424.0 / 4096.0 + (2413.0 / 128.0) * p) /
         (1.0 + (2392.0 / 128.0) * p), 2523.0 / 32.0);
+    return applyColorChannels(encoded);
 }
 float3 samplePq(uint2 pixel) {
     // Aspect fit in linear light; bars remain absolute black.

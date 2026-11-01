@@ -10,6 +10,7 @@ import {
 } from '../../utils/screenShare';
 import { Toggle } from '../ui/Toggle';
 import { HdrStreamControls } from './HdrStreamControls';
+import { StreamColorControls } from './StreamColorControls';
 import { isElectron } from '../../platform/platform';
 import { RESOLUTION_LABELS } from '@backspace/shared/src/constants';
 import i18n from '../../i18n';
@@ -143,6 +144,7 @@ export function StreamQualityControls() {
   return (
     <div className="flex flex-col gap-3">
       <HdrStreamControls />
+      <StreamColorControls />
       {/* Resolution */}
       <div>
         <div className="text-[11px] text-txt-tertiary font-semibold uppercase tracking-wider mb-1.5">
