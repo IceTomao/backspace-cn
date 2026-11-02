@@ -1,8 +1,10 @@
+import type { Track, TrackProcessor, VideoProcessorOptions } from 'livekit-client';
 import {
   computeStreamColorUniforms,
   type StreamColorSettings,
   type StreamColorUniforms,
 } from './streamColor';
+import { startStreamColorWorker, type StreamColorWorkerHandle } from './streamColorWorker';
 
 interface VideoFrameInitLike {
   timestamp: number;
@@ -77,6 +79,7 @@ void main() {
 `;
 
 const underlyingCaptureTracks = new WeakMap<MediaStreamTrack, MediaStreamTrack>();
+const nonDestructiveDetachHandlers = new WeakMap<MediaStreamTrack, () => void>();
 
 /**
  * Resolve the raw OS/browser capture track behind a color-processed video track.
@@ -87,6 +90,20 @@ const underlyingCaptureTracks = new WeakMap<MediaStreamTrack, MediaStreamTrack>(
 export function getUnderlyingCaptureTrack(track: MediaStreamTrack | null | undefined): MediaStreamTrack | null {
   if (!track) return null;
   return underlyingCaptureTracks.get(track) ?? track;
+}
+
+/**
+ * Tear down any synthetic color-processor wrapper on `stream` *without* stopping
+ * the underlying OS screen-capture track, returning a `MediaStream` backed by
+ * the raw capture video track and original audio tracks.
+ */
+export function detachStreamColorProcessor(stream: MediaStream): MediaStream {
+  const outerVideo = stream.getVideoTracks()[0];
+  if (!outerVideo) return stream;
+  const rawVideo = underlyingCaptureTracks.get(outerVideo);
+  if (!rawVideo || rawVideo === outerVideo) return stream;
+  nonDestructiveDetachHandlers.get(outerVideo)?.();
+  return new MediaStream([rawVideo, ...stream.getAudioTracks()]);
 }
 
 export interface StreamColorSurfaceRenderer {
@@ -246,6 +263,8 @@ export interface StreamColorProcessorSource {
   getColor: () => StreamColorSettings;
   subscribe: (listener: (color: StreamColorSettings) => void) => () => void;
   rendererFactory?: (preferOffscreen?: boolean) => StreamColorSurfaceRenderer | null;
+  /** Disable Dedicated Worker offload (used when custom main-thread `rendererFactory` is injected). */
+  preferWorker?: boolean;
 }
 
 function getInsertableStreamApis(): {
@@ -267,9 +286,9 @@ function getInsertableStreamApis(): {
  * Wrap a captured screen-share `MediaStream` with a real-time GPU color processor.
  *
  * - In Chromium / Electron (`MediaStreamTrackProcessor` + `MediaStreamTrackGenerator`),
- *   default color settings forward the captured `VideoFrame` handle untouched (zero GPU
- *   passes, zero extra allocations), and non-default settings run a single-triangle
- *   WebGL2 shader pass before WebRTC encoding.
+ *   transfers the `VideoFrame` streams to a Dedicated Worker (`OffscreenCanvas` WebGL2)
+ *   so frame processing never touches the UI main thread; falls back cleanly to an
+ *   in-process `TransformStream` when Worker stream transfer is unavailable.
  * - In non-Chromium browsers without `MediaStreamTrackGenerator`, falls back to an
  *   off-DOM WebGL2 `<canvas>.captureStream()` pipeline when WebGL2 is available, or
  *   returns `rawStream` unchanged if WebGL2 is unavailable (e.g., unit test `jsdom`).
@@ -289,6 +308,61 @@ export function attachStreamColorProcessor(
   }
 
   return attachCanvasFallbackProcessor(rawStream, rawVideoTrack, source, rendererFactory);
+}
+
+/**
+ * LiveKit `TrackProcessor` adapter for on-demand stream color grading.
+ *
+ * Attached via `localVideoTrack.setProcessor(processor, true)` ONLY when color
+ * settings are non-default, and removed via `localVideoTrack.stopProcessor()`
+ * when settings return to default — preserving 100% native zero-copy capture →
+ * hardware encode when unadjusted.
+ */
+export function createScreenShareColorTrackProcessor(
+  source: StreamColorProcessorSource,
+): TrackProcessor<Track.Kind.Video, VideoProcessorOptions> {
+  let activeProcessedTrack: MediaStreamTrack | undefined;
+
+  const teardownCurrent = () => {
+    const current = activeProcessedTrack;
+    activeProcessedTrack = undefined;
+    if (!current) return;
+    const detach = nonDestructiveDetachHandlers.get(current);
+    if (detach) {
+      detach();
+    } else {
+      try {
+        current.stop();
+      } catch {
+        // Ignore stop errors
+      }
+    }
+  };
+
+  const setupForTrack = async (rawTrack: MediaStreamTrack): Promise<void> => {
+    teardownCurrent();
+    const wrapped = attachStreamColorProcessor(new MediaStream([rawTrack]), source);
+    const outTrack = wrapped.getVideoTracks()[0];
+    activeProcessedTrack = outTrack && outTrack !== rawTrack ? outTrack : undefined;
+  };
+
+  const processor: TrackProcessor<Track.Kind.Video, VideoProcessorOptions> = {
+    name: 'backspace-stream-color',
+    get processedTrack(): MediaStreamTrack | undefined {
+      return activeProcessedTrack;
+    },
+    async init(opts: VideoProcessorOptions): Promise<void> {
+      await setupForTrack(opts.track);
+    },
+    async restart(opts: VideoProcessorOptions): Promise<void> {
+      await setupForTrack(opts.track);
+    },
+    async destroy(): Promise<void> {
+      teardownCurrent();
+    },
+  };
+
+  return processor;
 }
 
 function attachInsertableStreamProcessor(
@@ -314,10 +388,18 @@ function attachInsertableStreamProcessor(
   let uniforms = computeStreamColorUniforms(source.getColor());
   let renderer: StreamColorSurfaceRenderer | null = null;
   let rendererUnavailable = false;
+  let workerHandle: StreamColorWorkerHandle | null = null;
   let cleanedUp = false;
+
+  // Offload to Dedicated Worker when no custom main-thread rendererFactory was injected
+  const canUseWorker = source.preferWorker !== false && source.rendererFactory === undefined;
+  if (canUseWorker && !processor.readable.locked && !generator.writable.locked) {
+    workerHandle = startStreamColorWorker(processor.readable, generator.writable, uniforms);
+  }
 
   const unsubscribe = source.subscribe((nextColor) => {
     uniforms = computeStreamColorUniforms(nextColor);
+    workerHandle?.updateUniforms(uniforms);
   });
 
   const abortController = new AbortController();
@@ -329,6 +411,8 @@ function attachInsertableStreamProcessor(
     unsubscribe();
     rawVideoTrack.removeEventListener?.('ended', onRawEnded);
     abortController.abort();
+    workerHandle?.dispose();
+    workerHandle = null;
     renderer?.dispose();
     renderer = null;
     if (stopRaw) {
@@ -359,61 +443,66 @@ function attachInsertableStreamProcessor(
   generator.stop = () => {
     cleanup(true);
   };
+  nonDestructiveDetachHandlers.set(generator, () => {
+    cleanup(false);
+  });
 
   if (rawVideoTrack.contentHint) {
     generator.contentHint = rawVideoTrack.contentHint;
   }
   underlyingCaptureTracks.set(generator, rawVideoTrack);
 
-  const transform = new TransformStream<VideoFrameLike, VideoFrameLike>({
-    transform(frame, controller) {
-      if (cleanedUp) {
-        frame.close();
-        return;
-      }
-      if (uniforms.isDefault || rendererUnavailable) {
-        controller.enqueue(frame);
-        return;
-      }
-      if (!renderer) {
-        renderer = rendererFactory(true);
+  if (!workerHandle) {
+    const transform = new TransformStream<VideoFrameLike, VideoFrameLike>({
+      transform(frame, controller) {
+        if (cleanedUp) {
+          frame.close();
+          return;
+        }
+        if (uniforms.isDefault || rendererUnavailable) {
+          controller.enqueue(frame);
+          return;
+        }
         if (!renderer) {
-          rendererUnavailable = true;
-          controller.enqueue(frame);
-          return;
+          renderer = rendererFactory(true);
+          if (!renderer) {
+            rendererUnavailable = true;
+            controller.enqueue(frame);
+            return;
+          }
         }
-      }
 
-      const width = frame.displayWidth || frame.codedWidth;
-      const height = frame.displayHeight || frame.codedHeight;
-      try {
-        const rendered = renderer.render(frame as unknown as TexImageSource, width, height, uniforms);
-        if (!rendered) {
+        const width = frame.displayWidth || frame.codedWidth;
+        const height = frame.displayHeight || frame.codedHeight;
+        try {
+          const rendered = renderer.render(frame as unknown as TexImageSource, width, height, uniforms);
+          if (!rendered) {
+            controller.enqueue(frame);
+            return;
+          }
+          const outFrame = new apis.VideoFrameCtor(renderer.surface, {
+            timestamp: frame.timestamp,
+            ...(frame.duration != null ? { duration: frame.duration } : {}),
+          });
+          frame.close();
+          controller.enqueue(outFrame);
+        } catch {
           controller.enqueue(frame);
-          return;
         }
-        const outFrame = new apis.VideoFrameCtor(renderer.surface, {
-          timestamp: frame.timestamp,
-          ...(frame.duration != null ? { duration: frame.duration } : {}),
-        });
-        frame.close();
-        controller.enqueue(outFrame);
-      } catch {
-        controller.enqueue(frame);
-      }
-    },
-    flush() {
-      renderer?.dispose();
-      renderer = null;
-    },
-  });
-
-  void processor.readable
-    .pipeThrough(transform)
-    .pipeTo(generator.writable, { signal: abortController.signal })
-    .catch(() => {
-      // Expected on abort when stopping capture
+      },
+      flush() {
+        renderer?.dispose();
+        renderer = null;
+      },
     });
+
+    void processor.readable
+      .pipeThrough(transform)
+      .pipeTo(generator.writable, { signal: abortController.signal })
+      .catch(() => {
+        // Expected on abort when stopping capture
+      });
+  }
 
   const audioTracks = rawStream.getAudioTracks();
   return new MediaStream([generator, ...audioTracks]);
@@ -516,6 +605,9 @@ function attachCanvasFallbackProcessor(
   processedTrack.stop = () => {
     cleanup(true);
   };
+  nonDestructiveDetachHandlers.set(processedTrack, () => {
+    cleanup(false);
+  });
   if (rawVideoTrack.contentHint) {
     processedTrack.contentHint = rawVideoTrack.contentHint;
   }

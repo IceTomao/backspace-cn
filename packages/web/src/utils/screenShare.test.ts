@@ -3,6 +3,7 @@ import { AudioPresets, BackupCodecPolicy, Track } from 'livekit-client';
 import { useVoiceStore } from '../stores/voiceStore';
 import { useUIStore } from '../stores/uiStore';
 import { cloneStreamColor, DEFAULT_STREAM_COLOR } from './streamColor';
+import { resetCodecCapabilityCacheForTests } from './codecCapabilities';
 import i18n from '../i18n';
 import {
   buildScreenShareOptions,
@@ -43,12 +44,12 @@ function makeTrack(kind: FakeTrack['kind']): FakeTrack {
   return { kind, readyState: 'live', contentHint: '', stop: vi.fn() };
 }
 
-function makeVideoTrack(id = 'screen-video') {
+function makeVideoTrack(id = 'screen-video', width = 2560, height = 1440) {
   return {
     ...makeTrack('video'),
     id,
     applyConstraints: vi.fn().mockResolvedValue(undefined),
-    getSettings: vi.fn(() => ({ width: 2560, height: 1440 })),
+    getSettings: vi.fn(() => ({ width, height })),
   };
 }
 
@@ -94,6 +95,7 @@ function attachPublishedSender(
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  resetCodecCapabilityCacheForTests();
   vi.stubGlobal('RTCRtpSender', {
     getCapabilities: vi.fn(() => ({ codecs: [{ mimeType: 'video/H265' }] })),
   });
@@ -109,6 +111,7 @@ beforeEach(() => {
       customBitrateKbps: 18_000,
       shareAudio: true,
       codec: 'vp9',
+      degradationPreference: 'maintain-resolution',
       hdrEnabled: false,
       hdrExposureEv: 0,
       streamColor: cloneStreamColor(DEFAULT_STREAM_COLOR),
@@ -117,6 +120,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetCodecCapabilityCacheForTests();
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -151,6 +155,7 @@ describe('screen-share media options', () => {
       hdrExposureEv: 0,
       streamColor: DEFAULT_STREAM_COLOR,
       codec: 'h264',
+      degradationPreference: 'maintain-resolution',
     });
     expect('hdrBrightness' in useVoiceStore.getState().screenShareConfig).toBe(false);
 
@@ -175,11 +180,13 @@ describe('screen-share media options', () => {
       expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: -1.5, streamColor: customColor });
     }
   });
+
   it('treats malformed persisted HDR values as disabled', async () => {
     localStorage.setItem('backspace-voice-settings', JSON.stringify({ version: 16, state: { screenShareConfig: { hdrEnabled: 'true' } } }));
     await useVoiceStore.persist.rehydrate();
     expect(useVoiceStore.getState().screenShareConfig.hdrEnabled).toBe(false);
   });
+
   it('defaults/migrates old HDR settings off and retains the SDR codec preference', async () => {
     expect(useVoiceStore.getInitialState().screenShareConfig.hdrEnabled).toBe(false);
     localStorage.setItem('backspace-voice-settings', JSON.stringify({ version: 15, state: { screenShareConfig: { codec: 'h264' } } }));
@@ -212,7 +219,8 @@ describe('screen-share media options', () => {
     expect(audio.stop).toHaveBeenCalled();
     expect(useVoiceStore.getState().isScreenSharing).toBe(false);
   });
-  it('restores and publishes H.265 with a VP8 backup, then keeps the choice after stop', async () => {
+
+  it('restores and publishes H.265 with a REGRESSION VP8 backup, activates SDP bitrate floor, and keeps choice after stop', async () => {
     localStorage.setItem('backspace-voice-settings', JSON.stringify({
       version: 15,
       state: { screenShareConfig: { ...useVoiceStore.getState().screenShareConfig, codec: 'h265' } },
@@ -225,7 +233,8 @@ describe('screen-share media options', () => {
     attachPublishedSender(room, video, [
       ['codec-h265', { id: 'codec-h265', type: 'codec', mimeType: 'video/H265' }],
       ['outbound-h265', {
-        id: 'outbound-h265', type: 'outbound-rtp', kind: 'video', codecId: 'codec-h265', bytesSent: 100,
+        id: 'outbound-h265', type: 'outbound-rtp', kind: 'video', codecId: 'codec-h265',
+        bytesSent: 100, encoderImplementation: 'ExternalEncoder',
       }],
       ['outbound-vp8', {
         id: 'outbound-vp8', type: 'outbound-rtp', kind: 'video', mimeType: 'video/VP8', bytesSent: 500,
@@ -241,6 +250,7 @@ describe('screen-share media options', () => {
         videoCodec: 'h265',
         videoEncoding: opts.publish.videoEncoding,
         screenShareEncoding: opts.publish.videoEncoding,
+        degradationPreference: 'maintain-resolution',
         simulcast: false,
         backupCodec: {
           codec: 'vp8',
@@ -249,13 +259,17 @@ describe('screen-share media options', () => {
             maxFramerate: 30,
           },
         },
-        backupCodecPolicy: BackupCodecPolicy.SIMULCAST,
+        backupCodecPolicy: BackupCodecPolicy.REGRESSION,
       }),
     );
     expect(getRequestedPublishedScreenShareCodec()).toBe('h265');
     expect(getPublishedScreenShareCodec()).toBe('h265');
-    expect(sdp.activate).not.toHaveBeenCalled();
-    expect(sdp.deactivate).not.toHaveBeenCalled();
+    expect(sdp.activate).toHaveBeenCalledWith({
+      codec: 'h265',
+      targetBitrateBps: opts.publish.videoEncoding.maxBitrate,
+      trackId: video.id,
+    });
+    expect(sdp.deactivate).toHaveBeenCalledOnce();
 
     await stopScreenShare(room);
     expect(getRequestedPublishedScreenShareCodec()).toBeNull();
@@ -265,7 +279,7 @@ describe('screen-share media options', () => {
     expect(persisted.state.screenShareConfig.codec).toBe('h265');
   });
 
-  it('falls back before publishing an unsupported saved H.265 choice and warns only once', async () => {
+  it('falls back to auto before publishing an unsupported saved H.265 choice and warns only once', async () => {
     vi.stubGlobal('RTCRtpSender', undefined);
     useVoiceStore.getState().setScreenShareConfig({ codec: 'h265' });
     await useVoiceStore.persist.rehydrate();
@@ -277,14 +291,13 @@ describe('screen-share media options', () => {
       expect.anything(),
       expect.objectContaining({ videoCodec: 'vp9' }),
     );
-    expect(ensureSupportedScreenShareCodec().codec).toBe('vp9');
-    expect(ensureSupportedScreenShareCodec().codec).toBe('vp9');
+    expect(ensureSupportedScreenShareCodec().codec).toBe('auto');
+    expect(ensureSupportedScreenShareCodec().codec).toBe('auto');
     expect(addToast).toHaveBeenCalledTimes(1);
     expect(addToast).toHaveBeenCalledWith(i18n.t('voice:streamSettings.h265Fallback'), 'warning', 8000);
     expect(getRequestedPublishedScreenShareCodec()).toBe('vp9');
     const persisted = JSON.parse(localStorage.getItem('backspace-voice-settings') ?? '{}');
-    expect(persisted.state.screenShareConfig.codec).toBe('vp9');
-    expect(sdp.activate).not.toHaveBeenCalled();
+    expect(persisted.state.screenShareConfig.codec).toBe('auto');
   });
 
   it('records a sending VP8 backup separately from the requested H.265 codec', async () => {
@@ -296,7 +309,8 @@ describe('screen-share media options', () => {
         id: 'outbound-h265', type: 'outbound-rtp', kind: 'video', mimeType: 'video/H265', bytesSent: 0,
       }],
       ['outbound-vp8', {
-        id: 'outbound-vp8', type: 'outbound-rtp', kind: 'video', mimeType: 'video/VP8', bytesSent: 100,
+        id: 'outbound-vp8', type: 'outbound-rtp', kind: 'video', mimeType: 'video/VP8',
+        bytesSent: 100, encoderImplementation: 'ExternalEncoder',
       }],
     ]);
 
@@ -351,16 +365,18 @@ describe('screen-share media options', () => {
     expect(audio.stop).not.toHaveBeenCalled();
     expect(getRequestedPublishedScreenShareCodec()).toBe(codec);
     expect(useVoiceStore.getState().isScreenSharing).toBe(true);
-    expect(sdp.activate).toHaveBeenCalledTimes(codec === 'h264' ? 2 : 0);
+    expect(sdp.activate).toHaveBeenCalledTimes(3);
+    expect(sdp.deactivate).toHaveBeenCalledTimes(3);
   });
 
-  it('publishes VP9 directly without enabling the H.264 SDP hook', async () => {
+  it('publishes VP9 with SDP bitrate floor scoped to the screen-share track', async () => {
     const room = fakeRoom();
     const video = makeVideoTrack();
     attachPublishedSender(room, video, [
       ['codec-vp9', { id: 'codec-vp9', type: 'codec', mimeType: 'video/VP9' }],
       ['outbound-vp9', {
-        id: 'outbound-vp9', type: 'outbound-rtp', kind: 'video', codecId: 'codec-vp9', bytesSent: 100,
+        id: 'outbound-vp9', type: 'outbound-rtp', kind: 'video', codecId: 'codec-vp9',
+        bytesSent: 100, encoderImplementation: 'ExternalEncoder',
       }],
     ]);
 
@@ -372,11 +388,15 @@ describe('screen-share media options', () => {
       expect.objectContaining({ source: Track.Source.ScreenShare, videoCodec: 'vp9' }),
     );
     expect(getPublishedScreenShareCodec()).toBe('vp9');
-    expect(sdp.activate).not.toHaveBeenCalled();
-    expect(sdp.deactivate).not.toHaveBeenCalled();
+    expect(sdp.activate).toHaveBeenCalledWith({
+      codec: 'vp9',
+      targetBitrateBps: 18_000_000,
+      trackId: video.id,
+    });
+    expect(sdp.deactivate).toHaveBeenCalledOnce();
   });
 
-  it('uses the persisted codec on the first publication and keeps it after stop', async () => {
+  it('uses the persisted H.264 codec without instantiating a backup encoder and keeps it after stop', async () => {
     const room = fakeRoom();
     const video = makeVideoTrack();
     attachPublishedSender(room, video, [
@@ -390,10 +410,9 @@ describe('screen-share media options', () => {
 
     await publishScreenShare(room, makeStream(video));
     await vi.advanceTimersByTimeAsync(0);
-    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ videoCodec: 'h264' }),
-    );
+    const publishArgs = room.localParticipant.publishTrack.mock.calls[0]![1];
+    expect(publishArgs.videoCodec).toBe('h264');
+    expect(publishArgs.backupCodec).toBeUndefined();
     expect(getPublishedScreenShareCodec()).toBe('h264');
     expect(sdp.activate).toHaveBeenCalledOnce();
     expect(sdp.deactivate).toHaveBeenCalledOnce();
@@ -405,8 +424,13 @@ describe('screen-share media options', () => {
     expect(persisted.state.screenShareConfig.codec).toBe('h264');
   });
 
-  it('requests unprocessed stereo capture and publishes stereo music audio', async () => {
-    const video = makeTrack('video');
+  it('passes raw zero-copy stream through stageScreenCapture when color is default, requests stereo audio, and toggles Electron power blocker', async () => {
+    const setStreamingPowerMode = vi.fn();
+    vi.stubGlobal('window', {
+      ...globalThis.window,
+      backspace: { setStreamingPowerMode },
+    });
+    const video = makeVideoTrack('raw-os-track');
     const audio = makeTrack('audio');
     const stream = makeStream(video, audio);
     const getDisplayMedia = vi.fn().mockResolvedValue(stream);
@@ -415,8 +439,15 @@ describe('screen-share media options', () => {
       value: { getDisplayMedia },
     });
 
-    await stageScreenCapture();
+    const staged = await stageScreenCapture();
+    // Default streamColor must preserve the raw zero-copy OS stream without synthetic wrapping
+    expect(staged).toBe(stream);
     expect(getDisplayMedia).toHaveBeenCalledWith(expect.objectContaining({
+      video: {
+        width: { ideal: 2560, max: 2560 },
+        height: { ideal: 1440, max: 1440 },
+        frameRate: { ideal: 60, max: 60 },
+      },
       audio: expect.objectContaining({
         channelCount: 2,
         echoCancellation: false,
@@ -427,7 +458,8 @@ describe('screen-share media options', () => {
     }));
 
     const room = fakeRoom();
-    await publishScreenShare(room, stream);
+    await publishScreenShare(room, staged);
+    expect(setStreamingPowerMode).toHaveBeenCalledWith(true);
     expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(
       audio,
       expect.objectContaining({
@@ -438,22 +470,61 @@ describe('screen-share media options', () => {
         forceStereo: true,
       }),
     );
+
+    await stopScreenShare(room);
+    expect(setStreamingPowerMode).toHaveBeenLastCalledWith(false);
   });
 
-  it('keeps the measured Gaming/Text adaptation and dynacast-managed VP8 backup without the ignored minBitrate member', () => {
+  it('computes proportional Native bitrate BEFORE publishTrack so 1080p60 native does not negotiate 4K 20Mbps', async () => {
+    useVoiceStore.getState().setScreenShareConfig({
+      height: 'native',
+      fps: 60,
+      mode: 'gaming',
+      customBitrateKbps: null,
+      codec: 'vp9',
+    });
+    const video = makeVideoTrack('native-1080p', 1920, 1080);
+    const room = fakeRoom();
+
+    await publishScreenShare(room, makeStream(video));
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(
+      video,
+      expect.objectContaining({
+        videoEncoding: { maxBitrate: 8_000_000, maxFramerate: 60 },
+        screenShareEncoding: { maxBitrate: 8_000_000, maxFramerate: 60 },
+      }),
+    );
+    expect(sdp.activate).toHaveBeenCalledWith({
+      codec: 'vp9',
+      targetBitrateBps: 8_000_000,
+      trackId: 'native-1080p',
+    });
+  });
+
+  it('keeps Gaming/Text content hints, maintain-resolution default, H.264 1.15x gaming boost, and REGRESSION backup', () => {
     const base = useVoiceStore.getState().screenShareConfig;
     const gaming = buildScreenShareOptions({ ...base, mode: 'gaming' });
     const text = buildScreenShareOptions({ ...base, mode: 'text' });
+    const h264AutoGaming = buildScreenShareOptions({
+      ...base,
+      height: 1080,
+      fps: 60,
+      mode: 'gaming',
+      codec: 'h264',
+      customBitrateKbps: null,
+    });
 
     expect(gaming.contentHint).toBe('motion');
-    expect(gaming.overdrive.degradationPreference).toBe('balanced');
+    expect(gaming.overdrive.degradationPreference).toBe('maintain-resolution');
     expect(text.contentHint).toBe('detail');
     expect(text.overdrive.degradationPreference).toBe('maintain-resolution');
-    expect(gaming.publish.backupCodecPolicy).toBe(BackupCodecPolicy.SIMULCAST);
+    expect(gaming.publish.backupCodecPolicy).toBe(BackupCodecPolicy.REGRESSION);
+    expect(h264AutoGaming.publish.backupCodec).toBeUndefined();
+    expect(h264AutoGaming.publish.videoEncoding.maxBitrate).toBe(9_200_000);
     expect(gaming.overdrive).not.toHaveProperty('minBitrate');
   });
 
-  it('retries until the screen-share sender is ready and reasserts the ceiling at five seconds', async () => {
+  it('retries until the screen-share sender is ready and reasserts the ceiling at five seconds without min:15 constraint', async () => {
     const video = makeVideoTrack();
     const publicationTrack = { mediaStreamTrack: video };
     const publication = { source: Track.Source.ScreenShare, track: publicationTrack };
@@ -477,9 +548,14 @@ describe('screen-share media options', () => {
     await vi.advanceTimersByTimeAsync(250);
     expect(sender.setParameters).toHaveBeenCalledOnce();
     expect(video.applyConstraints).toHaveBeenCalledOnce();
+    expect(video.applyConstraints).toHaveBeenCalledWith({
+      width: { ideal: 2560, max: 2560 },
+      height: { ideal: 1440, max: 1440 },
+      frameRate: { ideal: 60, max: 60 },
+    });
     expect(sender.setParameters).toHaveBeenLastCalledWith(expect.objectContaining({
       encodings: [expect.objectContaining({ maxBitrate: 18_000_000, maxFramerate: 60 })],
-      degradationPreference: 'balanced',
+      degradationPreference: 'maintain-resolution',
     }));
 
     await vi.advanceTimersByTimeAsync(4750);
@@ -547,20 +623,15 @@ describe('screen-share media options', () => {
     expect(getPublishedScreenShareCodec()).toBe('vp9');
   });
 
-  it('warns with localized copy when H264 falls back to OpenH264 software encoding', async () => {
+  it('warns with localized copy when H264 falls back to OpenH264 or VP9 falls back to libvpx software encoding', async () => {
     useVoiceStore.getState().setScreenShareConfig({ codec: 'h264' });
     const video = makeVideoTrack();
     const room = fakeRoom();
     attachPublishedSender(room, video, [
       ['codec-h264', { id: 'codec-h264', type: 'codec', mimeType: 'video/H264' }],
-      ['codec-vp8', { id: 'codec-vp8', type: 'codec', mimeType: 'video/VP8' }],
       ['outbound-h264', {
         id: 'outbound-h264', type: 'outbound-rtp', kind: 'video', codecId: 'codec-h264',
         bytesSent: 100, encoderImplementation: 'OpenH264',
-      }],
-      ['outbound-vp8', {
-        id: 'outbound-vp8', type: 'outbound-rtp', kind: 'video', codecId: 'codec-vp8',
-        bytesSent: 0, encoderImplementation: 'libvpx',
       }],
     ]);
     const addToast = vi.spyOn(useUIStore.getState(), 'addToast');
@@ -574,9 +645,29 @@ describe('screen-share media options', () => {
       'warning',
       8000,
     );
+
+    await stopScreenShare(room);
+    addToast.mockClear();
+
+    useVoiceStore.getState().setScreenShareConfig({ codec: 'vp9' });
+    const vp9Video = makeVideoTrack('vp9-soft');
+    attachPublishedSender(room, vp9Video, [
+      ['codec-vp9', { id: 'codec-vp9', type: 'codec', mimeType: 'video/VP9' }],
+      ['outbound-vp9', {
+        id: 'outbound-vp9', type: 'outbound-rtp', kind: 'video', codecId: 'codec-vp9',
+        bytesSent: 200, encoderImplementation: 'libvpx',
+      }],
+    ]);
+    await publishScreenShare(room, makeStream(vp9Video));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(addToast).toHaveBeenCalledWith(
+      i18n.t('voice:streamSettings.softwareEncoderFallback', { codec: 'VP9', encoder: 'libvpx' }),
+      'warning',
+      8000,
+    );
   });
 
-  it('migrates older saved settings to VP9 once and persists subsequent choices', async () => {
+  it('migrates older saved settings to auto hardware-preferred codec once and persists subsequent choices', async () => {
     localStorage.setItem('backspace-voice-settings', JSON.stringify({
       version: 13,
       state: {
@@ -591,10 +682,12 @@ describe('screen-share media options', () => {
     }));
 
     await useVoiceStore.persist.rehydrate();
-    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('vp9');
+    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('auto');
+    expect(useVoiceStore.getState().screenShareConfig.degradationPreference).toBe('maintain-resolution');
 
-    useVoiceStore.getState().setScreenShareConfig({ codec: 'h264' });
+    useVoiceStore.getState().setScreenShareConfig({ codec: 'h264', degradationPreference: 'maintain-framerate' });
     await useVoiceStore.persist.rehydrate();
     expect(useVoiceStore.getState().screenShareConfig.codec).toBe('h264');
+    expect(useVoiceStore.getState().screenShareConfig.degradationPreference).toBe('maintain-framerate');
   });
 });

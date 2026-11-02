@@ -389,6 +389,9 @@ contextBridge.exposeInMainWorld('backspace', {
   setScreenShareAudioPreference: (shareAudio: boolean) => {
     ipcRenderer.send('screen-share-audio-preference', shareAudio);
   },
+  setStreamingPowerMode: (active: boolean) => {
+    ipcRenderer.send('set-streaming-power-mode', active === true);
+  },
 
   // Instance URL management
   getInstanceUrl: () => ipcRenderer.invoke('get-instance-url'),

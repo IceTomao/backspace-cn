@@ -785,6 +785,13 @@ No sources (0 results) typically means Screen Recording permission not granted o
 
 For full screen share configuration (resolution, bitrate, codec), see `voice.md`.
 
+### Anti-Throttling & Streaming Power Blocker
+
+When the user plays a fullscreen game while streaming from the desktop app, Windows 11 EcoQoS / macOS App Nap and Chromium's occluded-renderer throttling would normally deprioritize the hidden Backspace window and starve 60 fps capture/encoding timers:
+
+- `mainWindow` is created with `webPreferences.backgroundThrottling: false`, alongside Chromium switches `disable-renderer-backgrounding` and `disable-backgrounding-occluded-windows`.
+- While a local screen share is active, the renderer sends `set-streaming-power-mode` (`true` on publish, `false` on stop / unpublish / disconnect), which acquires `powerSaveBlocker.start('prevent-app-suspension')` in the main process (`applyStreamingPowerMode`). The blocker is also automatically released on `closed`, `render-process-gone`, top-level `did-navigate`, and `before-quit` so a renderer crash or reload can never leak an OS power assertion.
+
 ---
 
 ## Cache Clearing
@@ -833,6 +840,7 @@ All handlers registered in `main.ts:registerIpcHandlers()`.
 | `set-connected-origins` | R->M | `string[]` | Update `knownInstanceOrigins` set (used by in-instance `/join/` interception) |
 | `renderer-ready` | R->M | — | Boot-completion ping; disarms boot timer |
 | `recovery-action` | R->M | `RecoveryAction` enum | Recovery page button dispatcher (allowlist-validated) |
+| `set-streaming-power-mode` | R->M | `boolean` | Acquire/release `powerSaveBlocker('prevent-app-suspension')` while streaming |
 
 ### Request/Response (`ipcMain.handle`)
 

@@ -86,12 +86,21 @@ configs:
         # Single UDP mux port for a small self-hosted deployment.
         udp_port: 7882
         use_external_ip: true
+        packet_buffer_size_video: 1500
+        packet_buffer_size_audio: 200
+        pli_throttle:
+          low_quality: 500ms
+          mid_quality: 1s
+          high_quality: 1500ms
+        congestion_control:
+          enabled: true
+          allow_pause: false
       turn:
         enabled: true
         domain: ${LIVEKIT_TURN_DOMAIN}
         udp_port: 3478
         relay_range_start: 30000
-        relay_range_end: 30010
+        relay_range_end: 30100
       keys:
         ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
       room:

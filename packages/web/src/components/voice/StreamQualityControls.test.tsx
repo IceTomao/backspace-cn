@@ -7,6 +7,7 @@ import { useUIStore } from '../../stores/uiStore';
 import i18n from '../../i18n';
 import { useNativeHdrStore } from '../../stores/nativeHdrStore';
 import { DEFAULT_STREAM_COLOR } from '../../utils/streamColor';
+import { resetCodecCapabilityCacheForTests } from '../../utils/codecCapabilities';
 
 vi.mock('../../audio/AudioManager', () => ({
   AudioManager: { getInstance: () => ({}) },
@@ -23,6 +24,7 @@ vi.mock('../../stores/settingsStore', () => ({
 }));
 
 beforeEach(() => {
+  resetCodecCapabilityCacheForTests();
   vi.stubGlobal('RTCRtpSender', {
     getCapabilities: () => ({ codecs: [{ mimeType: 'video/H265' }] }),
   });
@@ -32,6 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetCodecCapabilityCacheForTests();
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -149,24 +152,33 @@ describe('screen-share codec & color controls', () => {
     expect(option).toBeDisabled();
     expect(option).toHaveAccessibleDescription(i18n.t('voice:streamSettings.h265Unsupported'));
     fireEvent.click(option);
-    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('vp9');
+    expect(useVoiceStore.getState().screenShareConfig.codec).toBe('auto');
+    expect(screen.getByRole('button', { name: i18n.t('voice:streamSettings.codecOption.auto') })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'VP9' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'H264' })).toBeEnabled();
   });
 
-  it('resets a restored unsupported choice once, including StrictMode effect replay', async () => {
+  it('resets a restored unsupported choice once to Auto (HW), including StrictMode effect replay, and persists congestion strategy', async () => {
     useVoiceStore.getState().setScreenShareConfig({ codec: 'h265' });
     await useVoiceStore.persist.rehydrate();
     vi.stubGlobal('RTCRtpSender', undefined);
     const addToast = vi.spyOn(useUIStore.getState(), 'addToast');
     const { rerender } = render(<StrictMode><StreamQualityControls /></StrictMode>);
 
-    expect(screen.getByRole('button', { name: 'VP9' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: i18n.t('voice:streamSettings.codecOption.auto') })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'H.265/HEVC' })).toBeDisabled();
     expect(addToast).toHaveBeenCalledWith(i18n.t('voice:streamSettings.h265Fallback'), 'warning', 8000);
     rerender(<StrictMode><StreamQualityControls /></StrictMode>);
     expect(addToast).toHaveBeenCalledTimes(1);
     const persisted = JSON.parse(localStorage.getItem('backspace-voice-settings') ?? '{}');
-    expect(persisted.state.screenShareConfig.codec).toBe('vp9');
+    expect(persisted.state.screenShareConfig.codec).toBe('auto');
+
+    // Verify 3-way Congestion Strategy selector defaults to Maintain Resolution and updates cleanly
+    const maintainResBtn = screen.getByRole('button', { name: i18n.t('voice:streamSettings.degradation.maintainResolution') });
+    const maintainFpsBtn = screen.getByRole('button', { name: i18n.t('voice:streamSettings.degradation.maintainFramerate') });
+    expect(maintainResBtn).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(maintainFpsBtn);
+    expect(maintainFpsBtn).toHaveAttribute('aria-pressed', 'true');
+    expect(useVoiceStore.getState().screenShareConfig.degradationPreference).toBe('maintain-framerate');
   });
 });

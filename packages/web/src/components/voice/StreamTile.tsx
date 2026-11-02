@@ -6,6 +6,7 @@ import { useVoiceStore } from '../../stores/voiceStore';
 import { useContextMenuStore, type ContextMenuItem } from '../../stores/contextMenuStore';
 import { getActiveRoom, setStreamSubscription } from '../../hooks/useLiveKit';
 import { stopScreenShare, changeScreenShare } from '../../utils/screenShare';
+import { applyStreamReceiverJitterBuffer } from '../../utils/receiverJitterBuffer';
 import { encodeStreamWatch } from '../../utils/streamWatchProtocol';
 import { canViewStream } from '../../utils/hdrStream';
 import { useNativeHdrStore } from '../../stores/nativeHdrStore';
@@ -249,18 +250,27 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
   });
   const healthWarning = useStreamHealthWarning(healthCandidate, stats);
 
-  // --- VIDEO --- use LiveKit's track.attach() to register the element
-  // with the adaptive stream observer (enables SFU layer switching by viewport size)
+  // --- VIDEO --- bind MediaStream directly instead of liveLkScreenTrack.attach(videoEl)
+  // so Room({ adaptiveStream: true }) ResizeObserver / IntersectionObserver never downscales
+  // or pauses an explicitly watched screen share in grid or backgrounded views.
   useEffect(() => {
     const videoEl = videoRef.current;
     if (!videoEl) return;
-    if (liveLkScreenTrack) {
-      liveLkScreenTrack.attach(videoEl);
-      return () => { liveLkScreenTrack.detach(videoEl); };
+    if (liveScreenTrack) {
+      try {
+        videoEl.srcObject = new MediaStream([liveScreenTrack]);
+        videoEl.play().catch(() => {});
+        return () => { videoEl.srcObject = null; };
+      } catch {
+        if (liveLkScreenTrack) {
+          liveLkScreenTrack.attach(videoEl);
+          return () => { liveLkScreenTrack.detach(videoEl); };
+        }
+      }
     } else {
       videoEl.srcObject = null;
     }
-  }, [liveLkScreenTrack]);
+  }, [liveScreenTrack, liveLkScreenTrack]);
 
   // Quality badge (poll every 3s)
   useEffect(() => {
@@ -394,6 +404,19 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
           subscribe: useVoiceStore.subscribe,
           getChecked: () => useVoiceStore.getState().streamMutes.get(userId) ?? false,
           onChange: (checked) => useVoiceStore.getState().setStreamMute(userId, checked),
+        });
+
+        // Ultra-Low Latency checkbox (bypasses the 120ms anti-jitter playout buffer)
+        items.push({
+          key: 'low-latency-stream',
+          type: 'checkbox',
+          label: t('voice:stream.lowLatency'),
+          subscribe: useVoiceStore.subscribe,
+          getChecked: () => useVoiceStore.getState().lowLatencyStreamViewing,
+          onChange: (checked) => {
+            useVoiceStore.getState().setLowLatencyStreamViewing(checked);
+            applyStreamReceiverJitterBuffer(getActiveRoom(), checked);
+          },
         });
 
         items.push({ key: 'vol-sep', type: 'separator' });

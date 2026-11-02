@@ -16,7 +16,9 @@ import {
   buildScreenShareOptions,
   isScreenCaptureSupported,
   isCaptureCancellation,
+  syncStagedStreamColorProcessor,
 } from '../../utils/screenShare';
+import { probeHardwareScreenShareCodecs } from '../../utils/codecCapabilities';
 import { StreamQualityControls, StreamSummary } from './StreamQualityControls';
 import { pickAutoStageSource, type ScreenSourceTab } from '../../utils/screenShareSources';
 
@@ -299,6 +301,7 @@ export function ScreenShareSetup() {
   // Reset per open
   useEffect(() => {
     if (!isOpen) return;
+    void probeHardwareScreenShareCodecs();
     setActiveTab('screens');
     setSearch('');
     setSelectedId(null);
@@ -354,6 +357,17 @@ export function ScreenShareSetup() {
     if (!staged) return;
     void applyStagedCaptureConfig(staged);
   }, [staged, config.height, config.fps, config.mode]);
+
+  // Attach or detach the preview color Worker on demand without stopping the underlying OS capture
+  useEffect(() => {
+    const current = stagedRef.current;
+    if (!current) return;
+    const next = syncStagedStreamColorProcessor(current);
+    if (next !== current) {
+      stagedRef.current = next;
+      setStaged(next);
+    }
+  }, [staged, config.streamColor]);
 
   // The closed drawer is off-canvas but still in the DOM, so its buttons,
   // sliders and toggle would stay in the tab order: tabbing through the setup

@@ -12,6 +12,7 @@ import {
   desktopCapturer,
   dialog,
   nativeTheme,
+  powerSaveBlocker,
   systemPreferences,
 } from 'electron';
 import path from 'path';
@@ -103,6 +104,36 @@ app.setName('Backspace');
 }
 
 let mainWindow: BrowserWindow | null = null;
+let streamingPowerBlockerId: number | null = null;
+
+function releaseStreamingPowerBlocker(): void {
+  if (streamingPowerBlockerId === null) return;
+  try {
+    if (powerSaveBlocker.isStarted(streamingPowerBlockerId)) {
+      powerSaveBlocker.stop(streamingPowerBlockerId);
+    }
+  } catch {
+    // Ignore teardown errors during shutdown
+  }
+  streamingPowerBlockerId = null;
+}
+
+function applyStreamingPowerMode(active: boolean): void {
+  if (active) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.setBackgroundThrottling(false);
+    }
+    if (streamingPowerBlockerId === null || !powerSaveBlocker.isStarted(streamingPowerBlockerId)) {
+      try {
+        streamingPowerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+      } catch {
+        streamingPowerBlockerId = null;
+      }
+    }
+  } else {
+    releaseStreamingPowerBlocker();
+  }
+}
 let detectedActivities: DesktopActivity[] = [];
 let activityPreferences: ActivityPreferences = { showGames: true, showMusic: true, showActivityImages: true };
 let activityAssetPublisher: ActivityAssetPublisher | null = null;
@@ -442,6 +473,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
       additionalArguments: [`--backspace-default-language=${getDesktopLanguage()}`],
     },
   });
@@ -511,6 +543,7 @@ function createWindow(): void {
   });
 
   mainWindow.on('closed', () => {
+    releaseStreamingPowerBlocker();
     setMainWindow(null);
     mainWindow = null;
     // Clear recovery state so macOS dock-activate (which calls createWindow again)
@@ -564,6 +597,12 @@ function createWindow(): void {
       console.warn(`[main] Blocked will-navigate to disallowed target: ${url}`);
       event.preventDefault();
     }
+  });
+  mainWindow.webContents.on('render-process-gone', () => {
+    releaseStreamingPowerBlocker();
+  });
+  mainWindow.webContents.on('did-navigate', () => {
+    releaseStreamingPowerBlocker();
   });
 }
 
@@ -934,6 +973,10 @@ function registerIpcHandlers(): void {
   ipcMain.on('screen-share-audio-preference', (event, shareAudio?: boolean) => {
     if (event.sender !== mainWindow?.webContents) return;
     lastSystemPickerShareAudio = shareAudio === true;
+  });
+  ipcMain.on('set-streaming-power-mode', (event, active?: unknown) => {
+    if (event.sender !== mainWindow?.webContents) return;
+    applyStreamingPowerMode(active === true);
   });
 
   // Auto-launch settings
@@ -1360,6 +1403,11 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'PulseaudioLoopbackForScreenShare');
 }
 
+// Prevent Chromium from throttling media capture, WebRTC timers, or GPU frame
+// scheduling when Backspace is occluded by a fullscreen game or hidden to tray.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
 // Windows: AppUserModelId so toast notifications attribute correctly to Backspace
 // (without this, recovery / update notifications appear under "electron.exe").
 if (process.platform === 'win32') {
@@ -1709,6 +1757,7 @@ if (!gotTheLock) {
 
   app.on('before-quit', () => {
     isQuitting = true;
+    releaseStreamingPowerBlocker();
     themeManager?.dispose();
     disposeThemeStyles?.();
     disposeThemeControls?.();

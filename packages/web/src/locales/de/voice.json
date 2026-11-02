@@ -121,10 +121,12 @@
     },
     "codec": "Codec",
     "codecOption": {
+      "auto": "Auto (Hardware)",
       "vp9": "VP9",
       "h264": "H264",
       "h265": "H.265/HEVC"
     },
+    "autoResolvedHint": "Automatisch gewählter Codec: {{codec}}",
     "h265Unsupported": "Dieses Gerät unterstützt keine H.265-Kodierung für Livestreams.",
     "hdrUnavailable": "Dieses Gerät oder dieser Server kann kein natives HDR senden. Prüfe HDR oder deaktiviere es vor dem Stream.",
     "hdrEnabled": "HDR-Stream aktivieren",
@@ -167,7 +169,7 @@
       "server_unsupported": "Aktualisiere den Server für HDR-Streams.",
       "encoder_unavailable": "NVENC kann auf diesem Gerät kein HEVC Main10 kodieren. Grafikkarte und Treiber prüfen."
     },
-    "h265Fallback": "Dieses Gerät unterstützt keine H.265-Kodierung für Livestreams. VP9 wurde ausgewählt.",
+    "h265Fallback": "Dieses Gerät unterstützt keine H.265-Kodierung für Livestreams. Auf Auto gewechselt.",
     "bitrate": "Bitrate",
     "custom": "Manuell",
     "auto": "Auto",
@@ -179,6 +181,8 @@
     "electronLinuxAudioNote": "Linux benötigt PulseAudio-Kompatibilität; Backspace-Audio kann ebenfalls aufgenommen werden",
     "systemAudioStartFailed": "Der Stream konnte nicht mit Systemaudio gestartet werden. Deaktiviere Systemaudio, wenn die Plattform es nicht unterstützt.",
     "softwareH264Fallback": "Hardware-H264-Kodierung ist nicht verfügbar. OpenH264 wird als Software-Encoder verwendet; VP9 kann schneller sein.",
+    "softwareEncoderFallback": "Hardware-{{codec}}-Kodierung ist nicht verfügbar (Software-Encoder {{encoder}} aktiv). Wechsle auf Auto oder H264, um Ruckler zu vermeiden.",
+    "degradationLabel": "Stabilitätspriorität",
     "degradation": {
       "maintainResolution": "Auflösung halten",
       "maintainFramerate": "Framerate halten",
@@ -200,6 +204,7 @@
     "hdrUnsupported": "Dies ist ein HDR-Stream. Dieses Gerät kann ihn derzeit nicht wiedergeben.",
     "hdrRecheck": "Erneut prüfen",
     "mute": "Stream stummschalten",
+    "lowLatency": "Extrem niedrige Latenz",
     "isStreaming": "{{name}} streamt",
     "hdrPlaying": "Wiedergabe im nativen HDR-Fenster",
     "hdrOpenNative": "Im HDR-Fenster ansehen"

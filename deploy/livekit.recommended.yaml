@@ -1,0 +1,54 @@
+# Recommended LiveKit Server Configuration for High-FPS Screen Sharing (1080p60 / 2K60)
+#
+# Host Linux UDP socket buffer tuning (run once on the host for bursty keyframes):
+#   sudo sysctl -w net.core.rmem_max=8388608
+#   sudo sysctl -w net.core.wmem_max=8388608
+#   sudo sysctl -w net.core.rmem_default=2097152
+#   sudo sysctl -w net.core.wmem_default=2097152
+# Persist across reboots in /etc/sysctl.d/99-livekit-udp.conf.
+
+port: 7880
+
+rtc:
+  tcp_port: 7881
+  use_external_ip: true
+
+  # Choose ONE of the two UDP listener modes below (mutually exclusive in LiveKit):
+  # 1. Cloud VPS / dedicated host (matches install.sh):
+  port_range_start: 50000
+  port_range_end: 60000
+  # 2. Home broadband / router NAT port-forwarding or single-port firewall (matches portainer-compose.yml):
+  # udp_port: 7882
+
+  # Deepen SFU NACK retransmission ring buffers so 12-20 Mbps 60fps bursts survive 40-100ms cross-ISP RTT
+  packet_buffer_size_video: 1500
+  packet_buffer_size_audio: 200
+
+  # Throttle PLI keyframe requests to prevent keyframe storms during transient jitter
+  pli_throttle:
+    low_quality: 500ms
+    mid_quality: 1s
+    high_quality: 1500ms
+
+  # Enable SFU congestion control while forbidding SFU-initiated track pauses on screen shares
+  congestion_control:
+    enabled: true
+    allow_pause: false
+
+turn:
+  enabled: true
+  domain: your.domain.example
+  udp_port: 3478
+  relay_range_start: 30000
+  relay_range_end: 30100
+
+keys:
+  replace_with_livekit_api_key: replace_with_livekit_api_secret
+
+room:
+  auto_create: true
+  empty_timeout: 300
+  departure_timeout: 20
+
+logging:
+  level: info

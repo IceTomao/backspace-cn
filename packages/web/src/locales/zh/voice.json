@@ -121,10 +121,12 @@
     },
     "codec": "编解码器",
     "codecOption": {
+      "auto": "自动（硬编优先）",
       "vp9": "VP9",
       "h264": "H.264/MPEG-4 AVC",
       "h265": "H.265/HEVC"
     },
+    "autoResolvedHint": "当前自动匹配编码：{{codec}}",
     "h265Unsupported": "当前设备不支持 H.265 直播编码。",
     "hdrUnavailable": "当前设备或服务器不支持原生 HDR 发布。请检查 HDR 状态，或关闭 HDR 模式后开播。",
     "hdrEnabled": "开启 HDR 直播间",
@@ -167,7 +169,7 @@
       "server_unsupported": "当前服务器不支持 HDR 直播，请先更新服务器。",
       "encoder_unavailable": "本机 NVENC 无法完成 HEVC Main10 编码，请检查显卡和驱动"
     },
-    "h265Fallback": "当前设备不支持 H.265 直播编码，已切换为 VP9。",
+    "h265Fallback": "当前设备不支持 H.265 直播编码，已切换为自动硬编。",
     "bitrate": "比特率",
     "custom": "自定义",
     "auto": "推荐",
@@ -179,6 +181,8 @@
     "electronLinuxAudioNote": "Linux需要PulseAudio兼容性；也可以捕获Backspace音频",
     "systemAudioStartFailed": "无法使用系统音频启动流。如果此平台不支持，请禁用共享系统音频。",
     "softwareH264Fallback": "硬件H264编码不可用。软件OpenH264正在使用中； VP9可能性能更好。",
+    "softwareEncoderFallback": "当前 {{codec}} 硬件编码不可用（正在使用 {{encoder}} 软件编码），建议切换为“自动”或 H.264 以避免游戏掉帧。",
+    "degradationLabel": "降级策略",
     "degradation": {
       "maintainResolution": "保留分辨率",
       "maintainFramerate": "保持帧速率",
@@ -200,6 +204,7 @@
     "hdrUnsupported": "该直播间为 HDR 直播间，本机设备暂不支持查看",
     "hdrRecheck": "重新检测",
     "mute": "静音流",
+    "lowLatency": "超低延迟模式",
     "isStreaming": "{{name}}正在流式传输",
     "hdrPlaying": "正在原生 HDR 窗口中观看",
     "hdrOpenNative": "在 HDR 窗口中观看"

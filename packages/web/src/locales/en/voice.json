@@ -121,10 +121,12 @@
     },
     "codec": "Codec",
     "codecOption": {
+      "auto": "Auto (HW)",
       "vp9": "VP9",
       "h264": "H264",
       "h265": "H.265/HEVC"
     },
+    "autoResolvedHint": "Auto-selected codec: {{codec}}",
     "h265Unsupported": "H.265 live encoding is not supported on this device.",
     "hdrUnavailable": "This device or server cannot publish native HDR. Check HDR support or turn HDR off before streaming.",
     "hdrEnabled": "Enable HDR stream",
@@ -167,7 +169,7 @@
       "server_unsupported": "Update the server to enable HDR streaming.",
       "encoder_unavailable": "NVENC cannot encode HEVC Main10 on this device. Check the GPU and driver."
     },
-    "h265Fallback": "H.265 live encoding is not supported on this device. Switched to VP9.",
+    "h265Fallback": "H.265 live encoding is not supported on this device. Switched to Auto hardware codec.",
     "bitrate": "Bitrate",
     "custom": "Custom",
     "auto": "Auto",
@@ -179,6 +181,8 @@
     "electronLinuxAudioNote": "Linux requires PulseAudio compatibility; Backspace audio may also be captured",
     "systemAudioStartFailed": "Could not start the stream with system audio. Disable Share system audio if this platform does not support it.",
     "softwareH264Fallback": "Hardware H264 encoding is unavailable. Software OpenH264 is in use; VP9 may perform better.",
+    "softwareEncoderFallback": "Hardware {{codec}} encoding is unavailable ({{encoder}} software encoder in use). Switch to Auto or H264 to prevent frame drops.",
+    "degradationLabel": "Stability Priority",
     "degradation": {
       "maintainResolution": "hold resolution",
       "maintainFramerate": "hold framerate",
@@ -200,6 +204,7 @@
     "hdrUnsupported": "This is an HDR stream. This device cannot currently play it.",
     "hdrRecheck": "Check again",
     "mute": "Mute Stream",
+    "lowLatency": "Ultra-Low Latency",
     "isStreaming": "{{name}} is streaming",
     "hdrPlaying": "Playing in the native HDR window",
     "hdrOpenNative": "Watch in an HDR window"

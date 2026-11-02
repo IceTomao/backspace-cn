@@ -52,6 +52,23 @@ export function getPublisherPC(room: Room): RTCPeerConnection | null {
 }
 
 /**
+ * Get the subscriber RTCPeerConnection from a LiveKit Room.
+ * Used to configure anti-jitter playout buffering on remote screen-share receivers.
+ */
+export function getSubscriberPC(room: Room): RTCPeerConnection | null {
+  const engine = (room as any)?.engine;
+  if (!engine) return null;
+
+  return (
+    engine.pcManager?.subscriber?.pc ??
+    engine.pcManager?.subscriber?._pc ??
+    engine.subscriber?.pc ??
+    engine.pc ??
+    null
+  );
+}
+
+/**
  * Safely extract the underlying MediaStreamTrack from a LiveKit track object.
  * Handles both public `.mediaStreamTrack` and private `._mediaStreamTrack`.
  */

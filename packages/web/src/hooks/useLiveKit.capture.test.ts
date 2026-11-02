@@ -76,7 +76,7 @@ describe('live screen-share codec updates', () => {
       const codec = useVoiceStore.getState().screenShareConfig.codec;
       requests.push(codec);
       if (requests.length === 1) await firstPublish;
-      publishedCodec = codec;
+      if (codec !== 'auto') publishedCodec = codec;
     });
     const { result } = renderHook(() => useLiveKit());
     await act(async () => { await result.current.connect('channel'); });

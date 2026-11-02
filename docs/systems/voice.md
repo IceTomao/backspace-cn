@@ -268,58 +268,51 @@ Width map: 540→960, 720→1280, 1080→1920, 1440→2560, 2160→3840
 ScreenShareConfig {
   height: number | 'native',       // Resolution or capture at display res
   fps: number,                     // 30-120
-  mode: 'gaming' | 'text',         // Content hint and degradation priority
+  mode: 'gaming' | 'text',         // Content hint ('motion' vs 'detail')
   customBitrateKbps: number | null, // Admin override (if allowed)
   shareAudio: boolean,              // System audio loopback (see Platform Support below)
-  codec: 'vp9' | 'h264' | 'h265',  // Persisted SDR codec preference
+  codec: 'auto' | 'vp9' | 'h264' | 'h265', // Persisted SDR codec preference ('auto' probes HW encoders)
+  degradationPreference: 'maintain-resolution' | 'maintain-framerate' | 'balanced', // Congestion strategy
   hdrEnabled: boolean,              // Windows native HDR Main10 mode
   hdrExposureEv: number,            // HDR linear exposure adjustment (-3.0 to +3.0 EV)
   streamColor: StreamColorSettings  // Outgoing GPU color channels (all/red/green/blue curves + vibrance + hue)
 }
 ```
+Additionally, `voiceStore` persists `lowLatencyStreamViewing: boolean` (default `false`; v19 migration) for viewers who opt out of the 120 ms remote stream anti-jitter playout buffer.
 
-### Stream Color Channels (`StreamColorControls`, `streamColorProcessor`, `HdrGpu`)
-- **UI & state (`StreamColorControls.tsx`, `utils/streamColor.ts`, `voiceStore` persist v18):** Collapsible **Color Channels** section inside `StreamQualityControls`, modeled after NVIDIA Desktop Color Settings:
+### Stream Color Channels (`StreamColorControls`, `streamColorProcessor`, `streamColorWorker`, `HdrGpu`)
+- **UI & state (`StreamColorControls.tsx`, `utils/streamColor.ts`, `voiceStore` persist v18+):** Collapsible **Color Channels** section inside `StreamQualityControls`, modeled after NVIDIA Desktop Color Settings:
   - Channel tabs: `all` (master curve) plus independent per-channel curves `red`, `green`, `blue`. Each channel stores `brightness` (`0–100%`, default `50%`), `contrast` (`0–100%`, default `50%`), and `gamma` (`0.30–2.80`, default `1.00`); per-channel adjustments compose on top of `all` without overwriting each other when switching tabs.
   - Global controls below the divider: `digitalVibrance` (`0–100%`, default `50%`; `0%` grayscale, `100%` adaptive vibrance boost) and `hue` (`0–359°`, default `0°`, luminance- and neutral-grey-preserving rotation).
-- **SDR pipeline (`utils/streamColorProcessor.ts`):** `stageScreenCapture()` wraps the captured `MediaStream` via `attachStreamColorProcessor()`, using `MediaStreamTrackProcessor` + `TransformStream` + `MediaStreamTrackGenerator` + `OffscreenCanvas` WebGL2 fragment shader (with `<canvas>.captureStream()` and raw-stream fallbacks). When `streamColor` is at default values, `TransformStream` forwards the original `VideoFrame` reference with zero WebGL passes. `getUnderlyingCaptureTrack()` maps synthetic generator tracks back to the real OS capture track so `applyConstraints`, `contentHint`, native resolution inspection, and `stop()`/`ended` lifecycle events always operate on the underlying capture source. Both pre-stream preview (`ScreenShareSetup`) and published WebRTC tracks reflect slider updates in real time without SDP renegotiation.
+- **Zero-copy passthrough & Dedicated Worker (`utils/streamColorProcessor.ts`, `utils/streamColorWorker.ts`):**
+  - When `isDefaultStreamColor(streamColor)` is true, `stageScreenCapture()` and `publishScreenShare()` bypass `MediaStreamTrackProcessor` and `TransformStream` completely, preserving Chromium's zero-copy OS capture → hardware encoder DMA/D3D11 texture path.
+  - When `streamColor` becomes non-default, staged previews wrap via `syncStagedStreamColorProcessor()` and live publications hot-swap via `LocalVideoTrack.setProcessor(createScreenShareColorTrackProcessor(...))` (`RTCRtpSender.replaceTrack`, zero SDP renegotiation). Resetting color back to default calls `stopProcessor()` and restores zero-copy passthrough.
+  - Frame processing transfers `MediaStreamTrackProcessor.readable` and `MediaStreamTrackGenerator.writable` into a self-contained Blob Web Worker (`streamColorWorker.ts`) backed by `OffscreenCanvas` + WebGL2 so React re-renders and main-thread GC pauses never jitter 60 fps frame pacing (falling back to main-thread `TransformStream` / `<canvas>.captureStream()` where worker stream transfer is unavailable).
 - **Windows native HDR pipeline (`nativeHdrStore.ts`, `packages/desktop/src/hdrColor.ts`, `HdrGpu.cpp`, `HdrGpuShader.hlsl`):** Coalesces live `{ exposureEv, streamColor }` updates every 100 ms (`colorControl === 2`) into a fixed 40-byte little-endian `HDC2` binary stdin packet. `HdrGpuShader.hlsl` applies `ExposureGain` in linear BT.2020 light and, when `streamColor` is non-default, evaluates the composed channel curves, Digital Vibrance, and Hue matrix in perceptual SMPTE ST 2084 PQ space before P010 quantization and NVENC Main10 encoding.
 
 ### Build Pipeline (`buildScreenShareOptions()`)
-1. Resolve bitrate from matrix (custom > override > default > native estimate)
-2. Clamp to instance limits (minBitrateKbps, maxBitrateKbps)
-3. Select the persisted codec: VP9 (default) or H.264
-4. Configure a VP8 simulcast backup at reduced framerate/bitrate; room dynacast pauses it when no subscriber needs it
-5. Content hint: `'detail'` (text) or `'motion'` (gaming)
-6. Degradation preference: preserve resolution for text, balanced for gaming
+1. Resolve concrete codec via `resolveEffectiveScreenShareCodec()` (`utils/codecCapabilities.ts`): `'auto'` probes `navigator.mediaCapabilities.encodingInfo()` for `powerEfficient` hardware encoders in order `H.265` → `H.264` → `VP9`, falling back to supported `H.264` → `VP9`.
+2. Resolve bitrate from matrix (custom > override > default > native estimate); in auto-bitrate `gaming` mode when the resolved codec is `h264`, apply a `1.15x` bitrate multiplier to match HEVC/VP9 perceptual quality before clamping to `[minBitrateKbps, maxBitrateKbps]`.
+3. Configure backup codec: omitted for `h264` (universally supported); `BackupCodecPolicy.REGRESSION` (VP8 capped at 30 fps) for `h265` and `vp9` so Chromium never runs a simultaneous software VP8 encoder alongside the primary stream.
+4. Content hint: `'detail'` (text) or `'motion'` (gaming), re-asserted after `publishTrack` so `livekit-client` cannot overwrite VP9 text-mode hints.
+5. Degradation preference: explicit `config.degradationPreference` (default `'maintain-resolution'`, preventing 1080p↔720p↔540p resolution pumping and keyframe hitches; user-selectable between `maintain-resolution`, `maintain-framerate`, and `balanced` in `StreamQualityControls`).
+6. Capture constraints include `{ ideal, max }` bounds and omit `min: 15` on `frameRate` so Windows WGC/DXGI never duplicates frames out of cadence alongside VRR/borderless games.
 
 ### Native Mode
 - Captures at display's full resolution
-- Snaps to nearest known tier for bitrate lookup
+- `resolveNativeOverdrive()` runs **before** `publishTrack()` (as well as on bounded sender retries) so 1080p/1440p native captures negotiate their true proportional bitrate ceiling upfront instead of starting at a 4K 20 Mbps estimate
 - Scales proportionally: `baseKbps * (capturedPixels / knownPixels) * (fps / knownFps)`
 
-### Codec and sender parameters
-- H.264 uses an SDP profile override only during its publish negotiation; the
-  hook is removed in `finally` so later camera or microphone negotiations are
-  unaffected.
-- Selecting H.264 does not guarantee hardware encoding. The negotiated codec
-  and `encoderImplementation` reported by WebRTC stats are shown in the
-  connection inspector. If Chromium reports the OpenH264 software fallback,
-  the publisher also receives a localized warning. Requested publication state
-  is tracked separately from the codec confirmed by outbound stats, so codec
-  changes can be serialized without presenting the requested value as a
-  negotiated result. Stats inspection retries briefly while the sender or
-  encoder implementation is still unavailable.
-- Sender parameters set the chosen bitrate ceiling and framerate with high
-  priority. Application starts immediately, retries at bounded intervals until
-  a real `RTCRtpSender` encoding is available, and always re-asserts the values
-  at 5 seconds after Chromium's bandwidth estimate converges. The same bounded
-  scheduler runs after LiveKit reconnects and screen-track restarts, where the
-  sender may again be temporarily absent or expose a placeholder encoding.
-  Capture constraints are applied once per scheduler run rather than on every
-  sender retry. The non-standard
-  `minBitrate` member was removed because Chromium discarded it during WebIDL
-  dictionary conversion; it never enforced a bitrate floor.
+### Codec, SDP Bitrate Floor, and Sender Parameters
+- `hwOverdrive.ts` (`activate({ codec, targetBitrateBps, trackId })`) runs around screen-share `publishTrack()` negotiation (scoped to the screen-share `m=video` section via `a=msid` track ID so camera negotiations are untouched, and torn down in `finally`):
+  - Upgrades H.264 baseline/constrained profile-level-ids (`42e01f` / `42c01f`) to High Profile Level 5.0 (`4d0032`).
+  - Appends `x-google-start-bitrate` (75% of target) and `x-google-min-bitrate` (`clamp(35% of target, 1200, 4500)` kbps, bounded `<= start`) on the negotiated video `a=fmtp` lines so Chromium's GCC congestion controller ramps immediately and never collapses to a 300 kbps mosaic floor during brief cross-ISP packet loss.
+- Outbound WebRTC stats (`inspectPublishedEncoder`) detect software encoder fallbacks across all codecs (`OpenH264`, `libvpx`, `libaom`, `FFmpeg`) and surface a localized warning toast while displaying `AUTO (H265)` / `encoderImplementation` in `ConnectionInfoPopover`.
+- Sender parameters set the chosen bitrate ceiling, framerate, `degradationPreference`, and high network/DSCP priority, retrying at bounded intervals (`0, 250, 750, 2000, 5000 ms`) and re-asserting after reconnects or track restarts.
+
+### Viewer Playout & Adaptive-Stream Isolation (`StreamTile`, `receiverJitterBuffer.ts`)
+- `StreamTile` binds watched screen-share tracks directly via `videoEl.srcObject = new MediaStream([liveScreenTrack])` rather than `liveLkScreenTrack.attach(videoEl)`, decoupling screen shares from `Room({ adaptiveStream: true })`'s `ResizeObserver` / `IntersectionObserver` so grid tiles and occluded windows never trigger SFU layer drops or pauses. `setStreamSubscription` explicitly requests `VideoQuality.HIGH` and `setEnabled(true)`.
+- `applyStreamReceiverJitterBuffer()` sets a `120 ms` playout buffer (`jitterBufferTarget = 120`, `playoutDelayHint = 0.12`) strictly on remote `ScreenShare` and `ScreenShareAudio` `RTCRtpReceiver`s — **never** touching `Microphone` or `Camera` receivers — so voice chat stays ultra-low latency while screen-share video/audio absorbs cross-ISP micro-bursts smoothly. Viewers can opt into 0 ms buffering via the "Ultra-Low Latency" context-menu toggle on remote stream tiles.
 
 ### Instance-Level Limits (admin-configured)
 - `allowedResolutions`, `allowedFramerates` (CSV in instance_settings)

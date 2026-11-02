@@ -596,6 +596,15 @@ rtc:
   port_range_start: 50000
   port_range_end: 60000
   use_external_ip: true
+  packet_buffer_size_video: 1500
+  packet_buffer_size_audio: 200
+  pli_throttle:
+    low_quality: 500ms
+    mid_quality: 1s
+    high_quality: 1500ms
+  congestion_control:
+    enabled: true
+    allow_pause: false
 
 turn:
   enabled: true
@@ -614,6 +623,12 @@ logging:
   level: info
 EOF
   success "livekit.yaml"
+  if [[ "$OS" == "linux" && -r /proc/sys/net/core/rmem_max ]]; then
+    cur_rmem=$(cat /proc/sys/net/core/rmem_max 2>/dev/null || echo 0)
+    if [[ "$cur_rmem" =~ ^[0-9]+$ ]] && (( cur_rmem < 8388608 )); then
+      info "Tip: raise Linux UDP buffers (net.core.rmem_max=8388608, net.core.wmem_max=8388608) for smoother 60fps screen shares."
+    fi
+  fi
 else
   cat > livekit.yaml << EOF
 # LiveKit is disabled. Run install.sh and enable voice to configure.

@@ -141,6 +141,8 @@ interface BackspaceElectronAPI {
   getScreenSharePickerMode?: () => Promise<'app' | 'system'>;
   /** System-picker captures carry no preselection; this tells main whether to add loopback audio. */
   setScreenShareAudioPreference?: (shareAudio: boolean) => void;
+  /** Prevents OS app-suspension and background throttling while actively streaming. */
+  setStreamingPowerMode?: (active: boolean) => void;
 
   // Instance URL management
   getInstanceUrl: () => Promise<string | null>;

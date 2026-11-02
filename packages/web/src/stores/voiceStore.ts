@@ -16,13 +16,31 @@ import {
   type StreamColorSettings,
 } from '../utils/streamColor';
 
+export type ScreenShareDegradationPreference =
+  | 'maintain-resolution'
+  | 'maintain-framerate'
+  | 'balanced';
+
+function isDegradationPreference(value: unknown): value is ScreenShareDegradationPreference {
+  return (
+    value === 'maintain-resolution' ||
+    value === 'maintain-framerate' ||
+    value === 'balanced'
+  );
+}
+
+function isScreenShareCodecPreference(value: unknown): value is ScreenShareConfig['codec'] {
+  return value === 'auto' || value === 'vp9' || value === 'h264' || value === 'h265';
+}
+
 export interface ScreenShareConfig {
   height: number | 'native';
   fps: number;
   mode: 'gaming' | 'text';
+  degradationPreference: ScreenShareDegradationPreference;
   customBitrateKbps: number | null;
   shareAudio: boolean;
-  codec: 'vp9' | 'h264' | 'h265';
+  codec: 'auto' | 'vp9' | 'h264' | 'h265';
   /** Independent of codec, which always retains the user's SDR preference. */
   hdrEnabled: boolean;
   hdrExposureEv: number;
@@ -94,6 +112,8 @@ interface VoiceState {
   setMessageSoundAllChannels: (allChannels: boolean) => void;
   pipEnabled: boolean;
   setPipEnabled: (enabled: boolean) => void;
+  lowLatencyStreamViewing: boolean;
+  setLowLatencyStreamViewing: (enabled: boolean) => void;
   streamAttenuationEnabled: boolean;        // global toggle, default true
   streamAttenuationStrength: number;        // 0-100, default 50
   setStreamVolume: (userId: string, volume: number) => void;
@@ -223,9 +243,10 @@ export const useVoiceStore = create<VoiceState>()(
         height: 720,
         fps: 60,
         mode: 'gaming',
+        degradationPreference: 'maintain-resolution',
         customBitrateKbps: null,
         shareAudio: !isElectron(),
-        codec: 'vp9',
+        codec: 'auto',
         hdrEnabled: false,
         hdrExposureEv: 0,
         streamColor: cloneStreamColor(DEFAULT_STREAM_COLOR),
@@ -256,6 +277,8 @@ export const useVoiceStore = create<VoiceState>()(
       setMessageSoundAllChannels: (allChannels) => set({ messageSoundAllChannels: allChannels }),
       pipEnabled: true,
       setPipEnabled: (enabled) => set({ pipEnabled: enabled }),
+      lowLatencyStreamViewing: false,
+      setLowLatencyStreamViewing: (enabled) => set({ lowLatencyStreamViewing: enabled }),
 
       // Stream widget state
       streamVolumes: new Map(),
@@ -524,6 +547,12 @@ export const useVoiceStore = create<VoiceState>()(
       setScreenShareConfig: (config) => set((state) => ({
         screenShareConfig: {
           ...state.screenShareConfig, ...config,
+          codec: config.codec !== undefined
+            ? (isScreenShareCodecPreference(config.codec) ? config.codec : state.screenShareConfig.codec)
+            : state.screenShareConfig.codec,
+          degradationPreference: config.degradationPreference !== undefined
+            ? (isDegradationPreference(config.degradationPreference) ? config.degradationPreference : state.screenShareConfig.degradationPreference)
+            : state.screenShareConfig.degradationPreference,
           hdrEnabled: state.isScreenSharing ? state.screenShareConfig.hdrEnabled
             : config.hdrEnabled ?? state.screenShareConfig.hdrEnabled,
           hdrExposureEv: config.hdrExposureEv !== undefined
@@ -809,7 +838,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: 'backspace-voice-settings',
-      version: 18,
+      version: 19,
       migrate: (persistedState: any, version: number) => {
         if (version === 0) {
           persistedState.streamAttenuationEnabled = false;
@@ -884,6 +913,19 @@ export const useVoiceStore = create<VoiceState>()(
         if (version < 18 && persistedState.screenShareConfig) {
           delete persistedState.screenShareConfig.hdrBrightness;
         }
+        if (version < 19) {
+          if (persistedState.screenShareConfig) {
+            if (persistedState.screenShareConfig.codec === 'vp9' || !persistedState.screenShareConfig.codec) {
+              persistedState.screenShareConfig.codec = 'auto';
+            }
+            if (!isDegradationPreference(persistedState.screenShareConfig.degradationPreference)) {
+              persistedState.screenShareConfig.degradationPreference = 'maintain-resolution';
+            }
+          }
+          if (typeof persistedState.lowLatencyStreamViewing !== 'boolean') {
+            persistedState.lowLatencyStreamViewing = false;
+          }
+        }
         return persistedState;
       },
       storage: createJSONStorage(() => appStorage),
@@ -906,6 +948,7 @@ export const useVoiceStore = create<VoiceState>()(
         soundEffectVolume: state.soundEffectVolume,
         messageSoundAllChannels: state.messageSoundAllChannels,
         pipEnabled: state.pipEnabled,
+        lowLatencyStreamViewing: state.lowLatencyStreamViewing,
         streamAttenuationEnabled: state.streamAttenuationEnabled,
         streamAttenuationStrength: state.streamAttenuationStrength,
         // Per-user preferences (Map → plain object for JSON)
@@ -919,10 +962,19 @@ export const useVoiceStore = create<VoiceState>()(
         merged.screenShareConfig = {
           ...currentState.screenShareConfig,
           ...restPersistedCfg,
+          codec: isScreenShareCodecPreference(persistedCfg?.codec)
+            ? persistedCfg.codec
+            : currentState.screenShareConfig.codec,
+          degradationPreference: isDegradationPreference(persistedCfg?.degradationPreference)
+            ? persistedCfg.degradationPreference
+            : currentState.screenShareConfig.degradationPreference,
           hdrEnabled: persistedCfg?.hdrEnabled === true,
           hdrExposureEv: isExposureEv(persistedCfg?.hdrExposureEv) ? persistedCfg.hdrExposureEv : 0,
           streamColor: sanitizeStreamColor(persistedCfg?.streamColor),
         };
+        merged.lowLatencyStreamViewing = typeof persistedState?.lowLatencyStreamViewing === 'boolean'
+          ? persistedState.lowLatencyStreamViewing
+          : currentState.lowLatencyStreamViewing;
         // Reconstruct non-persisted Sets/Maps to their defaults
         merged.spaceMutedUserIds = currentState.spaceMutedUserIds;
         merged.spaceDeafenedUserIds = currentState.spaceDeafenedUserIds;

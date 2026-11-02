@@ -9,6 +9,8 @@ import i18n from '../../i18n';
 import { formatters } from '../../i18n/formatters';
 import { VOICE_HEALTH, healthBand, type HealthBand } from '../../utils/voiceHealth';
 import { useVoiceStore } from '../../stores/voiceStore';
+import { getRequestedPublishedScreenShareCodec } from '../../utils/screenShare';
+import { resolveEffectiveScreenShareCodec } from '../../utils/codecCapabilities';
 
 interface ConnectionInfoPopoverProps {
   open: boolean;
@@ -170,6 +172,10 @@ export function ConnectionInfoPopover({ open, onClose, anchorRef }: ConnectionIn
   const outboundScreen = stats?.videoTracks.find((track) =>
     track.direction === 'send' && track.source === 'screen_share',
   );
+  const publishedRequestedCodec = getRequestedPublishedScreenShareCodec();
+  const requestedCodecDisplay = requestedCodec === 'auto'
+    ? `AUTO (${(publishedRequestedCodec ?? resolveEffectiveScreenShareCodec('auto', false)).toUpperCase()})`
+    : requestedCodec.toUpperCase();
 
   return createPortal(
     <div
@@ -233,7 +239,7 @@ export function ConnectionInfoPopover({ open, onClose, anchorRef }: ConnectionIn
                 <SectionHeader title={t('voice:connectionInfo.section.video')} />
                 {outboundScreen && (
                   <>
-                    <Row label={t('voice:connectionInfo.video.requestedCodec')} value={requestedCodec.toUpperCase()} />
+                    <Row label={t('voice:connectionInfo.video.requestedCodec')} value={requestedCodecDisplay} />
                     <Row label={t('voice:connectionInfo.video.negotiatedCodec')} value={outboundScreen.codec ?? '\u2014'} />
                     {outboundScreen.encoderImpl && (
                       <Row label={t('voice:connectionInfo.video.encoderImplementation')} value={outboundScreen.encoderImpl} />

@@ -1,4 +1,4 @@
-import React, { useEffect, useId } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVoiceStore } from '../../stores/voiceStore';
 import type { ScreenShareConfig } from '../../stores/voiceStore';
@@ -8,6 +8,11 @@ import {
   ensureSupportedScreenShareCodec,
   isH265ScreenShareSupported,
 } from '../../utils/screenShare';
+import {
+  probeHardwareScreenShareCodecs,
+  resolveEffectiveScreenShareCodec,
+  subscribeCodecCapabilities,
+} from '../../utils/codecCapabilities';
 import { Toggle } from '../ui/Toggle';
 import { HdrStreamControls } from './HdrStreamControls';
 import { StreamColorControls } from './StreamColorControls';
@@ -32,10 +37,33 @@ const MODES: { value: ScreenShareConfig['mode']; labelKey: 'voice:streamSettings
 ];
 
 const CODEC_OPTIONS = [
+  { value: 'auto' as const, labelKey: 'voice:streamSettings.codecOption.auto' as const },
   { value: 'vp9' as const, labelKey: 'voice:streamSettings.codecOption.vp9' as const },
   { value: 'h264' as const, labelKey: 'voice:streamSettings.codecOption.h264' as const },
   { value: 'h265' as const, labelKey: 'voice:streamSettings.codecOption.h265' as const },
 ];
+
+const DEGRADATION_OPTIONS: {
+  value: ScreenShareConfig['degradationPreference'];
+  labelKey:
+    | 'voice:streamSettings.degradation.maintainResolution'
+    | 'voice:streamSettings.degradation.maintainFramerate'
+    | 'voice:streamSettings.degradation.balanced';
+}[] = [
+  { value: 'maintain-resolution', labelKey: 'voice:streamSettings.degradation.maintainResolution' },
+  { value: 'maintain-framerate', labelKey: 'voice:streamSettings.degradation.maintainFramerate' },
+  { value: 'balanced', labelKey: 'voice:streamSettings.degradation.balanced' },
+];
+
+function useCodecCapabilityProbe(active: boolean): void {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const unsubscribe = subscribeCodecCapabilities(() => setTick((n) => n + 1));
+    void probeHardwareScreenShareCodecs();
+    return unsubscribe;
+  }, [active]);
+}
 
 /** Whole Mbps when the value is round, otherwise one decimal; the number goes through the locale. */
 export function formatBitrate(bps: number): string {
@@ -60,10 +88,11 @@ export function formatKbps(kbps: number): string {
   return i18n.t('common:units.kbps', { value: formatters.formatNumber(kbps) });
 }
 
-/** "4 Mbps · balanced" — the computed outcome of the current config. */
+/** "4 Mbps · maintain resolution" — the computed outcome of the current config. */
 export function StreamSummary({ className = '' }: { className?: string }) {
   const { t } = useTranslation(['voice', 'common']);
   const config = useVoiceStore((s) => s.screenShareConfig);
+  useCodecCapabilityProbe(config.codec === 'auto' && !config.hdrEnabled);
   const result = buildScreenShareOptions(config);
   return (
     <span className={`text-[12px] text-txt-tertiary ${className}`}>
@@ -82,6 +111,7 @@ const pillUnselected = 'bg-surface-elevated text-txt-secondary hover:bg-interact
 export function StreamQualityControls() {
   const { t } = useTranslation(['voice', 'common']);
   const config = useVoiceStore((s) => s.screenShareConfig);
+  useCodecCapabilityProbe(config.codec === 'auto' && !config.hdrEnabled);
   const setConfig = useVoiceStore((s) => s.setScreenShareConfig);
   const limits = useSettingsStore((s) => s.streamingLimits);
   const electronPlatform = isElectron() ? window.backspace?.platform : null;
@@ -199,6 +229,29 @@ export function StreamQualityControls() {
         </div>
       </div>
 
+      {/* Degradation Preference */}
+      <div>
+        <div className="text-[11px] text-txt-tertiary font-semibold uppercase tracking-wider mb-1.5">
+          {t('voice:streamSettings.degradationLabel')}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {DEGRADATION_OPTIONS.map((d) => {
+            const activePref = config.degradationPreference ?? 'maintain-resolution';
+            const isSelected = activePref === d.value;
+            return (
+              <button
+                key={d.value}
+                aria-pressed={isSelected}
+                onClick={() => setConfig({ degradationPreference: d.value })}
+                className={`${pillBase} ${isSelected ? pillSelected : pillUnselected}`}
+              >
+                {t(d.labelKey)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Codec */}
       <div>
         <div className="text-[11px] text-txt-tertiary font-semibold uppercase tracking-wider mb-1.5">
@@ -222,6 +275,19 @@ export function StreamQualityControls() {
             );
           })}
         </div>}
+        {!config.hdrEnabled && config.codec === 'auto' && (() => {
+          const resolved = resolveEffectiveScreenShareCodec('auto', false);
+          const codecName = resolved === 'h265'
+            ? t('voice:streamSettings.codecOption.h265')
+            : resolved === 'h264'
+              ? t('voice:streamSettings.codecOption.h264')
+              : t('voice:streamSettings.codecOption.vp9');
+          return (
+            <div className="text-[10px] text-txt-tertiary mt-1.5">
+              {t('voice:streamSettings.autoResolvedHint', { codec: codecName })}
+            </div>
+          );
+        })()}
         {!config.hdrEnabled && !h265Supported && (
           <div id={h265UnsupportedId} className="text-[10px] text-txt-tertiary mt-1.5">
             {t('voice:streamSettings.h265Unsupported')}

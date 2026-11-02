@@ -6,6 +6,8 @@ import {
 } from './streamColor';
 import {
   attachStreamColorProcessor,
+  createScreenShareColorTrackProcessor,
+  detachStreamColorProcessor,
   getUnderlyingCaptureTrack,
   type StreamColorSurfaceRenderer,
 } from './streamColorProcessor';
@@ -282,5 +284,66 @@ describe('attachStreamColorProcessor', () => {
 
     expect(result).toBe(rawStream);
     expect(getUnderlyingCaptureTrack(rawVideoTrack)).toBe(rawVideoTrack);
+  });
+
+  it('detaches synthetic color wrapper without stopping the underlying OS capture track', () => {
+    const rawVideoTrack = {
+      kind: 'video',
+      id: 'raw-video-track',
+      readyState: 'live',
+      contentHint: 'motion',
+      stop: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaStreamTrack;
+    const rawAudioTrack = {
+      kind: 'audio',
+      id: 'raw-audio-track',
+      readyState: 'live',
+      stop: vi.fn(),
+    } as unknown as MediaStreamTrack;
+
+    const generatorNativeStop = vi.fn();
+    vi.stubGlobal('MediaStreamTrackProcessor', class { readable = new ReadableStream(); });
+    vi.stubGlobal('MediaStreamTrackGenerator', class {
+      kind = 'video';
+      id = 'processed-video-track';
+      readyState = 'live';
+      contentHint = '';
+      stop = generatorNativeStop;
+      dispatchEvent = vi.fn();
+      writable = new WritableStream();
+    });
+    vi.stubGlobal('VideoFrame', class {});
+    vi.stubGlobal('MediaStream', class {
+      constructor(private tracks: MediaStreamTrack[]) {}
+      getTracks() { return this.tracks; }
+      getVideoTracks() { return this.tracks.filter((t) => t.kind === 'video'); }
+      getAudioTracks() { return this.tracks.filter((t) => t.kind === 'audio'); }
+    });
+
+    const wrapped = attachStreamColorProcessor(new MediaStream([rawVideoTrack, rawAudioTrack]), {
+      getColor: () => DEFAULT_STREAM_COLOR,
+      subscribe: () => () => {},
+      rendererFactory: () => null,
+    });
+    expect(wrapped.getVideoTracks()[0]?.id).toBe('processed-video-track');
+
+    const unwrapped = detachStreamColorProcessor(wrapped);
+    expect(generatorNativeStop).toHaveBeenCalledOnce();
+    expect(rawVideoTrack.stop).not.toHaveBeenCalled();
+    expect(rawAudioTrack.stop).not.toHaveBeenCalled();
+    expect(unwrapped.getVideoTracks()[0]).toBe(rawVideoTrack);
+    expect(unwrapped.getAudioTracks()[0]).toBe(rawAudioTrack);
+
+    const processor = createScreenShareColorTrackProcessor({
+      getColor: () => DEFAULT_STREAM_COLOR,
+      subscribe: () => () => {},
+      rendererFactory: () => null,
+    });
+    void processor.init({ kind: 'video' as never, track: rawVideoTrack });
+    expect(processor.processedTrack?.id).toBe('processed-video-track');
+    void processor.destroy();
+    expect(rawVideoTrack.stop).not.toHaveBeenCalled();
   });
 });

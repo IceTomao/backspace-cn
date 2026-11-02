@@ -15,6 +15,7 @@ import {
   LocalTrackPublication,
   DisconnectReason,
   TrackEvent,
+  VideoQuality,
 } from 'livekit-client';
 import { getApiForOrigin, getChannelOrigin, getMyUserIdForOrigin, useSpaceStore } from '../stores/spaceStore';
 import { wsSend } from './useWebSocket';
@@ -28,7 +29,10 @@ import { broadcastVoiceStatus, clearSpaceVoiceForDmCall } from '../utils/voice';
 import { consumeIntentionalCameraOff, markIntentionalCameraOff } from '../utils/voiceActions';
 import { AudioManager } from '../audio/AudioManager';
 import { SpeakingDetector } from '../audio/SpeakingDetector';
+import { getElectronAPI } from '../platform/platform';
 import { getUnderlyingCaptureTrack } from '../utils/streamColorProcessor';
+import { probeHardwareScreenShareCodecs } from '../utils/codecCapabilities';
+import { applyStreamReceiverJitterBuffer } from '../utils/receiverJitterBuffer';
 import {
   CAMERA_OVERDRIVE,
   buildScreenShareOptions,
@@ -39,6 +43,7 @@ import {
   handleScreenShareUnpublished,
   isScreenShareRepublishing,
   resolveNativeOverdrive,
+  syncPublishedScreenShareColorProcessor,
 } from '../utils/screenShare';
 import { parseStreamWatch } from '../utils/streamWatchProtocol';
 import { getMediaStreamTrack } from '../utils/livekitInternals';
@@ -152,9 +157,20 @@ export function setStreamSubscription(room: Room | null, targetIdentity: string,
   const allowed = canViewStream(range);
   rp.trackPublications.forEach((pub) => {
     if (pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio) {
-      (pub as RemoteTrackPublication).setSubscribed(subscribed && allowed);
+      const remotePub = pub as RemoteTrackPublication;
+      const nextSubscribed = subscribed && allowed;
+      remotePub.setSubscribed(nextSubscribed);
+      if (nextSubscribed) {
+        remotePub.setEnabled?.(true);
+        if (pub.source === Track.Source.ScreenShare) {
+          remotePub.setVideoQuality?.(VideoQuality.HIGH);
+        }
+      }
     }
   });
+  if (subscribed && allowed) {
+    applyStreamReceiverJitterBuffer(room, useVoiceStore.getState().lowLatencyStreamViewing);
+  }
   if (!allowed) useVoiceStore.getState().unwatchStream(userId);
   return !subscribed || allowed;
 }
@@ -252,6 +268,7 @@ function useBrowserLiveKit() {
   const isCameraOn = useVoiceStore((s) => s.isCameraOn);
   const isScreenSharing = useVoiceStore((s) => s.isScreenSharing);
   const screenShareConfig = useVoiceStore((s) => s.screenShareConfig);
+  const lowLatencyStreamViewing = useVoiceStore((s) => s.lowLatencyStreamViewing);
   const voiceUserStates = useVoiceStore((s) => s.voiceUserStates);
   const spaceMutedUserIds = useVoiceStore((s) => s.spaceMutedUserIds);
   const spaceDeafenedUserIds = useVoiceStore((s) => s.spaceDeafenedUserIds);
@@ -760,12 +777,19 @@ function useBrowserLiveKit() {
         const { userId } = parseIdentity(participant.identity);
         useVoiceStore.getState().clearVoiceUserStatus(userId);
       });
-      newRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+      newRoom.on(RoomEvent.TrackSubscribed, (track, publication) => {
         // LiveKit auto-attaches a hidden <audio> element for subscribed audio tracks.
         // GlobalAudioRenderer is the sole audio playback path with volume/attenuation/boost.
         // Detach LiveKit's internal element to prevent double-playback.
         if (track.kind === Track.Kind.Audio) {
           (track as RemoteAudioTrack).detach();
+        }
+        if (publication.source === Track.Source.ScreenShare || publication.source === Track.Source.ScreenShareAudio) {
+          publication.setEnabled?.(true);
+          if (publication.source === Track.Source.ScreenShare) {
+            publication.setVideoQuality?.(VideoQuality.HIGH);
+          }
+          applyStreamReceiverJitterBuffer(newRoom, useVoiceStore.getState().lowLatencyStreamViewing);
         }
         guardedUpdate();
       });
@@ -782,6 +806,7 @@ function useBrowserLiveKit() {
           publication.track?.on(TrackEvent.Restarted, () => {
             scheduleScreenShareOverdrive(newRoom);
           });
+          publication.track?.on(TrackEvent.TrackProcessorUpdate, guardedUpdate);
         }
         if (publication.source === Track.Source.Camera) {
           const mst = publication.track?.mediaStreamTrack;
@@ -918,6 +943,7 @@ function useBrowserLiveKit() {
       });
       newRoom.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
         if (roomRef.current !== newRoom) return;
+        getElectronAPI()?.setStreamingPowerMode?.(false);
         void useNativeHdrStore.getState().stop('publisher');
         void useNativeHdrStore.getState().stop('viewer');
         const terminal = reason === DisconnectReason.DUPLICATE_IDENTITY
@@ -1031,6 +1057,7 @@ function useBrowserLiveKit() {
   };
 
   const disconnect = useCallback(async () => {
+    getElectronAPI()?.setStreamingPowerMode?.(false);
     void useNativeHdrStore.getState().stop('publisher');
     void useNativeHdrStore.getState().stop('viewer');
     recoveryRef.current?.cancel();
@@ -1119,8 +1146,19 @@ function useBrowserLiveKit() {
     customBitrateKbps: shareCustomBitrate,
     shareAudio: shareAudioEnabled,
     codec: shareCodec,
+    degradationPreference: shareDegradation,
     hdrEnabled: shareHdrEnabled,
+    streamColor: shareStreamColor,
   } = screenShareConfig;
+
+  useEffect(() => {
+    void probeHardwareScreenShareCodecs();
+  }, []);
+
+  useEffect(() => {
+    if (!room) return;
+    applyStreamReceiverJitterBuffer(room, lowLatencyStreamViewing);
+  }, [room, lowLatencyStreamViewing]);
 
   useEffect(() => {
     if (!room) return;
@@ -1131,6 +1169,10 @@ function useBrowserLiveKit() {
       if (superseded) return;
       const currentShareConfig = useVoiceStore.getState().screenShareConfig;
       if (isScreenSharing && !currentShareConfig.hdrEnabled) {
+        if (currentShareConfig.codec === 'auto') {
+          await probeHardwareScreenShareCodecs();
+          if (superseded) return;
+        }
         const opts = buildScreenShareOptions(currentShareConfig);
         // Codec changed mid-stream — the codec is baked into SDP negotiation,
         // so republish the same track under the new options (no re-capture).
@@ -1140,17 +1182,32 @@ function useBrowserLiveKit() {
           return;
         }
 
+        const swappedProcessor = await syncPublishedScreenShareColorProcessor(room);
+        if (swappedProcessor) {
+          updateParticipants();
+        }
+
         const screenPub = room.localParticipant.getTrackPublications().find(p => p.source === Track.Source.ScreenShare);
         if (screenPub?.videoTrack) {
           const publishedMediaTrack = getMediaStreamTrack(screenPub.videoTrack);
           const mediaTrack = getUnderlyingCaptureTrack(publishedMediaTrack) ?? publishedMediaTrack;
           if (mediaTrack) {
-            if (opts.capture.width > 0 && opts.capture.height > 0) {
-              // Standard mode: apply resolution + frameRate together
-              await mediaTrack.applyConstraints({ width: { ideal: opts.capture.width }, height: { ideal: opts.capture.height }, frameRate: { ideal: opts.capture.frameRate, min: 15 } });
-            } else {
-              // Native mode: apply frameRate only — never pass 0 to width/height
-              await mediaTrack.applyConstraints({ frameRate: { ideal: opts.capture.frameRate, min: 15 } });
+            try {
+              if (opts.capture.width > 0 && opts.capture.height > 0) {
+                // Standard mode: apply resolution + frameRate together without min: 15
+                await mediaTrack.applyConstraints({
+                  width: { ideal: opts.capture.width, max: opts.capture.width },
+                  height: { ideal: opts.capture.height, max: opts.capture.height },
+                  frameRate: { ideal: opts.capture.frameRate, max: opts.capture.frameRate },
+                });
+              } else {
+                // Native mode: apply frameRate only — never pass 0 to width/height
+                await mediaTrack.applyConstraints({
+                  frameRate: { ideal: opts.capture.frameRate, max: opts.capture.frameRate },
+                });
+              }
+            } catch (err) {
+              console.warn('[LiveKit] Failed to apply capture constraints:', err);
             }
             mediaTrack.contentHint = opts.contentHint;
             if (publishedMediaTrack) publishedMediaTrack.contentHint = opts.contentHint;
@@ -1164,7 +1221,7 @@ function useBrowserLiveKit() {
     };
     _activeTrackUpdate = _activeTrackUpdate.then(updateActiveTracks).catch(() => {});
     return () => { superseded = true; };
-  }, [room, shareHeight, shareFps, shareMode, shareCustomBitrate, shareAudioEnabled, shareCodec, shareHdrEnabled, isScreenSharing, isCameraOn]);
+  }, [room, shareHeight, shareFps, shareMode, shareCustomBitrate, shareAudioEnabled, shareCodec, shareDegradation, shareHdrEnabled, shareStreamColor, isScreenSharing, isCameraOn, updateParticipants]);
 
   useEffect(() => {
     return () => {
@@ -1172,6 +1229,7 @@ function useBrowserLiveKit() {
       _connectGeneration++;
       SpeakingDetector.getInstance().clear();
       deactivateHwOverdrive();
+      getElectronAPI()?.setStreamingPowerMode?.(false);
       AudioManager.getInstance().releaseInputStream();
       const roomToDestroy = roomRef.current;
       roomRef.current = null;
