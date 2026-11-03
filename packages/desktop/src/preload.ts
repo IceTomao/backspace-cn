@@ -301,6 +301,17 @@ contextBridge.exposeInMainWorld('backspace', {
   },
   favoriteImages: (request: unknown): Promise<unknown> => ipcRenderer.invoke('desktop-favorite-images', request),
   hdrNative: (request: unknown): Promise<unknown> => ipcRenderer.invoke('hdr-native-request', request),
+  sdrNative: (request: unknown): Promise<unknown> => ipcRenderer.invoke('sdr-native-request', request),
+  onSdrNativeEvent: (callback: (event: unknown) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: unknown) => callback(event);
+    ipcRenderer.on('sdr-native-event', handler);
+    return () => ipcRenderer.removeListener('sdr-native-event', handler);
+  },
+  onSdrNativeAudio: (callback: (chunk: unknown) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, chunk: unknown) => callback(chunk);
+    ipcRenderer.on('sdr-native-audio', handler);
+    return () => ipcRenderer.removeListener('sdr-native-audio', handler);
+  },
   onHdrNativeEvent: (callback: (event: unknown) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, event: unknown) => callback(event);
     ipcRenderer.on('hdr-native-event', handler);

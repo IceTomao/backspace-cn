@@ -124,3 +124,52 @@ func TestHEVCUnitsKeepParameterSetsAndHDRMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestH264UnitsKeepParameterSetsAndSlices(t *testing.T) {
+	var input []byte
+	nal := func(kind byte, value byte) []byte { return []byte{0, 0, 0, 1, kind, value} }
+	for _, kind := range []byte{9, 7, 8, 6, 5, 9, 1} {
+		input = append(input, nal(kind, 0x42)...)
+	}
+	var frames [][]byte
+	if err := readH264AccessUnits(bytes.NewReader(input), func(data []byte) error {
+		frames = append(frames, append([]byte{}, data...))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 2 {
+		t.Fatalf("got %d H264 frames, want 2", len(frames))
+	}
+	for _, kind := range []byte{7, 8, 6, 5} {
+		if !bytes.Contains(frames[0], nal(kind, 0x42)) {
+			t.Fatalf("lost H264 NAL %d in first access unit", kind)
+		}
+	}
+	if !bytes.Contains(frames[1], nal(1, 0x42)) {
+		t.Fatal("lost H264 non-IDR slice in second access unit")
+	}
+}
+
+func TestSDRConfigurationAcceptsH264AndH265PublishOnly(t *testing.T) {
+	sdrH264 := configuration{Protocol: 1, Mode: "publish", StreamKind: "sdr", Codec: "h264", URL: "wss://voice.example", Token: "secret", FPS: 120, Width: 2560, Height: 1440}
+	if err := sdrH264.validate(); err != nil {
+		t.Fatalf("valid SDR H264 rejected: %v", err)
+	}
+	sdrH265 := sdrH264
+	sdrH265.Codec = "hevc"
+	if err := sdrH265.validate(); err != nil {
+		t.Fatalf("valid SDR HEVC rejected: %v", err)
+	}
+	hdrH264 := sdrH264
+	hdrH264.StreamKind = "hdr"
+	if hdrH264.validate() == nil {
+		t.Fatal("HDR must reject H264")
+	}
+	sdrReceive := sdrH264
+	sdrReceive.Mode = "receive"
+	sdrReceive.Publisher = identityPrefix + "alice:publish:session"
+	if sdrReceive.validate() == nil {
+		t.Fatal("SDR bridge must reject native receive mode")
+	}
+}

@@ -1,6 +1,5 @@
-// hdr-bridge transports already encoded HEVC. It never captures, decodes,
-// tone maps, or creates a backup video track. Credentials arrive on stdin,
-// never in command-line arguments or logs.
+// hdr-bridge transports already encoded HEVC or H.264 Elementary Streams.
+// Credentials arrive on stdin, never in command-line arguments or logs.
 package main
 
 import (
@@ -25,24 +24,46 @@ import (
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
+	"github.com/pion/webrtc/v4/pkg/media/h264reader"
 	"github.com/pion/webrtc/v4/pkg/media/h265reader"
 	"github.com/pion/webrtc/v4/pkg/media/oggwriter"
 )
 
 const trackName = "backspace-screen-hdr-v1"
+const sdrTrackName = "backspace-screen-sdr-v1"
 const audioTrackName = "backspace-screen-hdr-audio-v1"
 const identityPrefix = "__backspace_hdr_v1__"
 
 type configuration struct {
-	Protocol  int    `json:"protocol"`
-	Mode      string `json:"mode"`
-	URL       string `json:"url"`
-	Token     string `json:"token"`
-	Publisher string `json:"publisher"`
-	FPS       int    `json:"fps"`
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	AudioURL  string `json:"audioUrl"`
+	Protocol   int    `json:"protocol"`
+	Mode       string `json:"mode"`
+	StreamKind string `json:"streamKind,omitempty"`
+	Codec      string `json:"codec,omitempty"`
+	URL        string `json:"url"`
+	Token      string `json:"token"`
+	Publisher  string `json:"publisher"`
+	FPS        int    `json:"fps"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	AudioURL   string `json:"audioUrl"`
+}
+
+func (c configuration) streamKind() string {
+	if c.StreamKind == "" {
+		return "hdr"
+	}
+	return c.StreamKind
+}
+
+func (c configuration) normalizedCodec() string {
+	if c.Codec == "" {
+		return "h265"
+	}
+	v := strings.ToLower(c.Codec)
+	if v == "hevc" {
+		return "h265"
+	}
+	return v
 }
 
 func validAudioURL(raw string) bool {
@@ -59,9 +80,20 @@ func (c configuration) validate() error {
 		len(c.Token) == 0 || len(c.Token) > 16384 {
 		return errors.New("invalid bridge configuration")
 	}
+	kind := c.streamKind()
+	codec := c.normalizedCodec()
+	if kind != "hdr" && kind != "sdr" {
+		return errors.New("invalid stream kind")
+	}
+	if kind == "hdr" && codec != "h265" {
+		return errors.New("invalid HDR codec")
+	}
+	if kind == "sdr" && (c.Mode != "publish" || (codec != "h265" && codec != "h264")) {
+		return errors.New("invalid SDR bridge configuration")
+	}
 	if c.Mode == "publish" && (c.FPS < 1 || c.FPS > 120 || c.Width < 256 || c.Width > 7680 ||
 		c.Height < 128 || c.Height > 4320 || c.Width%2 != 0 || c.Height%2 != 0) {
-		return errors.New("invalid HDR video dimensions or frame rate")
+		return errors.New("invalid video dimensions or frame rate")
 	}
 	if c.Mode == "receive" && (!strings.HasPrefix(c.Publisher, identityPrefix) || len(c.Publisher) > 256) {
 		return errors.New("invalid HDR publisher")
@@ -177,8 +209,31 @@ func run() error {
 				return err
 			}
 		}
-		track, err := lksdk.NewLocalTrack(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH265, ClockRate: 90000,
-			SDPFmtpLine: "profile-id=2;tier-flag=0;level-id=153;tx-mode=SRST"})
+		isSdr := cfg.streamKind() == "sdr"
+		codec := cfg.normalizedCodec()
+		pubTrackName := trackName
+		capability := webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeH265,
+			ClockRate:   90000,
+			SDPFmtpLine: "profile-id=2;tier-flag=0;level-id=153;tx-mode=SRST",
+		}
+		if isSdr {
+			pubTrackName = sdrTrackName
+			if codec == "h264" {
+				capability = webrtc.RTPCodecCapability{
+					MimeType:    webrtc.MimeTypeH264,
+					ClockRate:   90000,
+					SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640032",
+				}
+			} else {
+				capability = webrtc.RTPCodecCapability{
+					MimeType:    webrtc.MimeTypeH265,
+					ClockRate:   90000,
+					SDPFmtpLine: "profile-id=1;tier-flag=0;level-id=153;tx-mode=SRST",
+				}
+			}
+		}
+		track, err := lksdk.NewLocalTrack(capability)
 		if err != nil {
 			return err
 		}
@@ -187,15 +242,13 @@ func run() error {
 		var bindOnce sync.Once
 		track.OnBind(func() { bindOnce.Do(func() { close(bound) }) })
 		pub, err := room.LocalParticipant.PublishTrack(track, &lksdk.TrackPublicationOptions{
-			Name: trackName, Source: livekit.TrackSource_SCREEN_SHARE,
+			Name: pubTrackName, Source: livekit.TrackSource_SCREEN_SHARE,
 			VideoWidth: cfg.Width, VideoHeight: cfg.Height,
 		})
 		if err != nil {
 			return err
 		}
-		// The owner additionally validates the bitstream and waits for outbound
-		// bytes before announcing HDR; a publication acknowledgement is insufficient.
-		event("published", map[string]any{"trackSid": pub.SID(), "identity": room.LocalParticipant.Identity()})
+		event("published", map[string]any{"trackSid": pub.SID(), "identity": room.LocalParticipant.Identity(), "codec": codec, "streamKind": cfg.streamKind()})
 		go func() {
 			select {
 			case <-bound:
@@ -203,22 +256,48 @@ func run() error {
 				return
 			}
 			var sent uint64
+			var windowBytes uint64
+			var lastWrite time.Time
+			defaultDur := time.Second / time.Duration(cfg.FPS)
 			lastReport := time.Now()
-			err := readAccessUnits(in, func(data []byte) error {
-				if err := track.WriteSample(media.Sample{Data: data, Duration: time.Second / time.Duration(cfg.FPS)}, nil); err != nil {
+			writeUnit := func(data []byte) error {
+				dur := defaultDur
+				if isSdr {
+					now := time.Now()
+					if !lastWrite.IsZero() {
+						dur = now.Sub(lastWrite)
+						if dur < time.Millisecond {
+							dur = time.Millisecond
+						} else if dur > 250*time.Millisecond {
+							dur = 250 * time.Millisecond
+						}
+					}
+					lastWrite = now
+				}
+				if err := track.WriteSample(media.Sample{Data: data, Duration: dur}, nil); err != nil {
 					return err
 				}
 				if sent == 0 {
-					event("streaming", map[string]any{"trackSid": pub.SID(), "identity": room.LocalParticipant.Identity()})
+					event("streaming", map[string]any{"trackSid": pub.SID(), "identity": room.LocalParticipant.Identity(), "codec": codec, "streamKind": cfg.streamKind()})
 				}
-				sent += uint64(len(data))
-				if time.Since(lastReport) >= time.Second {
-					event("sending", map[string]any{"bytes": sent})
+				n := uint64(len(data))
+				sent += n
+				windowBytes += n
+				if elapsed := time.Since(lastReport); elapsed >= time.Second {
+					kbps := float64(windowBytes*8) / (elapsed.Seconds() * 1000.0)
+					event("sending", map[string]any{"bytes": sent, "bitrateKbps": kbps, "codec": codec})
+					windowBytes = 0
 					lastReport = time.Now()
 				}
 				return nil
-			})
-			fail(err)
+			}
+			var readErr error
+			if codec == "h264" {
+				readErr = readH264AccessUnits(in, writeUnit)
+			} else {
+				readErr = readAccessUnits(in, writeUnit)
+			}
+			fail(readErr)
 		}()
 	}
 	select {
@@ -397,6 +476,54 @@ func readAccessUnits(in io.Reader, write func([]byte) error) error {
 		unit = append(unit, 0, 0, 0, 1)
 		unit = append(unit, nal.Data...)
 		if kind < 32 {
+			hasPicture = true
+		}
+	}
+}
+
+// H.264 Annex-B access unit framing keyed off NVENC's AUD (NAL type 9),
+// preserving SPS (7), PPS (8), and SEI (6) together with VCL slices (1..5).
+func readH264AccessUnits(in io.Reader, write func([]byte) error) error {
+	reader, err := h264reader.NewReaderWithOptions(in, h264reader.WithIncludeSEI(true))
+	if err != nil {
+		return err
+	}
+	var unit []byte
+	hasPicture := false
+	flush := func() error {
+		if !hasPicture {
+			return errors.New("H264 access unit has no picture")
+		}
+		if err := write(unit); err != nil {
+			return err
+		}
+		unit = nil
+		hasPicture = false
+		return nil
+	}
+	for {
+		nal, err := reader.NextNAL()
+		if err == io.EOF {
+			if hasPicture {
+				return flush()
+			}
+			return io.EOF
+		}
+		if err != nil {
+			return err
+		}
+		kind := uint8(nal.UnitType)
+		if kind == 9 && hasPicture {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		if len(unit)+len(nal.Data)+4 > 16*1024*1024 {
+			return errors.New("H264 access unit exceeds limit")
+		}
+		unit = append(unit, 0, 0, 0, 1)
+		unit = append(unit, nal.Data...)
+		if kind >= 1 && kind <= 5 {
 			hasPicture = true
 		}
 	}

@@ -21,7 +21,7 @@ import { canonicalizeHomeInstance, getOurOrigin, normalizeOriginForCompare } fro
 import { generateFederatedCallToken } from '../routes/livekit.js';
 import { config } from '../config.js';
 import crypto from 'node:crypto';
-import { hasNativeHdrPublication } from '../utils/nativeHdr.js';
+import { hasNativeHdrPublication, hasNativeSdrPublication } from '../utils/nativeHdr.js';
 
 /**
  * Re-evaluate SPEAK permission for all participants in voice channels
@@ -833,7 +833,10 @@ function handleVoiceStatus(event: Record<string, unknown>, userId: string, ws: W
   // This now works for both server channels AND DM calls.
   const userRoom = connectionManager.getUserRoom(userId);
   if (!userRoom) return;
-  const dynamicRange = isScreenSharing && hasNativeHdrPublication(userId, userRoom.roomId) ? 'hdr' : 'sdr';
+  const hasHdr = hasNativeHdrPublication(userId, userRoom.roomId);
+  const hasSdr = hasNativeSdrPublication(userId, userRoom.roomId);
+  const effectiveSharing = isScreenSharing || hasHdr || hasSdr;
+  const dynamicRange = effectiveSharing && hasHdr ? 'hdr' : 'sdr';
   // Space sessions must resume through voice_join so an ordinary tab cannot
   // keep a stale session alive merely by sending status. DM calls have no
   // voice_join event, so voice_status is their explicit resume signal.
@@ -853,7 +856,7 @@ function handleVoiceStatus(event: Record<string, unknown>, userId: string, ws: W
   const effectiveMuted = (isSpaceMuted || isPermMuted) ? true : isMuted;
   const effectiveDeafened = isSpaceDeafened ? true : isDeafened;
 
-  connectionManager.setVoiceUserStatus(userId, effectiveMuted, effectiveDeafened, isCameraOn, isScreenSharing, dynamicRange);
+  connectionManager.setVoiceUserStatus(userId, effectiveMuted, effectiveDeafened, isCameraOn, effectiveSharing, dynamicRange);
 
   // sendToRoom routes to sendToSpace for space rooms, sendToDmMembers for DM rooms
   connectionManager.sendToRoom(userRoom.roomId, {
@@ -863,7 +866,7 @@ function handleVoiceStatus(event: Record<string, unknown>, userId: string, ws: W
     isMuted: effectiveMuted,
     isDeafened: effectiveDeafened,
     isCameraOn,
-    isScreenSharing,
+    isScreenSharing: effectiveSharing,
     ...(dynamicRange === 'hdr' ? { dynamicRange } : {}),
   });
 }

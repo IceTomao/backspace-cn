@@ -77,6 +77,9 @@ interface DesktopUpdateSnapshot {
 interface BackspaceElectronAPI {
   hdrNative?: (request: unknown) => Promise<unknown>;
   onHdrNativeEvent?: (callback: (event: unknown) => void) => (() => void);
+  sdrNative?: (request: unknown) => Promise<unknown>;
+  onSdrNativeEvent?: (callback: (event: unknown) => void) => (() => void);
+  onSdrNativeAudio?: (callback: (chunk: unknown) => void) => (() => void);
   // Platform info
   platform: NodeJS.Platform;
   // Window controls

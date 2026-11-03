@@ -36,13 +36,13 @@ interface SettingsState {
 }
 
 const DEFAULT_LIMITS: InstanceStreamingLimits = {
-  maxBitrateKbps: 20000,
+  maxBitrateKbps: 35000,
   minBitrateKbps: 500,
   bitrateStepKbps: 500,
-  allowedResolutions: [540, 720, 1080],
-  allowedFramerates: [30, 45, 60],
-  maxResolution: 1080,
-  maxFramerate: 60,
+  allowedResolutions: [540, 720, 1080, 1440, 'native'],
+  allowedFramerates: [30, 45, 60, 75, 90, 120],
+  maxResolution: 1440,
+  maxFramerate: 120,
   discoveryEnabled: true,
   bitrateMatrixOverrides: null,
   allowCustomBitrate: true,

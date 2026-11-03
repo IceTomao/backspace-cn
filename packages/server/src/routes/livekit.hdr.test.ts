@@ -34,7 +34,7 @@ vi.mock('livekit-server-sdk', async original => ({ ...await original<typeof impo
 }));
 
 import { livekitRoutes } from './livekit.js';
-import { hasNativeHdrPublication, stopNativeHdrSession, reconcileNativeHdrSessions } from '../utils/nativeHdr.js';
+import { hasNativeHdrPublication, hasNativeSdrPublication, stopNativeHdrSession, reconcileNativeHdrSessions } from '../utils/nativeHdr.js';
 let app: FastifyInstance;
 const identities: string[] = [];
 beforeEach(async () => {
@@ -125,4 +125,71 @@ it('announces HDR only after the exact live HEVC publication is confirmed, and c
   expect(hasNativeHdrPublication('alice', 'channel')).toBe(false);
   expect(state.broadcast).toHaveBeenLastCalledWith('channel', expect.objectContaining({ isScreenSharing: false }));
   expect((await confirm('video')).statusCode).toBe(409);
+});
+
+it('authorizes native SDR publishing with H.265 or H.264 while keeping dynamicRange strictly SDR', async () => {
+  const status = await app.inject({ method: 'GET', url: '/api/livekit/status', headers: { authorization: 'Bearer test' } });
+  expect(status.json().nativeSdrProtocol).toBe(1);
+  // Rejects simultaneous nativeHdr + nativeSdr
+  const mixed = await app.inject({
+    method: 'POST',
+    url: '/api/livekit/token',
+    headers: { authorization: 'Bearer test' },
+    payload: { channelId: 'channel', nativeHdr: { role: 'publish' }, nativeSdr: { role: 'publish' } },
+  });
+  expect(mixed.statusCode).toBe(400);
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/livekit/token',
+    headers: { authorization: 'Bearer test' },
+    payload: { channelId: 'channel', nativeSdr: { role: 'publish' } },
+  });
+  expect(res.statusCode).toBe(200);
+  const body = res.json();
+  const identity = body.nativeSdr.identity as string;
+  identities.push(identity);
+  const jwt = JSON.parse(Buffer.from(body.token.split('.')[1], 'base64url').toString());
+  expect(jwt.sub).toContain('__backspace_hdr_v1__alice:publish:');
+  expect(JSON.parse(jwt.metadata)).toMatchObject({ kind: 'backspace-native-sdr', ownerId: 'alice', role: 'publish' });
+  expect(jwt.video.canPublishSources).toEqual(['screen_share']);
+
+  const confirmSdr = (id: string, trackSid: string | null) =>
+    app.inject({ method: 'POST', url: '/api/livekit/sdr-publication', headers: { authorization: 'Bearer test' }, payload: { identity: id, trackSid } });
+
+  // Wrong track name rejected
+  state.participant = { tracks: [{ sid: 'v1', name: 'backspace-screen-hdr-v1', type: TrackType.VIDEO, source: TrackSource.SCREEN_SHARE, muted: false, mimeType: 'video/h265' }] };
+  expect((await confirmSdr(identity, 'v1')).statusCode).toBe(409);
+
+  // Valid H.265 SDR publication announces isScreenSharing=true WITHOUT dynamicRange='hdr'
+  state.participant = { tracks: [{ sid: 'v1', name: 'backspace-screen-sdr-v1', type: TrackType.VIDEO, source: TrackSource.SCREEN_SHARE, muted: false, mimeType: 'video/h265' }] };
+  expect((await confirmSdr(identity, 'v1')).statusCode).toBe(200);
+  expect(hasNativeSdrPublication('alice', 'channel')).toBe(true);
+  expect(hasNativeHdrPublication('alice', 'channel')).toBe(false);
+  expect(state.broadcast).toHaveBeenLastCalledWith('channel', expect.objectContaining({ userId: 'alice', isScreenSharing: true }));
+  expect(state.broadcast.mock.calls.at(-1)?.[1]?.dynamicRange).toBeUndefined();
+
+  // HDR receive token cannot target an SDR publisher
+  expect((await token({ role: 'receive', targetIdentity: identity })).statusCode).toBe(409);
+
+  // Hot-switch overlap: H.264 SDR session starts before H.265 SDR session stops -> no false stop broadcast
+  const res2 = await app.inject({
+    method: 'POST',
+    url: '/api/livekit/token',
+    headers: { authorization: 'Bearer test' },
+    payload: { channelId: 'channel', nativeSdr: { role: 'publish' } },
+  });
+  const identity2 = res2.json().nativeSdr.identity as string;
+  identities.push(identity2);
+  state.participant = { tracks: [{ sid: 'v2', name: 'backspace-screen-sdr-v1', type: TrackType.VIDEO, source: TrackSource.SCREEN_SHARE, muted: false, mimeType: 'video/h264' }] };
+  expect((await confirmSdr(identity2, 'v2')).statusCode).toBe(200);
+  state.broadcast.mockClear();
+  expect((await confirmSdr(identity, null)).statusCode).toBe(200);
+  expect(state.broadcast).not.toHaveBeenCalled();
+  expect(hasNativeSdrPublication('alice', 'channel')).toBe(true);
+
+  // Final stop announces isScreenSharing=false
+  expect((await confirmSdr(identity2, null)).statusCode).toBe(200);
+  expect(hasNativeSdrPublication('alice', 'channel')).toBe(false);
+  expect(state.broadcast).toHaveBeenLastCalledWith('channel', expect.objectContaining({ isScreenSharing: false }));
 });

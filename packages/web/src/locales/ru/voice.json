@@ -65,7 +65,23 @@
       "encoderImplementation": "Кодировщик",
       "qpDelta": "Изменение суммы QP",
       "nackDelta": "Изменение NACK",
-      "pliDelta": "Изменение PLI"
+      "pliDelta": "Изменение PLI",
+      "captureFps": "Частота захвата",
+      "captureFpsValue": "{{capture}} / {{target}} к/с",
+      "encodeFps": "Частота кодирования",
+      "encodeFpsValue": "{{fps}} к/с",
+      "encodeTime": "Время кодирования кадра",
+      "hwAccel": "GPU",
+      "swFallback": "CPU",
+      "bottleneck": "Диагностика узких мест",
+      "bottleneckStatus": {
+        "ok": "Плавно (без узких мест)",
+        "bandwidth": "Ограничена исходящая скорость",
+        "encoderOverload": "Перегрузка кодировщика GPU/CPU",
+        "softwareEncoder": "Программный кодек (выберите Авто/H.264)",
+        "captureStarved": "Просадка захвата (делитесь экраном или ограничьте FPS игры)",
+        "codecRegressed": "Переключено на {{codec}} для зрителя"
+      }
     },
     "source": {
       "microphone": "Микрофон",
@@ -105,6 +121,7 @@
     "stageReady": "Готово к запуску",
     "permissionHintMac": "macOS не разрешает захват экрана, пока у Backspace нет доступа. Выдайте его в Системных настройках → Конфиденциальность и безопасность → Запись экрана и повторите попытку.",
     "retrySources": "Повторить",
+    "windowsHighFpsScreenHint": "Для игр в 60/120 к/с лучше выбрать весь экран во вкладке «Экраны»: захват окна при высокой нагрузке GPU может падать до ~30 к/с, а захват экрана работает напрямую через DXGI.",
     "kind": {
       "monitor": "Экран",
       "window": "Окно"
@@ -207,7 +224,10 @@
     "lowLatency": "Сверхнизкая задержка",
     "isStreaming": "{{name}} ведёт трансляцию",
     "hdrPlaying": "Просмотр в отдельном окне HDR",
-    "hdrOpenNative": "Смотреть в окне HDR"
+    "hdrOpenNative": "Смотреть в окне HDR",
+    "localPreviewPaused": "Предпросмотр приостановлен для экономии ресурсов",
+    "previewLocal": "Показать предпросмотр",
+    "pausePreview": "Скрыть предпросмотр"
   },
   "streamDiagnostics": {
     "publisherNetwork": "Нестабильная сеть у транслирующего",

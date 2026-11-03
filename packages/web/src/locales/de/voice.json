@@ -65,7 +65,23 @@
       "encoderImplementation": "Encoder-Implementierung",
       "qpDelta": "QP-Summenänderung",
       "nackDelta": "NACK-Änderung",
-      "pliDelta": "PLI-Änderung"
+      "pliDelta": "PLI-Änderung",
+      "captureFps": "Aufnahme-FPS",
+      "captureFpsValue": "{{capture}} / {{target}} fps",
+      "encodeFps": "Kodier-FPS",
+      "encodeFpsValue": "{{fps}} fps",
+      "encodeTime": "Kodierzeit pro Bild",
+      "hwAccel": "Hardware",
+      "swFallback": "Software",
+      "bottleneck": "Engpass-Diagnose",
+      "bottleneckStatus": {
+        "ok": "Flüssig (kein Engpass)",
+        "bandwidth": "Upload-Bandbreite begrenzt",
+        "encoderOverload": "GPU/CPU-Encoder überlastet",
+        "softwareEncoder": "Software-Encoder (Auto/H.264 nutzen)",
+        "captureStarved": "Aufnahme gebremst (Bildschirm teilen oder Spiel-FPS begrenzen)",
+        "codecRegressed": "Kompatibilitätswechsel auf {{codec}}"
+      }
     },
     "source": {
       "microphone": "Mikrofon",
@@ -105,6 +121,7 @@
     "stageReady": "Bereit zum Start",
     "permissionHintMac": "macOS blockiert die Bildschirmaufnahme, solange Backspace keine Berechtigung dafür hat. Erteile sie unter Systemeinstellungen → Datenschutz & Sicherheit → Bildschirmaufnahme und versuche es dann erneut.",
     "retrySources": "Erneut suchen",
+    "windowsHighFpsScreenHint": "Für 60/120-fps-Gaming empfiehlt sich „Bildschirme“ statt „Fenster“: Fensteraufnahmen fallen bei hoher GPU-Last oft auf ~30 fps, während die Bildschirmaufnahme direktes DXGI nutzt.",
     "kind": {
       "monitor": "Bildschirm",
       "window": "Fenster"
@@ -207,7 +224,10 @@
     "lowLatency": "Extrem niedrige Latenz",
     "isStreaming": "{{name}} streamt",
     "hdrPlaying": "Wiedergabe im nativen HDR-Fenster",
-    "hdrOpenNative": "Im HDR-Fenster ansehen"
+    "hdrOpenNative": "Im HDR-Fenster ansehen",
+    "localPreviewPaused": "Lokale Vorschau pausiert, um Spielleistung zu sparen",
+    "previewLocal": "Vorschau anzeigen",
+    "pausePreview": "Vorschau pausieren"
   },
   "streamDiagnostics": {
     "publisherNetwork": "Das Netzwerk des Streamers ist instabil",

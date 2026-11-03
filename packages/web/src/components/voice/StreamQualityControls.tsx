@@ -123,14 +123,14 @@ export function StreamQualityControls() {
   }, [config.codec, h265Supported]);
 
   const BITRATE_MIN = limits?.minBitrateKbps ?? 500;
-  const BITRATE_MAX = limits?.maxBitrateKbps ?? 20000;
+  const BITRATE_MAX = limits?.maxBitrateKbps ?? 35000;
   const BITRATE_STEP = limits?.bitrateStepKbps ?? 500;
 
-  const RESOLUTIONS = (limits?.allowedResolutions ?? [540, 720, 1080]).map((r) => ({
+  const RESOLUTIONS = (limits?.allowedResolutions ?? [540, 720, 1080, 1440, 'native']).map((r) => ({
     value: r as ScreenShareConfig['height'],
     label: RESOLUTION_LABELS[r as keyof typeof RESOLUTION_LABELS] ?? `${r}p`,
   }));
-  const FRAME_RATES = (limits?.allowedFramerates ?? [30, 45, 60]).map((f) => ({
+  const FRAME_RATES = (limits?.allowedFramerates ?? [30, 45, 60, 75, 90, 120]).map((f) => ({
     value: f as ScreenShareConfig['fps'],
     label: `${f}`,
   }));
@@ -220,7 +220,7 @@ export function StreamQualityControls() {
           {MODES.map((m) => (
             <button
               key={m.value}
-              onClick={() => setConfig({ mode: m.value })}
+              onClick={() => setConfig({ mode: m.value, degradationPreference: m.value === 'gaming' ? 'maintain-framerate' : 'maintain-resolution' })}
               className={`${pillBase} ${config.mode === m.value ? pillSelected : pillUnselected}`}
             >
               {t(m.labelKey)}
@@ -236,7 +236,7 @@ export function StreamQualityControls() {
         </div>
         <div className="flex flex-wrap gap-1.5">
           {DEGRADATION_OPTIONS.map((d) => {
-            const activePref = config.degradationPreference ?? 'maintain-resolution';
+            const activePref = config.degradationPreference ?? (config.mode === 'gaming' ? 'maintain-framerate' : 'maintain-resolution');
             const isSelected = activePref === d.value;
             return (
               <button

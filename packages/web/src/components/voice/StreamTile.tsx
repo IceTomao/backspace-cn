@@ -7,7 +7,7 @@ import { useContextMenuStore, type ContextMenuItem } from '../../stores/contextM
 import { getActiveRoom, setStreamSubscription } from '../../hooks/useLiveKit';
 import { stopScreenShare, changeScreenShare } from '../../utils/screenShare';
 import { applyStreamReceiverJitterBuffer } from '../../utils/receiverJitterBuffer';
-import { encodeStreamWatch } from '../../utils/streamWatchProtocol';
+import { canDecodeHevcWebRtc, encodeStreamWatch } from '../../utils/streamWatchProtocol';
 import { canViewStream } from '../../utils/hdrStream';
 import { useNativeHdrStore } from '../../stores/nativeHdrStore';
 import { AudioManager } from '../../audio/AudioManager';
@@ -194,7 +194,13 @@ function handleViewerWatchToggle(streamerUserId: string, watching: boolean): voi
   );
   const room = getActiveRoom();
   if (!room) return;
-  const payload = encodeStreamWatch({ type: 'stream_watch', target: streamerUserId, watching });
+  const supportsHevc = watching ? canDecodeHevcWebRtc() : undefined;
+  const payload = encodeStreamWatch({
+    type: 'stream_watch',
+    target: streamerUserId,
+    watching,
+    ...(supportsHevc !== undefined ? { supportsHevc } : {}),
+  });
   // Reliable delivery; data channels are room-scoped and small (under 1KB).
   void room.localParticipant.publishData(payload, { reliable: true });
 }
@@ -313,6 +319,33 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
       const items: ContextMenuItem[] = [];
 
       if (isLocal) {
+        if (!hdrBlocked) {
+          const previewing = useVoiceStore.getState().watchingStreams.has(userId);
+          items.push({
+            key: 'toggle-local-preview',
+            type: 'action',
+            label: t(previewing ? 'voice:stream.pausePreview' : 'voice:stream.previewLocal'),
+            icon: React.createElement(
+              'svg',
+              { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'currentColor', className: 'flex-shrink-0' },
+              React.createElement('path', {
+                d: previewing
+                  ? 'M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27z'
+                  : 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z',
+              }),
+            ),
+            onClick: () => {
+              if (previewing) {
+                useVoiceStore.getState().unwatchStream(userId);
+                setStreamSubscription(getActiveRoom(), participant.identity, false);
+              } else {
+                setStreamSubscription(getActiveRoom(), participant.identity, true);
+                useVoiceStore.getState().watchStream(userId);
+              }
+            },
+          });
+          items.push({ key: 'preview-sep', type: 'separator' });
+        }
         // Local stream: stop, change, quality
         items.push({
           key: 'stop-streaming',
@@ -449,6 +482,16 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
     handleViewerWatchToggle(userId, true);
   }, [userId, participant.identity]);
 
+  const handleToggleLocalPreview = useCallback((nextPreview: boolean) => {
+    if (nextPreview) {
+      setStreamSubscription(getActiveRoom(), participant.identity, true);
+      useVoiceStore.getState().watchStream(userId);
+    } else {
+      useVoiceStore.getState().unwatchStream(userId);
+      setStreamSubscription(getActiveRoom(), participant.identity, false);
+    }
+  }, [userId, participant.identity]);
+
   const hasVideo = liveScreenTrack !== null;
 
   return (
@@ -478,6 +521,21 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
                 {t('voice:stream.isStreaming', { name: displayName })}
               </p>
               {hdrBlocked && <p className="text-xs text-txt-secondary mt-2">{t(nativeWatching ? 'voice:stream.hdrPlaying' : nativeHdr.available && participant.nativeHdrIdentity ? 'voice:stream.hdrOpenNative' : 'voice:stream.hdrUnsupported')}</p>}
+              {isLocal && !hdrBlocked && (
+                <>
+                  <p className="text-xs text-txt-secondary mt-1.5">
+                    {t('voice:stream.localPreviewPaused')}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleLocalPreview(true)}
+                    aria-label={t('voice:stream.previewLocal')}
+                    className={`${large ? 'mt-2 px-4 py-1.5' : 'mt-2 w-full min-h-7 px-3 py-1 text-[11px]'} whitespace-nowrap bg-white/10 hover:bg-white/20 rounded text-txt-primary font-semibold transition-colors`}
+                  >
+                    {t('voice:stream.previewLocal')}
+                  </button>
+                </>
+              )}
               {!isLocal && (
                 <button
                   onClick={hdrBlocked ? () => {
@@ -524,24 +582,39 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
 
       {/* Bottom overlay */}
       {hasVideo && isWatching && <div data-testid="stream-tile-caption" className="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/70 via-black/30 to-transparent">
-        <div className="flex items-center gap-1.5 min-w-0">
-          {/* Screen icon */}
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            className="text-white/70 flex-shrink-0"
-          >
-            <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H8v2h8v-2h-2v-2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z" />
-          </svg>
-          <span
-            className={`font-semibold text-white truncate ${large ? 'text-base' : 'text-[13px]'}`}
-          >
-            {displayName}
-          </span>
-          {isLocal && (
-            <span className="text-[10px] text-white/40 font-medium">{t('voice:badges.you')}</span>
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {/* Screen icon */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              className="text-white/70 flex-shrink-0"
+            >
+              <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H8v2h8v-2h-2v-2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z" />
+            </svg>
+            <span
+              className={`font-semibold text-white truncate ${large ? 'text-base' : 'text-[13px]'}`}
+            >
+              {displayName}
+            </span>
+            {isLocal && (
+              <span className="text-[10px] text-white/40 font-medium">{t('voice:badges.you')}</span>
+            )}
+          </div>
+          {isLocal && !hdrBlocked && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleToggleLocalPreview(false);
+              }}
+              aria-label={t('voice:stream.pausePreview')}
+              className="flex-shrink-0 px-2 py-0.5 rounded bg-black/60 hover:bg-black/80 text-[11px] font-medium text-white/90 transition-colors"
+            >
+              {t('voice:stream.pausePreview')}
+            </button>
           )}
         </div>
       </div>}

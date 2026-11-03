@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { getElectronAPI, isElectron, isElectronMac } from '../../platform/platform';
 import { useVoiceStore } from '../../stores/voiceStore';
 import { useNativeHdrStore } from '../../stores/nativeHdrStore';
+import { useNativeSdrStore } from '../../stores/nativeSdrStore';
 import { useScreenShareSetupStore } from '../../stores/screenShareSetupStore';
 import { usePortalContainer } from '../../hooks/usePortalContainer';
 import { getActiveRoom } from '../../hooks/useLiveKit';
@@ -447,6 +448,27 @@ export function ScreenShareSetup() {
     if (!stream || !room) { setError('startFailed'); return; }
     setStarting(true);
     setError(null);
+    if (
+      electron &&
+      api?.platform === 'win32' &&
+      selectedId?.startsWith('screen:') &&
+      currentConfig.codec !== 'vp9'
+    ) {
+      const stagedSettings = stream.getVideoTracks()[0]?.getSettings();
+      const sdrOk = await useNativeSdrStore.getState().publish(room, selectedId, currentConfig, {
+        width: stagedSettings?.width,
+        height: stagedSettings?.height,
+      });
+      if (sdrOk) {
+        stopStagedCapture(stream);
+        useVoiceStore.getState().setLastScreenShareSourceId(selectedId);
+        stagedRef.current = null;
+        setStaged(null);
+        setStarting(false);
+        close();
+        return;
+      }
+    }
     const ok = await publishScreenShare(room, stream);
     if (!ok) {
       // publishScreenShare stopped the tracks on failure
@@ -556,6 +578,14 @@ export function ScreenShareSetup() {
                 autoFocus
               />
             )}
+          </div>
+        )}
+
+        {showGrid && electron && api?.platform === 'win32' && !config.hdrEnabled && config.fps >= 60 && (activeTab === 'windows' || stagedKind === 'window') && (
+          <div className="px-6 pb-2.5 flex-shrink-0">
+            <div className="rounded-lg bg-accent-amber/10 ring-1 ring-accent-amber/25 px-3 py-1.5 text-[12px] text-accent-amber/95">
+              {t('voice:screenPicker.windowsHighFpsScreenHint')}
+            </div>
           </div>
         )}
 

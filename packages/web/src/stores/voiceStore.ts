@@ -243,7 +243,7 @@ export const useVoiceStore = create<VoiceState>()(
         height: 720,
         fps: 60,
         mode: 'gaming',
-        degradationPreference: 'maintain-resolution',
+        degradationPreference: 'maintain-framerate',
         customBitrateKbps: null,
         shareAudio: !isElectron(),
         codec: 'auto',
@@ -838,7 +838,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: 'backspace-voice-settings',
-      version: 19,
+      version: 20,
       migrate: (persistedState: any, version: number) => {
         if (version === 0) {
           persistedState.streamAttenuationEnabled = false;
@@ -924,6 +924,11 @@ export const useVoiceStore = create<VoiceState>()(
           }
           if (typeof persistedState.lowLatencyStreamViewing !== 'boolean') {
             persistedState.lowLatencyStreamViewing = false;
+          }
+        }
+        if (version < 20) {
+          if (persistedState.screenShareConfig && (persistedState.screenShareConfig.mode ?? 'gaming') === 'gaming') {
+            persistedState.screenShareConfig.degradationPreference = 'maintain-framerate';
           }
         }
         return persistedState;

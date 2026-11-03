@@ -70,6 +70,8 @@ import { DESKTOP_BUILD } from './buildConfig';
 import { ThemeManager, registerThemeStyles, registerThemeControls, windowThemeColors, type ThemeMode } from './theme';
 import { registerFavoriteImages } from './favoriteImages';
 import { registerHdrNative } from './hdrIpc';
+import { registerSdrNative } from './sdrIpc';
+import type { ScreenMonitorHint } from './sdrNative';
 import { ActivityAssetPublisher, registerActivityAssetSession } from './activityAssetPublisher';
 
 function showManagedUpdateNotice(): void {
@@ -105,8 +107,48 @@ app.setName('Backspace');
 
 let mainWindow: BrowserWindow | null = null;
 let streamingPowerBlockerId: number | null = null;
+let streamingPriorityElevated = false;
+const elevatedProcessPids = new Set<number>();
+let streamingPriorityTimer: ReturnType<typeof setInterval> | null = null;
+
+function elevateElectronProcessPriorities(): void {
+  if (process.platform !== 'win32') return;
+  const pids = new Set<number>([process.pid]);
+  try {
+    for (const metric of app.getAppMetrics()) {
+      if (typeof metric.pid === 'number' && metric.pid > 0) pids.add(metric.pid);
+    }
+  } catch {
+    // Ignore appMetrics races during startup/shutdown
+  }
+  for (const pid of pids) {
+    try {
+      os.setPriority(pid, os.constants.priority.PRIORITY_ABOVE_NORMAL);
+      elevatedProcessPids.add(pid);
+    } catch {
+      // Ignore child processes that exited concurrently
+    }
+  }
+}
 
 function releaseStreamingPowerBlocker(): void {
+  if (streamingPriorityElevated) {
+    streamingPriorityElevated = false;
+    if (process.platform === 'win32') {
+      if (streamingPriorityTimer) {
+        clearInterval(streamingPriorityTimer);
+        streamingPriorityTimer = null;
+      }
+      for (const pid of [...elevatedProcessPids, process.pid]) {
+        try {
+          os.setPriority(pid, os.constants.priority.PRIORITY_NORMAL);
+        } catch {
+          // Ignore priority reset errors during teardown
+        }
+      }
+      elevatedProcessPids.clear();
+    }
+  }
   if (streamingPowerBlockerId === null) return;
   try {
     if (powerSaveBlocker.isStarted(streamingPowerBlockerId)) {
@@ -123,9 +165,17 @@ function applyStreamingPowerMode(active: boolean): void {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.setBackgroundThrottling(false);
     }
+    if (process.platform === 'win32') {
+      elevateElectronProcessPriorities();
+      streamingPriorityElevated = true;
+      if (!streamingPriorityTimer) {
+        streamingPriorityTimer = setInterval(elevateElectronProcessPriorities, 5000);
+        streamingPriorityTimer.unref?.();
+      }
+    }
     if (streamingPowerBlockerId === null || !powerSaveBlocker.isStarted(streamingPowerBlockerId)) {
       try {
-        streamingPowerBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+        streamingPowerBlockerId = powerSaveBlocker.start('prevent-display-sleep');
       } catch {
         streamingPowerBlockerId = null;
       }
@@ -163,6 +213,7 @@ let disposeThemeStyles: (() => void) | null = null;
 let disposeThemeControls: (() => void) | null = null;
 let disposeFavoriteImages: (() => void) | null = null;
 let disposeHdrNative: (() => void) | null = null;
+let disposeSdrNative: (() => void) | null = null;
 let disposeActivityAssetSession: (() => void) | null = null;
 
 function getWindowThemeColors(): { color: string; symbolColor: string } {
@@ -481,7 +532,9 @@ function createWindow(): void {
   setMainWindow(mainWindow);
   if (process.platform === 'win32') {
     disposeHdrNative?.();
+    disposeSdrNative?.();
     disposeHdrNative = registerHdrNative(ipcMain, () => mainWindow, getResolvedInstanceUrl);
+    disposeSdrNative = registerSdrNative(ipcMain, () => mainWindow, getResolvedInstanceUrl, resolveMonitorHintForScreenSource);
   }
   attachRecoveryHandlers(mainWindow);
   keybindManager.setWindow(mainWindow);
@@ -723,6 +776,54 @@ async function enumerateScreenSources(): Promise<Electron.DesktopCapturerSource[
   });
   lastScreenSources = sources;
   return sources;
+}
+
+async function resolveMonitorHintForScreenSource(sourceId: string): Promise<ScreenMonitorHint | null> {
+  if (!sourceId.startsWith('screen:')) return null;
+  if (!lastScreenSources.some(s => s.id === sourceId)) {
+    try { await enumerateScreenSources(); } catch { /* ignore */ }
+  }
+  const screenSources = lastScreenSources.filter(s => s.id.startsWith('screen:'));
+  const source = screenSources.find(s => s.id === sourceId);
+  const screenIndex = screenSources.findIndex(s => s.id === sourceId);
+  const displays = screen.getAllDisplays();
+  const primaryId = screen.getPrimaryDisplay()?.id;
+  const matchedDisplay = source?.display_id
+    ? displays.find(d => String(d.id) === String(source.display_id))
+    : displays[screenIndex >= 0 ? screenIndex : 0];
+  if (!matchedDisplay) {
+    return {
+      sourceId,
+      physicalBounds: null,
+      dipBounds: null,
+      scaleFactor: 1,
+      isPrimary: screenIndex <= 0,
+      screenIndex: Math.max(0, screenIndex),
+      totalScreens: Math.max(1, screenSources.length || displays.length),
+    };
+  }
+  let physicalBounds: { x: number; y: number; width: number; height: number } | null = null;
+  try {
+    const rect = screen.dipToScreenRect(null, matchedDisplay.bounds);
+    physicalBounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  } catch {
+    const sf = matchedDisplay.scaleFactor || 1;
+    physicalBounds = {
+      x: Math.round(matchedDisplay.bounds.x * sf),
+      y: Math.round(matchedDisplay.bounds.y * sf),
+      width: Math.round(matchedDisplay.bounds.width * sf),
+      height: Math.round(matchedDisplay.bounds.height * sf),
+    };
+  }
+  return {
+    sourceId,
+    physicalBounds,
+    dipBounds: { ...matchedDisplay.bounds },
+    scaleFactor: matchedDisplay.scaleFactor || 1,
+    isPrimary: matchedDisplay.id === primaryId,
+    screenIndex: Math.max(0, screenIndex),
+    totalScreens: Math.max(1, screenSources.length || displays.length),
+  };
 }
 
 function serializeScreenSources(sources: Electron.DesktopCapturerSource[]): SerializedScreenSource[] {
@@ -1412,6 +1513,15 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 // (without this, recovery / update notifications appear under "electron.exe").
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.backspace.desktop');
+  // Route entire-screen capture to DXGI Output Duplication (ScreenCapturerWinDirectx)
+  // instead of WgcCapturerWin, unlocking native 120Hz+ monitor capture without WGC's
+  // 60Hz MinUpdateInterval cap or CPU staging-copy stalls under >95% GPU game load.
+  // Individual window capture continues to use WgcCapturerWin normally.
+  app.commandLine.appendSwitch(
+    'disable-features',
+    'AllowWgcScreenZeroHz,CalculateNativeWinOcclusion,UseEcoQoSForBackgroundProcess,IntensiveWakeUpThrottling',
+  );
+  app.commandLine.appendSwitch('enable-features', 'MediaFoundationD3DVideoProcessing');
 }
 
 /**
@@ -1763,6 +1873,7 @@ if (!gotTheLock) {
     disposeThemeControls?.();
     disposeFavoriteImages?.();
     disposeHdrNative?.();
+    disposeSdrNative?.();
     disposeActivityAssetSession?.();
     stopActivityDetection();
     keybindManager.stop();

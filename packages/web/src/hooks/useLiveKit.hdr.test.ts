@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { Track, type Room } from 'livekit-client';
 import { setStreamSubscription } from './useLiveKit';
 import { useVoiceStore } from '../stores/voiceStore';
-import { canViewStream, HDR_SCREEN_TRACK_NAME, streamDynamicRange } from '../utils/hdrStream';
+import { canViewStream, HDR_SCREEN_TRACK_NAME, SDR_SCREEN_TRACK_NAME, streamDynamicRange } from '../utils/hdrStream';
 
 vi.mock('../audio/AudioManager', () => ({ AudioManager: { getInstance: () => ({}) } }));
 vi.mock('./useWebSocket', () => ({ wsSend: vi.fn() }));
@@ -39,4 +39,25 @@ it('never equates HEVC/browser HDR display capability with verified playback', (
   expect(canViewStream('sdr')).toBe(true);
   expect(streamDynamicRange()).toBe('sdr');
   vi.unstubAllGlobals();
+});
+
+it('subscribes Native Zero-Copy SDR helper track for both remote viewers and local self-preview', () => {
+  const streamer = remote('u1:alice');
+  const sdrHelper = remote(
+    '__backspace_hdr_v1__u1:publish:00000000-0000-0000-0000-000000000001',
+    SDR_SCREEN_TRACK_NAME,
+  );
+  const room = {
+    localParticipant: { identity: 'u1:alice' },
+    remoteParticipants: new Map([
+      [streamer.identity, streamer],
+      [sdrHelper.identity, sdrHelper],
+    ]),
+  } as unknown as Room;
+
+  expect(setStreamSubscription(room, 'u1:alice', true)).toBe(true);
+  expect(sdrHelper.publications[2]!.setSubscribed).toHaveBeenCalledWith(true);
+
+  expect(setStreamSubscription(room, 'u1:alice', false)).toBe(true);
+  expect(sdrHelper.publications[2]!.setSubscribed).toHaveBeenLastCalledWith(false);
 });

@@ -5,6 +5,7 @@ import { useFloatingPosition } from '../../hooks/useFloatingPosition';
 import { usePortalContainer } from '../../hooks/usePortalContainer';
 import { useFormatters } from '../../i18n/formatters';
 import { useNativeHdrStore } from '../../stores/nativeHdrStore';
+import { useNativeSdrStore } from '../../stores/nativeSdrStore';
 import { useVoiceStore } from '../../stores/voiceStore';
 import {
   cloneStreamColor,
@@ -109,6 +110,9 @@ export function StreamColorControls() {
       setHdrColor({ exposureEv: effectiveExposureEv, streamColor: next });
     } else {
       setConfig({ streamColor: next });
+      if (useNativeSdrStore.getState().active) {
+        useNativeSdrStore.getState().setColor({ exposureEv: 0, streamColor: next });
+      }
     }
   };
 

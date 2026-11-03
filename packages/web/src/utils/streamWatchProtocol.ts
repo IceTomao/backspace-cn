@@ -2,12 +2,26 @@
  * Wire format for the LiveKit data-channel ping that announces a viewer
  * has begun (or stopped) watching a screen share. Sent only from explicit
  * user-action sites (StreamTile click handlers); receiver maintains the
- * streamer-side watcher set.
+ * streamer-side watcher set and adapts AUTO codec selection when needed.
  */
 export interface StreamWatchPayload {
   type: 'stream_watch';
   target: string;
   watching: boolean;
+  supportsHevc?: boolean;
+}
+
+/**
+ * Probes whether the local browser/WebView can decode WebRTC HEVC (H.265) video.
+ * Returns `undefined` in headless/test environments without `RTCRtpReceiver.getCapabilities`.
+ */
+export function canDecodeHevcWebRtc(): boolean | undefined {
+  if (typeof RTCRtpReceiver === 'undefined' || typeof RTCRtpReceiver.getCapabilities !== 'function') {
+    return undefined;
+  }
+  const caps = RTCRtpReceiver.getCapabilities('video');
+  if (!caps?.codecs) return undefined;
+  return caps.codecs.some((c) => /^video\/(h265|hevc)$/i.test(c.mimeType));
 }
 
 /**
@@ -27,7 +41,8 @@ export function isStreamWatchPayload(value: unknown): value is StreamWatchPayloa
   return (
     v.type === 'stream_watch' &&
     typeof v.target === 'string' &&
-    typeof v.watching === 'boolean'
+    typeof v.watching === 'boolean' &&
+    (v.supportsHevc === undefined || typeof v.supportsHevc === 'boolean')
   );
 }
 

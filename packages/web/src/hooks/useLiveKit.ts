@@ -23,8 +23,9 @@ import { useVoiceStore, type VoiceConnectionQuality } from '../stores/voiceStore
 import { useAuthStore } from '../stores/authStore';
 import { useUIStore } from '../stores/uiStore';
 import type { User, StreamDynamicRange } from '@backspace/shared';
-import { canViewStream, streamDynamicRange, nativeHdrOwner, HDR_IDENTITY_PREFIX, HDR_SCREEN_TRACK_NAME } from '../utils/hdrStream';
+import { canViewStream, streamDynamicRange, nativeHdrOwner, HDR_IDENTITY_PREFIX, HDR_SCREEN_TRACK_NAME, SDR_SCREEN_TRACK_NAME } from '../utils/hdrStream';
 import { useNativeHdrStore } from '../stores/nativeHdrStore';
+import { useNativeSdrStore } from '../stores/nativeSdrStore';
 import { broadcastVoiceStatus, clearSpaceVoiceForDmCall } from '../utils/voice';
 import { consumeIntentionalCameraOff, markIntentionalCameraOff } from '../utils/voiceActions';
 import { AudioManager } from '../audio/AudioManager';
@@ -44,6 +45,8 @@ import {
   isScreenShareRepublishing,
   resolveNativeOverdrive,
   syncPublishedScreenShareColorProcessor,
+  computeEncoderScaleDown,
+  isWindowsElectronCapture,
 } from '../utils/screenShare';
 import { parseStreamWatch } from '../utils/streamWatchProtocol';
 import { getMediaStreamTrack } from '../utils/livekitInternals';
@@ -150,15 +153,33 @@ export function deriveGridTiles(participants: ParticipantInfo[]): GridTile[] {
 export function setStreamSubscription(room: Room | null, targetIdentity: string, subscribed: boolean) {
   if (!room) return false;
   const rp = room.remoteParticipants.get(targetIdentity);
-  if (!rp) return false;
+  const isSelf = room.localParticipant?.identity === targetIdentity;
   const { userId } = parseIdentity(targetIdentity);
-  const range = streamDynamicRange(useVoiceStore.getState().voiceUserStates.get(userId),
-    [...rp.trackPublications.values()].filter(pub => pub.source === Track.Source.ScreenShare).map(pub => pub.trackName));
+  const sdrHelpers = [...room.remoteParticipants.values()].filter(
+    (helper) =>
+      nativeHdrOwner(helper.identity) === userId &&
+      [...helper.trackPublications.values()].some(
+        (pub) => pub.source === Track.Source.ScreenShare && pub.trackName === SDR_SCREEN_TRACK_NAME,
+      ),
+  );
+  if (!rp && !isSelf && sdrHelpers.length === 0) return false;
+
+  const trackNames: string[] = [];
+  rp?.trackPublications.forEach((pub) => {
+    if (pub.source === Track.Source.ScreenShare) trackNames.push(pub.trackName);
+  });
+  for (const helper of sdrHelpers) {
+    helper.trackPublications.forEach((pub) => {
+      if (pub.source === Track.Source.ScreenShare) trackNames.push(pub.trackName);
+    });
+  }
+  const range = streamDynamicRange(useVoiceStore.getState().voiceUserStates.get(userId), trackNames);
   const allowed = canViewStream(range);
-  rp.trackPublications.forEach((pub) => {
+  const nextSubscribed = subscribed && allowed;
+
+  rp?.trackPublications.forEach((pub) => {
     if (pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio) {
       const remotePub = pub as RemoteTrackPublication;
-      const nextSubscribed = subscribed && allowed;
       remotePub.setSubscribed(nextSubscribed);
       if (nextSubscribed) {
         remotePub.setEnabled?.(true);
@@ -168,7 +189,24 @@ export function setStreamSubscription(room: Room | null, targetIdentity: string,
       }
     }
   });
-  if (subscribed && allowed) {
+
+  for (const helper of sdrHelpers) {
+    helper.trackPublications.forEach((pub) => {
+      if (pub.source === Track.Source.ScreenShare && pub.trackName === SDR_SCREEN_TRACK_NAME) {
+        const remotePub = pub as RemoteTrackPublication;
+        remotePub.setSubscribed(nextSubscribed);
+        if (nextSubscribed) {
+          remotePub.setEnabled?.(true);
+          remotePub.setVideoQuality?.(VideoQuality.HIGH);
+        }
+      }
+    });
+  }
+
+  if (isSelf && nextSubscribed && useNativeSdrStore.getState().active) {
+    useNativeSdrStore.getState().requestKeyFrame();
+  }
+  if (nextSubscribed) {
     applyStreamReceiverJitterBuffer(room, useVoiceStore.getState().lowLatencyStreamViewing);
   }
   if (!allowed) useVoiceStore.getState().unwatchStream(userId);
@@ -340,6 +378,9 @@ function useBrowserLiveKit() {
       let hasCameraPublication = false;
       const nativePublisher = [...r.remoteParticipants.values()].find(helper => nativeHdrOwner(helper.identity) === userId &&
         [...helper.trackPublications.values()].some(pub => pub.source === Track.Source.ScreenShare && pub.trackName === HDR_SCREEN_TRACK_NAME));
+      const nativeSdrPublisher = [...r.remoteParticipants.values()].find(helper => nativeHdrOwner(helper.identity) === userId &&
+        [...helper.trackPublications.values()].some(pub => pub.source === Track.Source.ScreenShare && pub.trackName === SDR_SCREEN_TRACK_NAME));
+      const localNativeSdrActive = isLocal && useNativeSdrStore.getState().active;
       const dynamicRange = nativePublisher ? 'hdr' : streamDynamicRange(useVoiceStore.getState().voiceUserStates.get(userId),
         [...p.trackPublications.values()].filter(pub => pub.source === Track.Source.ScreenShare).map(pub => pub.trackName));
       p.trackPublications.forEach((pub) => {
@@ -363,6 +404,21 @@ function useBrowserLiveKit() {
         else if (pub.source === Track.Source.ScreenShare) { screenTrack = mt; lkScreenTrack = track; }
         else if (pub.source === Track.Source.ScreenShareAudio) screenAudioTrack = mt;
       });
+      if (nativeSdrPublisher && canViewStream(dynamicRange)) {
+        hasScreenSharePublication = true;
+        nativeSdrPublisher.trackPublications.forEach((pub) => {
+          if (pub.source !== Track.Source.ScreenShare || pub.trackName !== SDR_SCREEN_TRACK_NAME) return;
+          if (!pub.isSubscribed || pub.isMuted || !pub.track) return;
+          const mt = pub.track.mediaStreamTrack;
+          if (mt && mt.readyState === 'live') {
+            screenTrack = mt;
+            lkScreenTrack = pub.track;
+          }
+        });
+      }
+      if (localNativeSdrActive) {
+        hasScreenSharePublication = true;
+      }
 
       const userState = useVoiceStore.getState().voiceUserStates.get(userId);
       let isPartDeafened = false;
@@ -419,6 +475,16 @@ function useBrowserLiveKit() {
         // viewer's full LiveKit identity ("userId:username"); we key by identity
         // so ParticipantDisconnected can evict cleanly.
         useVoiceStore.getState().recordStreamWatch(sw.target, participant.identity, sw.watching);
+        const myIdentity = roomRef.current?.localParticipant?.identity;
+        const myUserId = myIdentity ? parseIdentity(myIdentity).userId : null;
+        if (!myUserId || sw.target === myUserId) {
+          useNativeSdrStore.getState().onViewerWatch(
+            roomRef.current,
+            participant.identity,
+            sw.watching,
+            sw.supportsHevc,
+          );
+        }
         return;
       }
     }
@@ -772,6 +838,7 @@ function useBrowserLiveKit() {
       });
       newRoom.on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
         useVoiceStore.getState().evictWatcher(participant.identity);
+        useNativeSdrStore.getState().evictViewer(participant.identity);
         guardedUpdate();
         // Clean up stale WS-based voice status for the departed participant
         const { userId } = parseIdentity(participant.identity);
@@ -801,8 +868,8 @@ function useBrowserLiveKit() {
       });
       newRoom.on(RoomEvent.LocalTrackPublished, (publication: LocalTrackPublication) => {
         if (publication.source === Track.Source.ScreenShare) {
-          const { userId } = parseIdentity(newRoom.localParticipant.identity);
-          useVoiceStore.getState().watchStream(userId);
+          // Local self-preview stays paused by default to eliminate dual-monitor
+          // DWM/VRAM composition overhead; streamer can toggle preview from StreamTile.
           publication.track?.on(TrackEvent.Restarted, () => {
             scheduleScreenShareOverdrive(newRoom);
           });
@@ -877,6 +944,20 @@ function useBrowserLiveKit() {
       newRoom.on(RoomEvent.TrackUnmuted, guardedUpdate);
       newRoom.on(RoomEvent.ParticipantMetadataChanged, guardedUpdate);
       newRoom.on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        const helperOwnerId = nativeHdrOwner(participant.identity);
+        if (helperOwnerId) {
+          if (
+            publication.source === Track.Source.ScreenShare &&
+            publication.trackName === SDR_SCREEN_TRACK_NAME &&
+            useVoiceStore.getState().watchingStreams.has(helperOwnerId)
+          ) {
+            publication.setSubscribed(true);
+            publication.setEnabled?.(true);
+            publication.setVideoQuality?.(VideoQuality.HIGH);
+          }
+          guardedUpdate();
+          return;
+        }
         if (!canViewStream(streamDynamicRange(useVoiceStore.getState().voiceUserStates.get(parseIdentity(participant.identity).userId),
           [...participant.trackPublications.values()].filter(pub => pub.source === Track.Source.ScreenShare).map(pub => pub.trackName)))) {
           setStreamSubscription(newRoom, participant.identity, false);
@@ -891,11 +972,33 @@ function useBrowserLiveKit() {
       });
       newRoom.on(RoomEvent.TrackUnpublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         if (publication.source === Track.Source.ScreenShare) {
-          const { userId } = parseIdentity(participant.identity);
-          const state = useVoiceStore.getState();
-          state.unwatchStream(userId);
-          state.clearStreamVolume(userId);
-          state.clearStreamMute(userId);
+          const ownerId = nativeHdrOwner(participant.identity) ?? parseIdentity(participant.identity).userId;
+          const localUserId = newRoom.localParticipant?.identity
+            ? parseIdentity(newRoom.localParticipant.identity).userId
+            : null;
+          const stillSharingSdrHelper = [...newRoom.remoteParticipants.values()].some(
+            (rp) =>
+              rp.identity !== participant.identity &&
+              nativeHdrOwner(rp.identity) === ownerId &&
+              [...rp.trackPublications.values()].some((p) => p.source === Track.Source.ScreenShare),
+          );
+          const stillSharingDirect = [...newRoom.remoteParticipants.values()].some(
+            (rp) =>
+              !rp.identity.startsWith(HDR_IDENTITY_PREFIX) &&
+              parseIdentity(rp.identity).userId === ownerId &&
+              [...rp.trackPublications.values()].some(
+                (p) => p !== publication && p.source === Track.Source.ScreenShare,
+              ),
+          );
+          const localHotSwitching =
+            ownerId === localUserId &&
+            (useNativeSdrStore.getState().active || useNativeSdrStore.getState().reconfiguring);
+          if (!stillSharingSdrHelper && !stillSharingDirect && !localHotSwitching) {
+            const state = useVoiceStore.getState();
+            state.unwatchStream(ownerId);
+            state.clearStreamVolume(ownerId);
+            state.clearStreamMute(ownerId);
+          }
         }
         guardedUpdate();
       });
@@ -944,6 +1047,7 @@ function useBrowserLiveKit() {
       newRoom.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
         if (roomRef.current !== newRoom) return;
         getElectronAPI()?.setStreamingPowerMode?.(false);
+        void useNativeSdrStore.getState().stop(newRoom);
         void useNativeHdrStore.getState().stop('publisher');
         void useNativeHdrStore.getState().stop('viewer');
         const terminal = reason === DisconnectReason.DUPLICATE_IDENTITY
@@ -1058,6 +1162,7 @@ function useBrowserLiveKit() {
 
   const disconnect = useCallback(async () => {
     getElectronAPI()?.setStreamingPowerMode?.(false);
+    void useNativeSdrStore.getState().stop(roomRef.current);
     void useNativeHdrStore.getState().stop('publisher');
     void useNativeHdrStore.getState().stop('viewer');
     recoveryRef.current?.cancel();
@@ -1169,52 +1274,62 @@ function useBrowserLiveKit() {
       if (superseded) return;
       const currentShareConfig = useVoiceStore.getState().screenShareConfig;
       if (isScreenSharing && !currentShareConfig.hdrEnabled) {
-        if (currentShareConfig.codec === 'auto') {
-          await probeHardwareScreenShareCodecs();
-          if (superseded) return;
-        }
-        const opts = buildScreenShareOptions(currentShareConfig);
-        // Codec changed mid-stream — the codec is baked into SDP negotiation,
-        // so republish the same track under the new options (no re-capture).
-        const publishedCodec = getRequestedPublishedScreenShareCodec();
-        if (publishedCodec && publishedCodec !== opts.publish.videoCodec) {
-          await republishScreenShare(room);
-          return;
-        }
-
-        const swappedProcessor = await syncPublishedScreenShareColorProcessor(room);
-        if (swappedProcessor) {
-          updateParticipants();
-        }
-
-        const screenPub = room.localParticipant.getTrackPublications().find(p => p.source === Track.Source.ScreenShare);
-        if (screenPub?.videoTrack) {
-          const publishedMediaTrack = getMediaStreamTrack(screenPub.videoTrack);
-          const mediaTrack = getUnderlyingCaptureTrack(publishedMediaTrack) ?? publishedMediaTrack;
-          if (mediaTrack) {
-            try {
-              if (opts.capture.width > 0 && opts.capture.height > 0) {
-                // Standard mode: apply resolution + frameRate together without min: 15
-                await mediaTrack.applyConstraints({
-                  width: { ideal: opts.capture.width, max: opts.capture.width },
-                  height: { ideal: opts.capture.height, max: opts.capture.height },
-                  frameRate: { ideal: opts.capture.frameRate, max: opts.capture.frameRate },
-                });
-              } else {
-                // Native mode: apply frameRate only — never pass 0 to width/height
-                await mediaTrack.applyConstraints({
-                  frameRate: { ideal: opts.capture.frameRate, max: opts.capture.frameRate },
-                });
-              }
-            } catch (err) {
-              console.warn('[LiveKit] Failed to apply capture constraints:', err);
-            }
-            mediaTrack.contentHint = opts.contentHint;
-            if (publishedMediaTrack) publishedMediaTrack.contentHint = opts.contentHint;
+        if (useNativeSdrStore.getState().active) {
+          await useNativeSdrStore.getState().reconfigure(room, currentShareConfig);
+        } else {
+          if (currentShareConfig.codec === 'auto') {
+            await probeHardwareScreenShareCodecs();
+            if (superseded) return;
           }
-          // For native mode, recompute overdrive bitrate from actual track dimensions
-          resolveNativeOverdrive(mediaTrack ?? null, currentShareConfig, opts);
-          await applyOverdrive(room, Track.Source.ScreenShare, opts.overdrive);
+          const opts = buildScreenShareOptions(currentShareConfig);
+          // Codec changed mid-stream — the codec is baked into SDP negotiation,
+          // so republish the same track under the new options (no re-capture).
+          const publishedCodec = getRequestedPublishedScreenShareCodec();
+          if (publishedCodec && publishedCodec !== opts.publish.videoCodec) {
+            await republishScreenShare(room);
+            return;
+          }
+
+          const swappedProcessor = await syncPublishedScreenShareColorProcessor(room);
+          if (swappedProcessor) {
+            updateParticipants();
+          }
+
+          const screenPub = room.localParticipant.getTrackPublications().find(p => p.source === Track.Source.ScreenShare);
+          if (screenPub?.videoTrack) {
+            const publishedMediaTrack = getMediaStreamTrack(screenPub.videoTrack);
+            const mediaTrack = getUnderlyingCaptureTrack(publishedMediaTrack) ?? publishedMediaTrack;
+            if (mediaTrack) {
+              try {
+                if (!isWindowsElectronCapture() && opts.capture.width > 0 && opts.capture.height > 0) {
+                  // Standard mode: apply resolution + frameRate together without min: 15
+                  await mediaTrack.applyConstraints({
+                    width: { ideal: opts.capture.width, max: opts.capture.width },
+                    height: { ideal: opts.capture.height, max: opts.capture.height },
+                    frameRate: { ideal: opts.capture.frameRate, max: opts.capture.frameRate },
+                  });
+                } else {
+                  // Native mode or Windows Electron zero-scale GPU path: apply frameRate only
+                  await mediaTrack.applyConstraints({
+                    frameRate: { ideal: opts.capture.frameRate, max: opts.capture.frameRate },
+                  });
+                }
+              } catch (err) {
+                console.warn('[LiveKit] Failed to apply capture constraints:', err);
+              }
+              mediaTrack.contentHint = opts.contentHint;
+              if (publishedMediaTrack) publishedMediaTrack.contentHint = opts.contentHint;
+            }
+            // For native mode, recompute overdrive bitrate from actual track dimensions
+            resolveNativeOverdrive(mediaTrack ?? null, currentShareConfig, opts);
+            if (isWindowsElectronCapture()) {
+              opts.overdrive.scaleResolutionDownBy = computeEncoderScaleDown(
+                mediaTrack?.getSettings().height,
+                opts.capture.height,
+              );
+            }
+            await applyOverdrive(room, Track.Source.ScreenShare, opts.overdrive);
+          }
         }
       }
       if (isCameraOn) { await applyOverdrive(room, Track.Source.Camera, CAMERA_OVERDRIVE); }

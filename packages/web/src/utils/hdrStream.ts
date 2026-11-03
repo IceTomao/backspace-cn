@@ -2,6 +2,7 @@ import type { StreamDynamicRange, VoiceUserState } from '@backspace/shared';
 
 /** Reserved for a verified native publisher, never an SDR HEVC track. */
 export const HDR_SCREEN_TRACK_NAME = 'backspace-screen-hdr-v1';
+export const SDR_SCREEN_TRACK_NAME = 'backspace-screen-sdr-v1';
 export const HDR_IDENTITY_PREFIX = '__backspace_hdr_v1__';
 
 export function nativeHdrOwner(identity: string): string | null {

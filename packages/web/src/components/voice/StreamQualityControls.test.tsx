@@ -173,11 +173,20 @@ describe('screen-share codec & color controls', () => {
     const persisted = JSON.parse(localStorage.getItem('backspace-voice-settings') ?? '{}');
     expect(persisted.state.screenShareConfig.codec).toBe('auto');
 
-    // Verify 3-way Congestion Strategy selector defaults to Maintain Resolution and updates cleanly
+    // Verify 1440p / Native / 120fps pills and Gaming default Maintain Framerate + Text mode linkage
+    expect(screen.getByRole('button', { name: '1440p' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Native' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '120' })).toBeEnabled();
+
     const maintainResBtn = screen.getByRole('button', { name: i18n.t('voice:streamSettings.degradation.maintainResolution') });
     const maintainFpsBtn = screen.getByRole('button', { name: i18n.t('voice:streamSettings.degradation.maintainFramerate') });
+    expect(maintainFpsBtn).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('voice:streamSettings.mode.text') }));
     expect(maintainResBtn).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(maintainFpsBtn);
+    expect(useVoiceStore.getState().screenShareConfig.degradationPreference).toBe('maintain-resolution');
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('voice:streamSettings.mode.gaming') }));
     expect(maintainFpsBtn).toHaveAttribute('aria-pressed', 'true');
     expect(useVoiceStore.getState().screenShareConfig.degradationPreference).toBe('maintain-framerate');
   });

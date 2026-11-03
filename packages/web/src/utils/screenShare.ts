@@ -9,6 +9,7 @@ import { useUIStore } from '../stores/uiStore';
 import { openScreenShareSetup } from '../stores/screenShareSetupStore';
 import i18n from '../i18n';
 import { useNativeHdrStore } from '../stores/nativeHdrStore';
+import { useNativeSdrStore } from '../stores/nativeSdrStore';
 import { getElectronAPI } from '../platform/platform';
 import { DEFAULT_STREAM_COLOR, isDefaultStreamColor, type StreamColorSettings } from './streamColor';
 import {
@@ -18,9 +19,11 @@ import {
   getUnderlyingCaptureTrack,
 } from './streamColorProcessor';
 import {
+  isH264WebRtcSupported,
   isH265WebRtcSupported,
   probeHardwareScreenShareCodecs,
   resolveEffectiveScreenShareCodec,
+  type CodecProbeTarget,
   type ResolvedScreenShareCodec,
 } from './codecCapabilities';
 import {
@@ -37,6 +40,21 @@ export interface OverdriveOptions {
   maxBitrate: number;
   maxFramerate: number;
   degradationPreference: RTCDegradationPreference;
+  scaleResolutionDownBy?: number;
+}
+
+export function isWindowsElectronCapture(): boolean {
+  return getElectronAPI()?.platform === 'win32';
+}
+
+export function computeEncoderScaleDown(
+  sourceHeight: number | undefined,
+  targetHeight: number,
+): number {
+  if (!sourceHeight || sourceHeight <= 0 || targetHeight <= 0 || sourceHeight <= targetHeight) {
+    return 1;
+  }
+  return Math.max(1, Math.round((sourceHeight / targetHeight) * 1000) / 1000);
 }
 
 export interface ScreenShareBuildResult {
@@ -163,7 +181,10 @@ export function buildScreenShareOptions(config: ScreenShareConfig): ScreenShareB
     const nearestFps = STANDARD_FRAMERATES.reduce((a, b) =>
       Math.abs(b - fps) < Math.abs(a - fps) ? b : a
     );
-    rawKbps = resolveMatrixKbps(2160, nearestFps, overrides);
+    const fallbackNativeHeight = STANDARD_RESOLUTIONS.includes(limits.maxResolution as StandardResolution)
+      ? limits.maxResolution
+      : 1440;
+    rawKbps = resolveMatrixKbps(fallbackNativeHeight, nearestFps, overrides);
   } else {
     rawKbps = resolveMatrixKbps(height as number, fps, overrides);
   }
@@ -179,12 +200,34 @@ export function buildScreenShareOptions(config: ScreenShareConfig): ScreenShareB
   // Convert to bps ONLY at the WebRTC boundary
   const bps = clampedKbps * 1000;
 
-  // Backup encoding: H.264 is universally supported, so omit backupCodec there;
-  // for H.265 / VP9 use BackupCodecPolicy.REGRESSION so the VP8 software encoder
-  // is never instantiated simultaneously alongside the primary stream.
+  // Backup encoding: H.264 is universally supported, so omit backupCodec there.
+  // For H.265 / VP9 use BackupCodecPolicy.REGRESSION so the backup encoder is
+  // never instantiated simultaneously alongside the primary stream. When the
+  // sender supports H.264, use hardware-accelerated H.264 at full target FPS
+  // instead of VP8 capped at 30fps so Firefox / non-HEVC viewers never force a
+  // 60/120fps → 30fps CPU software regression.
   const needsBackupCodec = !config.hdrEnabled && resolvedCodec !== 'h264';
-  const backupFps = Math.min(fps, 30);
-  const backupBps = Math.round(bps * (backupFps / fps));
+  let backupCodec: { codec: 'vp8' | 'h264'; encoding: { maxBitrate: number; maxFramerate: number } } | undefined;
+  if (needsBackupCodec) {
+    if (isH264WebRtcSupported()) {
+      let h264BackupKbps = rawKbps;
+      if (!usingCustomBitrate && mode === 'gaming') {
+        h264BackupKbps = Math.round(h264BackupKbps * H264_GAMING_BITRATE_MULTIPLIER);
+      }
+      const clampedBackupKbps = Math.min(Math.max(h264BackupKbps, limits.minBitrateKbps), limits.maxBitrateKbps);
+      backupCodec = {
+        codec: 'h264',
+        encoding: { maxBitrate: clampedBackupKbps * 1000, maxFramerate: fps },
+      };
+    } else {
+      const backupFps = Math.min(fps, 30);
+      const backupBps = Math.round(bps * (backupFps / fps));
+      backupCodec = {
+        codec: 'vp8',
+        encoding: { maxBitrate: backupBps, maxFramerate: backupFps },
+      };
+    }
+  }
 
   return {
     capture: { width: captureWidth, height: captureHeight, frameRate: fps },
@@ -192,10 +235,7 @@ export function buildScreenShareOptions(config: ScreenShareConfig): ScreenShareB
       videoCodec: resolvedCodec,
       videoEncoding: { maxBitrate: bps, maxFramerate: fps },
       simulcast: false,
-      backupCodec: needsBackupCodec ? {
-        codec: 'vp8' as const,
-        encoding: { maxBitrate: backupBps, maxFramerate: backupFps },
-      } : undefined,
+      backupCodec,
       backupCodecPolicy: needsBackupCodec ? BackupCodecPolicy.REGRESSION : undefined,
       audioPreset: AudioPresets.musicHighQualityStereo,
       dtx: false,
@@ -205,10 +245,48 @@ export function buildScreenShareOptions(config: ScreenShareConfig): ScreenShareB
     overdrive: {
       maxBitrate: bps,
       maxFramerate: fps,
-      degradationPreference: config.degradationPreference ?? 'maintain-resolution',
+      degradationPreference: config.degradationPreference ?? (mode === 'gaming' ? 'maintain-framerate' : 'maintain-resolution'),
     },
     contentHint: mode === 'text' ? 'detail' : 'motion',
   };
+}
+
+function buildProbeTargetForConfig(config: ScreenShareConfig): CodecProbeTarget {
+  const height = config.height === 'native' ? 1440 : (config.height as number);
+  const width = WIDTH_MAP[height as StandardResolution] ?? Math.round((height * 16) / 9);
+  const nearestFps = STANDARD_FRAMERATES.reduce((a, b) =>
+    Math.abs(b - config.fps) < Math.abs(a - config.fps) ? b : a,
+  );
+  const bitrateKbps = config.customBitrateKbps ?? resolveMatrixKbps(height, nearestFps, getStreamingLimits().bitrateMatrixOverrides);
+  return {
+    width,
+    height,
+    framerate: config.fps,
+    bitrate: bitrateKbps * 1000,
+  };
+}
+
+async function applyCaptureConstraintsToTrack(
+  track: MediaStreamTrack,
+  opts: ScreenShareBuildResult,
+): Promise<void> {
+  const rawTrack = getUnderlyingCaptureTrack(track) ?? track;
+  if (typeof rawTrack.applyConstraints !== 'function') return;
+  try {
+    if (!isWindowsElectronCapture() && opts.capture.width > 0 && opts.capture.height > 0) {
+      await rawTrack.applyConstraints({
+        width: { ideal: opts.capture.width, max: opts.capture.width },
+        height: { ideal: opts.capture.height, max: opts.capture.height },
+        frameRate: { ideal: opts.capture.frameRate, max: opts.capture.frameRate },
+      });
+    } else {
+      await rawTrack.applyConstraints({
+        frameRate: { ideal: opts.capture.frameRate, max: opts.capture.frameRate },
+      });
+    }
+  } catch (err) {
+    console.warn('[ScreenShare] Failed to apply capture constraints:', err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -239,8 +317,18 @@ export function resolveNativeOverdrive(
   opts.overdrive.maxBitrate = bps;
   opts.publish.videoEncoding.maxBitrate = bps;
   if (opts.publish.backupCodec) {
-    const backupFps = opts.publish.backupCodec.encoding.maxFramerate;
-    opts.publish.backupCodec.encoding.maxBitrate = Math.round(bps * (backupFps / config.fps));
+    if (opts.publish.backupCodec.codec === 'h264') {
+      let h264NativeKbps = nativeKbps;
+      if (!config.hdrEnabled && config.mode === 'gaming') {
+        h264NativeKbps = Math.round(h264NativeKbps * H264_GAMING_BITRATE_MULTIPLIER);
+      }
+      const clampedBackupKbps = Math.min(Math.max(h264NativeKbps, limits.minBitrateKbps), limits.maxBitrateKbps);
+      opts.publish.backupCodec.encoding.maxBitrate = clampedBackupKbps * 1000;
+      opts.publish.backupCodec.encoding.maxFramerate = config.fps;
+    } else {
+      const backupFps = opts.publish.backupCodec.encoding.maxFramerate;
+      opts.publish.backupCodec.encoding.maxBitrate = Math.round(bps * (backupFps / config.fps));
+    }
   }
 }
 
@@ -285,10 +373,39 @@ export async function applyOverdrive(
     params.encodings[idx]!.maxFramerate = options.maxFramerate;
     params.encodings[idx]!.priority = 'high';
     params.encodings[idx]!.networkPriority = 'high';
+    if (options.scaleResolutionDownBy !== undefined) {
+      params.encodings[idx]!.scaleResolutionDownBy = options.scaleResolutionDownBy;
+    }
     (params as RTCRtpSendParameters & { degradationPreference?: RTCDegradationPreference }).degradationPreference =
       options.degradationPreference;
 
     await sender.setParameters(params);
+
+    // Also configure any LiveKit REGRESSION / SIMULCAST backup codec senders (e.g. H.265 → H.264)
+    const simulcastCodecs = (pub.track as {
+      simulcastCodecs?: Map<string, { sender?: RTCRtpSender; mediaStreamTrack?: MediaStreamTrack }>;
+    }).simulcastCodecs;
+    if (simulcastCodecs) {
+      for (const entry of simulcastCodecs.values()) {
+        const backupSender = entry.sender
+          ?? (entry.mediaStreamTrack ? senders.find(s => s.track?.id === entry.mediaStreamTrack?.id) : undefined);
+        if (!backupSender || backupSender === sender) continue;
+        const bp = backupSender.getParameters();
+        if (!bp.encodings?.length) continue;
+        if (bp.encodings.length === 1 && Object.keys(bp.encodings[0]!).length === 0) continue;
+        const bIdx = bp.encodings.length - 1;
+        bp.encodings[bIdx]!.maxBitrate = options.maxBitrate;
+        bp.encodings[bIdx]!.maxFramerate = options.maxFramerate;
+        bp.encodings[bIdx]!.priority = 'high';
+        bp.encodings[bIdx]!.networkPriority = 'high';
+        if (options.scaleResolutionDownBy !== undefined) {
+          bp.encodings[bIdx]!.scaleResolutionDownBy = options.scaleResolutionDownBy;
+        }
+        (bp as RTCRtpSendParameters & { degradationPreference?: RTCDegradationPreference }).degradationPreference =
+          options.degradationPreference;
+        await backupSender.setParameters(bp).catch(() => {});
+      }
+    }
     return true;
   } catch (err) {
     console.warn('[ScreenShare] Failed to apply overdrive:', err);
@@ -304,8 +421,8 @@ function buildCaptureConstraints(config: ScreenShareConfig, opts: ScreenShareBui
   const video: MediaTrackConstraints = {
     frameRate: { ideal: opts.capture.frameRate, max: opts.capture.frameRate },
   };
-  // Native mode: no resolution constraint so the display captures at full size
-  if (opts.capture.width > 0 && opts.capture.height > 0) {
+  // Native mode (or Windows Electron zero-scale GPU path): no resolution constraint on capturer
+  if (!isWindowsElectronCapture() && opts.capture.width > 0 && opts.capture.height > 0) {
     video.width = { ideal: opts.capture.width, max: opts.capture.width };
     video.height = { ideal: opts.capture.height, max: opts.capture.height };
   }
@@ -424,7 +541,7 @@ function assertBrowserScreenShareIsSdr(config: ScreenShareConfig): void {
 export async function stageScreenCapture(): Promise<MediaStream> {
   const config = useVoiceStore.getState().screenShareConfig;
   assertBrowserScreenShareIsSdr(config);
-  void probeHardwareScreenShareCodecs();
+  void probeHardwareScreenShareCodecs(buildProbeTargetForConfig(config));
   const opts = buildScreenShareOptions(config);
   if (!isScreenCaptureSupported()) {
     throw new DOMException('getDisplayMedia is not available', 'NotSupportedError');
@@ -432,7 +549,10 @@ export async function stageScreenCapture(): Promise<MediaStream> {
   try {
     const rawStream = await navigator.mediaDevices.getDisplayMedia(buildCaptureConstraints(config, opts));
     const video = rawStream.getVideoTracks()[0];
-    if (video) video.contentHint = opts.contentHint;
+    if (video) {
+      await applyCaptureConstraintsToTrack(video, opts);
+      video.contentHint = opts.contentHint;
+    }
     const currentColor = useVoiceStore.getState().screenShareConfig.streamColor ?? DEFAULT_STREAM_COLOR;
     if (isDefaultStreamColor(currentColor)) {
       return rawStream;
@@ -489,10 +609,18 @@ let _publishedScreenShareCodec: ResolvedScreenShareCodec | 'vp8' | null = null;
 let _requestedPublishedScreenShareCodec: ResolvedScreenShareCodec | null = null;
 
 export function getPublishedScreenShareCodec(): ResolvedScreenShareCodec | 'vp8' | null {
+  const nativeSdr = useNativeSdrStore.getState();
+  if (nativeSdr.active && nativeSdr.codec) {
+    return nativeSdr.codec === 'hevc' ? 'h265' : 'h264';
+  }
   return _publishedScreenShareCodec;
 }
 
 export function getRequestedPublishedScreenShareCodec(): ResolvedScreenShareCodec | null {
+  const nativeSdr = useNativeSdrStore.getState();
+  if (nativeSdr.active && nativeSdr.requestedResolvedCodec) {
+    return nativeSdr.requestedResolvedCodec;
+  }
   return _requestedPublishedScreenShareCodec;
 }
 
@@ -527,12 +655,16 @@ export async function publishScreenShare(room: Room, stream: MediaStream): Promi
   const cleanStream = detachStreamColorProcessor(stream);
   const config = ensureSupportedScreenShareCodec();
   if (config.codec === 'auto') {
-    await probeHardwareScreenShareCodecs();
+    await probeHardwareScreenShareCodecs(buildProbeTargetForConfig(config));
   }
   const opts = buildScreenShareOptions(config);
   const videoTrack = cleanStream.getVideoTracks()[0];
   if (!videoTrack || videoTrack.readyState !== 'live') return false;
   const audioTrack = cleanStream.getAudioTracks().find((t) => t.readyState === 'live') ?? null;
+
+  // Lock OS capture resolution & frameRate BEFORE LiveKit negotiates or attaches
+  // the WebRTC video source adapter so Electron's capturer starts at target FPS.
+  await applyCaptureConstraintsToTrack(videoTrack, opts);
 
   // Compute exact Native-mode bitrate from real track dimensions BEFORE negotiation
   // so 1080p/1440p native captures do not initially negotiate a 4K 20 Mbps ceiling.
@@ -584,7 +716,7 @@ export async function publishScreenShare(room: Room, stream: MediaStream): Promi
     _requestedPublishedScreenShareCodec = opts.publish.videoCodec;
     _publishedScreenShareCodec = null;
     useVoiceStore.setState({ isScreenSharing: true, screenShareDynamicRange: 'sdr' });
-    scheduleScreenShareOverdrive(room);
+    scheduleScreenShareOverdrive(room, { captureAlreadyApplied: true });
     scheduleEncoderDetection(room, opts.publish.videoCodec, videoTrack.id);
     return true;
   } catch (err) {
@@ -676,10 +808,13 @@ const OVERDRIVE_ATTEMPT_OFFSETS_MS = [0, 250, 750, 2000, 5000] as const;
  * estimate converges. Reconnect and track-restart paths use the same scheduler
  * because they can replace the sender and briefly expose placeholder encodings.
  */
-export function scheduleScreenShareOverdrive(room: Room): void {
+export function scheduleScreenShareOverdrive(
+  room: Room,
+  options?: { captureAlreadyApplied?: boolean },
+): void {
   const startedAt = Date.now();
   let attemptIndex = 0;
-  let captureConfigured = false;
+  let captureConfigured = options?.captureAlreadyApplied ?? false;
 
   const apply = async (): Promise<void> => {
     if (!useVoiceStore.getState().isScreenSharing) return;
@@ -692,33 +827,21 @@ export function scheduleScreenShareOverdrive(room: Room): void {
       const mediaTrack = getUnderlyingCaptureTrack(publishedTrack) ?? publishedTrack;
       if (!captureConfigured) {
         captureConfigured = true;
-        try {
-          if (freshOpts.capture.width > 0 && freshOpts.capture.height > 0) {
-            // Standard mode: apply resolution + frameRate together (omit min: 15 so DWM/WGC never forces frame duplication)
-            await mediaTrack.applyConstraints({
-              width: { ideal: freshOpts.capture.width, max: freshOpts.capture.width },
-              height: { ideal: freshOpts.capture.height, max: freshOpts.capture.height },
-              frameRate: { ideal: freshOpts.capture.frameRate, max: freshOpts.capture.frameRate },
-            });
-          } else {
-            // Native mode: apply frameRate only — never pass 0 to width/height
-            await mediaTrack.applyConstraints({
-              frameRate: { ideal: freshOpts.capture.frameRate, max: freshOpts.capture.frameRate },
-            });
-          }
-          mediaTrack.contentHint = freshOpts.contentHint;
-          publishedTrack.contentHint = freshOpts.contentHint;
-        } catch (err) {
-          // Capture constraints and sender parameters are independent. A browser
-          // rejecting one constraint must not cancel the bounded sender retry.
-          console.warn('[ScreenShare] Failed to apply capture constraints:', err);
-        }
+        await applyCaptureConstraintsToTrack(mediaTrack, freshOpts);
       }
+      mediaTrack.contentHint = freshOpts.contentHint;
+      publishedTrack.contentHint = freshOpts.contentHint;
 
       // Native dimensions can settle after negotiation/restart, so recompute
       // their ceiling on each bounded sender attempt without reapplying capture
       // constraints or restarting the source track.
       resolveNativeOverdrive(mediaTrack, useVoiceStore.getState().screenShareConfig, freshOpts);
+      if (isWindowsElectronCapture()) {
+        freshOpts.overdrive.scaleResolutionDownBy = computeEncoderScaleDown(
+          mediaTrack.getSettings().height,
+          freshOpts.capture.height,
+        );
+      }
     }
     const applied = await applyOverdrive(room, Track.Source.ScreenShare, freshOpts.overdrive);
     if (!useVoiceStore.getState().isScreenSharing) return;
@@ -780,25 +903,38 @@ async function inspectPublishedEncoder(
   ) ?? (screenPub.track as { sender?: RTCRtpSender }).sender;
   if (!sender) return false;
 
-  const stats = await sender.getStats();
+  const candidateSenders: RTCRtpSender[] = [sender];
+  const simulcastCodecs = (screenPub.track as {
+    simulcastCodecs?: Map<string, { sender?: RTCRtpSender; mediaStreamTrack?: MediaStreamTrack }>;
+  }).simulcastCodecs;
+  if (simulcastCodecs) {
+    for (const sc of simulcastCodecs.values()) {
+      const bs = sc.sender ?? (sc.mediaStreamTrack ? pc.getSenders().find(s => s.track?.id === sc.mediaStreamTrack?.id) : undefined);
+      if (bs && !candidateSenders.includes(bs)) candidateSenders.push(bs);
+    }
+  }
+
   const codecById = new Map<string, string>();
   const outbound: Array<{ codec: ResolvedScreenShareCodec | 'vp8'; bytesSent: number; encoderImpl: string | null }> = [];
-  stats.forEach((report) => {
-    const entry = report as EncoderStatsEntry;
-    if (entry.type === 'codec' && entry.mimeType) codecById.set(entry.id, entry.mimeType);
-  });
-  stats.forEach((report) => {
-    const entry = report as EncoderStatsEntry;
-    if (entry.type !== 'outbound-rtp' || (entry.kind !== 'video' && entry.mediaType !== 'video')) return;
-    if (entry.active === false) return;
-    const codec = normalizeVideoCodec(entry.mimeType ?? (entry.codecId ? codecById.get(entry.codecId) : undefined));
-    if (!codec) return;
-    outbound.push({
-      codec,
-      bytesSent: entry.bytesSent ?? 0,
-      encoderImpl: entry.encoderImplementation ?? null,
+  for (const cand of candidateSenders) {
+    const stats = await cand.getStats();
+    stats.forEach((report) => {
+      const entry = report as EncoderStatsEntry;
+      if (entry.type === 'codec' && entry.mimeType) codecById.set(entry.id, entry.mimeType);
     });
-  });
+    stats.forEach((report) => {
+      const entry = report as EncoderStatsEntry;
+      if (entry.type !== 'outbound-rtp' || (entry.kind !== 'video' && entry.mediaType !== 'video')) return;
+      if (entry.active === false) return;
+      const codec = normalizeVideoCodec(entry.mimeType ?? (entry.codecId ? codecById.get(entry.codecId) : undefined));
+      if (!codec) return;
+      outbound.push({
+        codec,
+        bytesSent: entry.bytesSent ?? 0,
+        encoderImpl: entry.encoderImplementation ?? null,
+      });
+    });
+  }
   if (outbound.length === 0) return false;
 
   const sending = outbound.filter((entry) => entry.bytesSent > 0);
@@ -810,11 +946,25 @@ async function inspectPublishedEncoder(
       : outbound.find((entry) => entry.codec === requestedCodec) ?? outbound[0]!);
   _publishedScreenShareCodec = selected.codec;
 
+  // If viewer capability regression switched the active outbound stream (e.g. H.265 → H.264),
+  // reassert overdrive on the regressed sender so full target FPS & gaming bitrate stay locked.
+  if (selected.codec !== requestedCodec && selected.bytesSent > 0 && selected.codec === 'h264') {
+    const currentConfig = useVoiceStore.getState().screenShareConfig;
+    const regressedConfig: ScreenShareConfig = { ...currentConfig, codec: 'h264' };
+    const regressedOpts = buildScreenShareOptions(regressedConfig);
+    resolveNativeOverdrive(rawTrack, regressedConfig, regressedOpts);
+    void applyOverdrive(room, Track.Source.ScreenShare, regressedOpts.overdrive);
+  }
+
   const h264Implementations = outbound
     .filter((entry) => entry.codec === 'h264')
     .map((entry) => entry.encoderImpl)
     .filter((value): value is string => value != null);
-  if (requestedCodec === 'h264' && h264Implementations.some((value) => /openh264/i.test(value))) {
+  if (
+    (requestedCodec === 'h264' || selected.codec === 'h264') &&
+    selected.codec === 'h264' &&
+    h264Implementations.some((value) => /openh264/i.test(value))
+  ) {
     useUIStore.getState().addToast(
       i18n.t('voice:streamSettings.softwareH264Fallback'),
       'warning',
@@ -825,7 +975,7 @@ async function inspectPublishedEncoder(
 
   if (
     selected.encoderImpl &&
-    (selected.codec === 'vp9' || selected.codec === 'h265') &&
+    (selected.codec === 'vp9' || selected.codec === 'h265' || selected.codec === 'vp8') &&
     /libvpx|libaom|ffmpeg|openh264/i.test(selected.encoderImpl)
   ) {
     useUIStore.getState().addToast(
@@ -876,6 +1026,10 @@ function scheduleEncoderDetection(
 // ---------------------------------------------------------------------------
 
 export async function stopScreenShare(room: Room): Promise<void> {
+  if (useNativeSdrStore.getState().active) {
+    await useNativeSdrStore.getState().stop(room);
+    return;
+  }
   if (useNativeHdrStore.getState().publication || useVoiceStore.getState().screenShareDynamicRange === 'hdr') {
     getElectronAPI()?.setStreamingPowerMode?.(false);
     await useNativeHdrStore.getState().stop('publisher');

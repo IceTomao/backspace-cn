@@ -80,4 +80,41 @@ describe('hwOverdrive SDP rewriter', () => {
     const rawOffer = await pc.createOffer();
     expect(rawOffer.sdp).not.toContain('x-google-start-bitrate');
   });
+
+  it('upgrades H.264 REGRESSION backup transceiver when primary codec is H.265 while excluding camera', () => {
+    const sdp = [
+      'v=0',
+      'm=video 9 UDP/TLS/RTP/SAVPF 102',
+      'a=msid:cam-stream cam-track-1',
+      'a=rtpmap:102 H264/90000',
+      'a=fmtp:102 profile-level-id=42e01f',
+      'm=video 9 UDP/TLS/RTP/SAVPF 104 102',
+      'a=msid:screen-stream screen-primary-track',
+      'a=rtpmap:104 H265/90000',
+      'a=rtpmap:102 H264/90000',
+      'a=fmtp:102 profile-level-id=42e01f',
+      'm=video 9 UDP/TLS/RTP/SAVPF 102',
+      'a=msid:backup-stream screen-cloned-backup-track',
+      'a=rtpmap:102 H264/90000',
+      'a=fmtp:102 profile-level-id=42e01f',
+      '',
+    ].join('\r\n');
+
+    const rewritten = rewriteScreenShareSdp(sdp, {
+      codec: 'h265',
+      targetBitrateBps: 14_000_000,
+      trackId: 'screen-primary-track',
+      excludeTrackIds: ['cam-track-1'],
+    });
+
+    const sections = rewritten.split('m=video ');
+    // Camera section stays untouched
+    expect(sections[1]).toContain('profile-level-id=42e01f');
+    expect(sections[1]).not.toContain('x-google-start-bitrate');
+    // Primary H.265 section upgrades H.264 and sets bitrate floor on both H.265 & H.264
+    expect(sections[2]).toContain('a=fmtp:104 x-google-start-bitrate=10500;x-google-min-bitrate=4500');
+    expect(sections[2]).toContain('a=fmtp:102 profile-level-id=4d0032;x-google-start-bitrate=10500;x-google-min-bitrate=4500');
+    // Cloned H.264 backup transceiver also upgrades to 4d0032 + bitrate floor
+    expect(sections[3]).toContain('a=fmtp:102 profile-level-id=4d0032;x-google-start-bitrate=10500;x-google-min-bitrate=4500');
+  });
 });

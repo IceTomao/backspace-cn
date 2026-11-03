@@ -30,6 +30,26 @@ await run(csc, ['/nologo', '/platform:x64', '/target:exe', '/r:System.Web.Extens
 await run(go, ['build', '-trimpath', '-ldflags=-s -w', '-o', path.join(destination, 'hdr-bridge.exe'), '.'], path.join(native, 'hdr-bridge'));
 await fs.copyFile(path.join(native, 'hdr-probe.hevc'), path.join(destination, 'hdr-probe.hevc'));
 await fs.copyFile(path.join(native, 'acceptance.json'), path.join(destination, 'acceptance.json'));
+await fs.copyFile(path.join(native, 'THIRD_PARTY_NOTICES.md'), path.join(destination, 'THIRD_PARTY_NOTICES.md'));
+
+// Populate Go module dependency licenses in hdr-runtime/dependency-licenses without dirtying git worktree.
+const vendorTmp = path.join(repo, 'experiments/windows-hdr/.artifacts/bridge-vendor');
+await fs.rm(vendorTmp, { recursive: true, force: true });
+await fs.cp(path.join(native, 'hdr-bridge'), vendorTmp, { recursive: true, filter: s => !s.endsWith('.exe') });
+await run(go, ['mod', 'vendor'], vendorTmp);
+const depLicenses = path.join(destination, 'dependency-licenses');
+await fs.mkdir(depLicenses, { recursive: true });
+async function copyVendorLicenses(dir, rel = '') {
+  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+    const child = path.join(dir, entry.name), name = path.join(rel, entry.name);
+    if (entry.isDirectory()) await copyVendorLicenses(child, name);
+    else if (/^(licen[cs]e|copying|notice|authors|copyright)([.-]|$)/i.test(entry.name)) {
+      await fs.mkdir(path.dirname(path.join(depLicenses, name)), { recursive: true });
+      await fs.copyFile(child, path.join(depLicenses, name));
+    }
+  }
+}
+await copyVendorLicenses(path.join(vendorTmp, 'vendor'));
 
 if (args.includes('--assemble-runtime')) {
   // setup-runtime.mjs pins downloads by asset ID and SHA-256 before extraction.

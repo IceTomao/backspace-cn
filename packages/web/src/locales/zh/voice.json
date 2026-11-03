@@ -65,7 +65,23 @@
       "encoderImplementation": "编码器实现",
       "qpDelta": "QP 增量",
       "nackDelta": "NACK 增量",
-      "pliDelta": "PLI 增量"
+      "pliDelta": "PLI 增量",
+      "captureFps": "采集帧率",
+      "captureFpsValue": "{{capture}} / {{target}} 帧",
+      "encodeFps": "编码帧率",
+      "encodeFpsValue": "{{fps}} 帧",
+      "encodeTime": "单帧编码耗时",
+      "hwAccel": "硬编",
+      "swFallback": "软编",
+      "bottleneck": "实时瓶颈诊断",
+      "bottleneckStatus": {
+        "ok": "运行流畅（无瓶颈）",
+        "bandwidth": "网络上行带宽受限",
+        "encoderOverload": "显卡/CPU 编码过载",
+        "softwareEncoder": "软件编码回退（建议切自动/H.264）",
+        "captureStarved": "采集掉帧（建议改共享「屏幕」或锁游戏帧率留显卡余量）",
+        "codecRegressed": "已兼容观众切至 {{codec}}"
+      }
     },
     "source": {
       "microphone": "麦克风",
@@ -105,6 +121,7 @@
     "stageReady": "准备好了",
     "permissionHintMac": "在Backspace拥有屏幕录制权限之前， macOS会阻止屏幕捕获。在系统设置→隐私和安全→屏幕录制中授予它，然后重试。",
     "retrySources": "再试一次",
+    "windowsHighFpsScreenHint": "高帧率（60/120帧）游戏直播建议切到「屏幕」共享整个显示器：窗口捕获在高负载全屏游戏下易被系统压到 30 帧，共享屏幕走 DXGI 高刷直通更稳。",
     "kind": {
       "monitor": "屏幕",
       "window": "窗口"
@@ -207,7 +224,10 @@
     "lowLatency": "超低延迟模式",
     "isStreaming": "{{name}}正在流式传输",
     "hdrPlaying": "正在原生 HDR 窗口中观看",
-    "hdrOpenNative": "在 HDR 窗口中观看"
+    "hdrOpenNative": "在 HDR 窗口中观看",
+    "localPreviewPaused": "已暂停本地预览以节省双屏游戏性能",
+    "previewLocal": "预览画面",
+    "pausePreview": "暂停预览"
   },
   "streamDiagnostics": {
     "publisherNetwork": "主播的网络不稳定",

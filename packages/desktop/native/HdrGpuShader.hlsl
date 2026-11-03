@@ -67,6 +67,51 @@ void Convert(uint3 id : SV_DispatchThreadID) {
     Chroma[id.xy] = uint2(round(512.0 + 896.0 * uv)) << 6;
 }
 
+// WGC BGRA8 sRGB -> hardware aspect-fit scale + optional color grade -> limited-range BT.709 NV12.
+// Zero raw pixel readback to CPU memory.
+float3 sampleSdr(uint2 pixel) {
+    float scale = min(float(Width) / SourceWidth, float(Height) / SourceHeight);
+    float2 content = float2(SourceWidth, SourceHeight) * scale;
+    float2 position = float2(pixel) + 0.5 - (float2(Width, Height) - content) * 0.5;
+    if (any(position < 0.0) || any(position >= content)) return 0.0;
+    float3 srgb = saturate(Source.SampleLevel(LinearClamp, position / content, 0).rgb);
+    return applyColorChannels(srgb);
+}
+float3 yuv709(float3 rgb) {
+    float y = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+    return float3(y, (rgb.b - y) / 1.8556, (rgb.r - y) / 1.5748);
+}
+[numthreads(8, 8, 1)]
+void ConvertSdr(uint3 id : SV_DispatchThreadID) {
+    uint2 p = id.xy * 2;
+    if (p.x >= Width || p.y >= Height) return;
+    float3 a = yuv709(sampleSdr(p)), b = yuv709(sampleSdr(p + uint2(1, 0)));
+    float3 c = yuv709(sampleSdr(p + uint2(0, 1))), d = yuv709(sampleSdr(p + uint2(1, 1)));
+    Luma[p] = uint(round(16.0 + 219.0 * saturate(a.x)));
+    Luma[p + uint2(1, 0)] = uint(round(16.0 + 219.0 * saturate(b.x)));
+    Luma[p + uint2(0, 1)] = uint(round(16.0 + 219.0 * saturate(c.x)));
+    Luma[p + uint2(1, 1)] = uint(round(16.0 + 219.0 * saturate(d.x)));
+    float2 uv = clamp((a.yz + b.yz + c.yz + d.yz) * 0.25, -0.5, 0.5);
+    Chroma[id.xy] = uint2(round(128.0 + 224.0 * uv));
+}
+
+RWTexture2D<unorm float4> SyntheticSdr : register(u0);
+[numthreads(8, 8, 1)]
+void GenerateSdr(uint3 id : SV_DispatchThreadID) {
+    if (id.x >= SourceWidth || id.y >= SourceHeight) return;
+    uint patch = min(3, id.x * 4 / SourceWidth);
+    float3 rgb = patch == 0 ? float3(0.05, 0.05, 0.05) :
+                 patch == 1 ? float3(0.85, 0.20, 0.20) :
+                 patch == 2 ? float3(0.20, 0.80, 0.30) :
+                              float3(0.20, 0.45, 0.95);
+    if (Pattern == 2) {
+        uint n = (id.x + FrameIndex * 5) * 1664525u + (id.y + FrameIndex * 3) * 1013904223u;
+        n ^= n >> 13; n *= 1274126177u; n ^= n >> 16;
+        rgb = saturate(rgb * (0.5 + float3(n & 255u, (n >> 8) & 255u, (n >> 16) & 255u) / 510.0));
+    }
+    SyntheticSdr[id.xy] = float4(rgb, 1.0);
+}
+
 // Generate the test input on the GPU too. Pattern 0 is the reference grey
 // patches. Pattern 1 includes saturated HDR colors. Pattern 2 adds moving
 // detail over most rows to exercise conversion/encoding beyond a still image.

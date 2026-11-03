@@ -232,7 +232,7 @@ internal static class DisplayProbe
                             ",\"name\":" + Json(targetCode == 0 ? target.FriendlyName : "") +
                             ",\"hmonitor\":" + (handle == null ? "null" : Json(handle)) +
                             ",\"hdrSupported\":" + (hdrCode != 0 ? "null" : (hdr.Flags & 16) != 0 ? "true" : "false") +
-                            ",\"hdrActive\":" + hdrActive +
+                            ",\"hdrActive\":" + hdrActive + ",\"left\":" + (hasSize ? monitorInfo.Monitor.Left.ToString() : "null") + ",\"top\":" + (hasSize ? monitorInfo.Monitor.Top.ToString() : "null") + ",\"isPrimary\":" + (hasSize ? ((monitorInfo.Flags & 1) != 0 ? "true" : "false") : "null") +
                             ",\"width\":" + (hasSize ? (monitorInfo.Monitor.Right - monitorInfo.Monitor.Left).ToString() : "null") +
                             ",\"height\":" + (hasSize ? (monitorInfo.Monitor.Bottom - monitorInfo.Monitor.Top).ToString() : "null") +
                             ",\"dxgiColorSpace\":" + (hasDxgiSpace ? dxgiSpace.ToString() : "null") +

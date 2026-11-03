@@ -1,24 +1,27 @@
 // packages/web/src/utils/hwOverdrive.ts
 //
 // Negotiation-scoped SDP overdrive for screen-share publishing:
-// 1. Upgrades H.264 Constrained Baseline (42e01f/42c01f) → High Profile Level 5.0 (4d0032)
-//    to unlock hardware 1080p60 / 1440p60 / 4K60 NVENC / AMF / QSV encoding.
+// 1. Upgrades H.264 Constrained Baseline (42e01f/42c01f) → High/Main Profile Level 5.0 (4d0032)
+//    to unlock hardware 1080p60 / 1440p60 / 1440p120 NVENC / AMF / QSV encoding (including when
+//    H.264 is negotiated as a REGRESSION backup alongside H.265 or VP9).
 // 2. Injects `x-google-start-bitrate` and `x-google-min-bitrate` on the screen-share
-//    video media section so WebRTC's GCC congestion controller starts crisp and never
+//    video media section(s) so WebRTC's GCC congestion controller starts crisp and never
 //    collapses to ~300 kbps slow-start on transient cross-ISP jitter.
 
 export interface SdpOverdriveOptions {
   codec?: 'h264' | 'vp9' | 'h265';
   targetBitrateBps?: number;
   trackId?: string;
+  excludeTrackIds?: string[];
 }
 
 let _active = false;
 let _currentOptions: SdpOverdriveOptions = { codec: 'h264' };
 let _originalCreateOffer: typeof RTCPeerConnection.prototype.createOffer | null = null;
 
-function matchesCodecName(rtpCodec: string, target: 'h264' | 'vp9' | 'h265'): boolean {
+function matchesCodecName(rtpCodec: string, target: 'h264' | 'vp9' | 'h265', includeH264Backup = false): boolean {
   const upper = rtpCodec.toUpperCase();
+  if (includeH264Backup && upper === 'H264') return true;
   if (target === 'h264') return upper === 'H264';
   if (target === 'vp9') return upper === 'VP9';
   return upper === 'H265' || upper === 'HEVC';
@@ -62,7 +65,11 @@ export function rewriteScreenShareSdp(sdp: string, options: SdpOverdriveOptions)
   }
   if (current.length > 0) sections.push(current);
 
+  const excludeSet = new Set(options.excludeTrackIds ?? []);
+  const hasExplicitExclusions = options.excludeTrackIds !== undefined;
+
   const hasAnyMatchingTrackId = Boolean(
+    !hasExplicitExclusions &&
     options.trackId &&
     sections.some(
       (sec) =>
@@ -75,7 +82,12 @@ export function rewriteScreenShareSdp(sdp: string, options: SdpOverdriveOptions)
     const sec = sections[sIdx]!;
     if (!sec[0]?.startsWith('m=video ')) continue;
 
-    if (
+    if (hasExplicitExclusions) {
+      const isExcluded = sec.some(
+        (l) => l.startsWith('a=msid:') && [...excludeSet].some((id) => id && l.includes(id)),
+      );
+      if (isExcluded) continue;
+    } else if (
       hasAnyMatchingTrackId &&
       options.trackId &&
       !sec.some((l) => l.startsWith('a=msid:') && l.includes(options.trackId!))
@@ -83,19 +95,20 @@ export function rewriteScreenShareSdp(sdp: string, options: SdpOverdriveOptions)
       continue;
     }
 
-    if (codec === 'h264') {
-      for (let i = 0; i < sec.length; i++) {
-        sec[i] = sec[i]!.replace(/profile-level-id=(42e01f|42c01f)/gi, 'profile-level-id=4d0032');
-      }
+    // Upgrade H.264 Constrained Baseline → Level 5.0 (4d0032) for both primary H.264
+    // and REGRESSION backup H.264 (when primary is H.265 or VP9).
+    for (let i = 0; i < sec.length; i++) {
+      sec[i] = sec[i]!.replace(/profile-level-id=(42e01f|42c01f)/gi, 'profile-level-id=4d0032');
     }
 
     if (options.targetBitrateBps && options.targetBitrateBps > 0) {
       const { startKbps, minKbps } = computeBitrateBoundsKbps(options.targetBitrateBps);
       const matchingPayloads = new Set<string>();
+      const includeH264Backup = codec !== 'h264';
 
       for (const line of sec) {
         const match = /^a=rtpmap:(\d+)\s+([^/\s]+)\/\d+/i.exec(line);
-        if (match && matchesCodecName(match[2]!, codec)) {
+        if (match && matchesCodecName(match[2]!, codec, includeH264Backup)) {
           matchingPayloads.add(match[1]!);
         }
       }

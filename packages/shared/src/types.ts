@@ -622,6 +622,8 @@ export interface LiveKitStatusResponse {
   state: VoiceServiceState | null;
   /** Missing on older servers. Does not certify the client's HDR pipeline. */
   nativeHdrProtocol?: 1;
+  /** Present when the server authorizes native zero-copy SDR sidecar publishing. */
+  nativeSdrProtocol?: 1;
 }
 
 export interface NativeHdrTokenOptions {
@@ -629,10 +631,15 @@ export interface NativeHdrTokenOptions {
   targetIdentity?: string;
 }
 
+export interface NativeSdrTokenOptions {
+  role: 'publish';
+}
+
 export interface LiveKitTokenResponse {
   token: string;
   url: string;
   nativeHdr?: { protocol: 1; identity: string; ownerId: string; role: 'publish' | 'receive'; hasAudio?: boolean };
+  nativeSdr?: { protocol: 1; identity: string; ownerId: string; role: 'publish' };
 }
 
 export interface CreateDmRequest {

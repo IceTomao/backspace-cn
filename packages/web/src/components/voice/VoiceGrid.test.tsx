@@ -74,4 +74,18 @@ describe('VoiceGrid participant strip', () => {
     await userEvent.click(screen.getByText(/show members/i));
     expect(screen.getByText(/hide members/i)).toBeInTheDocument();
   });
+
+  it('pauses local streamer self-preview by default and toggles preview on demand', async () => {
+    const { setStreamSubscription } = await import('../../hooks/useLiveKit');
+    useVoiceStore.setState({ watchingStreams: new Set() });
+    const me = { ...participant('ada', true), isScreenSharing: true };
+    render(<VoiceGrid participants={[me]} />);
+
+    expect(screen.getByText('Local preview paused to save gaming performance')).toBeInTheDocument();
+    const previewBtn = screen.getByRole('button', { name: 'Preview Stream' });
+    await userEvent.click(previewBtn);
+
+    expect(setStreamSubscription).toHaveBeenCalledWith(null, 'ada', true);
+    expect(useVoiceStore.getState().watchingStreams.has('ada')).toBe(true);
+  });
 });

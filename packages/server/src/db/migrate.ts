@@ -13,8 +13,8 @@ export function ensureDefaults(db: Database.Database): void {
       `INSERT OR IGNORE INTO instance_settings
         (id, max_bitrate_kbps, min_bitrate_kbps, bitrate_step_kbps,
          allowed_resolutions, allowed_framerates, max_resolution, max_framerate, updated_at)
-       VALUES (1, 20000, 500, 500, ?, ?, 1080, 60, ?)`
-    ).run('540,720,1080', '30,45,60', Date.now());
+       VALUES (1, 35000, 500, 500, ?, ?, 1440, 120, ?)`
+    ).run('540,720,1080,1440,native', '30,45,60,75,90,120', Date.now());
     console.log('[defaults] Inserted default instance_settings row');
   }
 

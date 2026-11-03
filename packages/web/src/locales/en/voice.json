@@ -65,7 +65,23 @@
       "encoderImplementation": "Encoder implementation",
       "qpDelta": "QP sum delta",
       "nackDelta": "NACK delta",
-      "pliDelta": "PLI delta"
+      "pliDelta": "PLI delta",
+      "captureFps": "Capture FPS",
+      "captureFpsValue": "{{capture}} / {{target}} fps",
+      "encodeFps": "Encode FPS",
+      "encodeFpsValue": "{{fps}} fps",
+      "encodeTime": "Encode time",
+      "hwAccel": "HW",
+      "swFallback": "SW",
+      "bottleneck": "Bottleneck check",
+      "bottleneckStatus": {
+        "ok": "Smooth (no bottleneck)",
+        "bandwidth": "Network upload limited",
+        "encoderOverload": "GPU/CPU encoder overloaded",
+        "softwareEncoder": "Software encoder (use Auto/H.264)",
+        "captureStarved": "Capture throttled (share Screen or cap game FPS)",
+        "codecRegressed": "Compat fallback to {{codec}}"
+      }
     },
     "source": {
       "microphone": "Microphone",
@@ -105,6 +121,7 @@
     "stageReady": "Ready to go live",
     "permissionHintMac": "macOS blocks screen capture until Backspace has Screen Recording permission. Grant it in System Settings → Privacy & Security → Screen Recording, then try again.",
     "retrySources": "Try again",
+    "windowsHighFpsScreenHint": "For 60/120fps gaming, share an Entire Screen under Screens: window capture can drop to ~30fps under heavy GPU load, while screen capture uses direct DXGI high-refresh output.",
     "kind": {
       "monitor": "Screen",
       "window": "Window"
@@ -207,7 +224,10 @@
     "lowLatency": "Ultra-Low Latency",
     "isStreaming": "{{name}} is streaming",
     "hdrPlaying": "Playing in the native HDR window",
-    "hdrOpenNative": "Watch in an HDR window"
+    "hdrOpenNative": "Watch in an HDR window",
+    "localPreviewPaused": "Local preview paused to save gaming performance",
+    "previewLocal": "Preview Stream",
+    "pausePreview": "Pause Preview"
   },
   "streamDiagnostics": {
     "publisherNetwork": "The streamer's network is unstable",

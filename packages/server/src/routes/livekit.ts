@@ -4,8 +4,17 @@ import { authenticate } from '../utils/auth.js';
 import { sendError } from '../utils/httpErrors.js';
 import { config } from '../config.js';
 import { getChannelSpaceId, hasPermission, computePermissions, isDmMember, PermissionBits } from '../utils/permissions.js';
-import type { LiveKitTokenRequest, LiveKitTokenResponse, NativeHdrTokenOptions } from '@backspace/shared';
-import { nativeHdrIdentity, nativeHdrOwner, registerNativeHdrSession, confirmNativeHdrPublication, stopNativeHdrSession, reconcileNativeHdrSessions, getNativeHdrPublication } from '../utils/nativeHdr.js';
+import type { LiveKitTokenRequest, LiveKitTokenResponse, NativeHdrTokenOptions, NativeSdrTokenOptions } from '@backspace/shared';
+import {
+  nativeHdrIdentity,
+  nativeHdrOwner,
+  registerNativeHdrSession,
+  confirmNativeHdrPublication,
+  confirmNativeSdrPublication,
+  stopNativeHdrSession,
+  reconcileNativeHdrSessions,
+  getNativeHdrPublication,
+} from '../utils/nativeHdr.js';
 import { getDb, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { readVoiceServiceState } from '../utils/voiceRecovery.js';
@@ -47,7 +56,7 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
   const hdrTimer = setInterval(() => {
     if (reconciling) return;
     reconciling = true;
-    void reconcileNativeHdrSessions().catch(error => app.log.warn({ err: error }, 'HDR session reconciliation failed'))
+    void reconcileNativeHdrSessions().catch(error => app.log.warn({ err: error }, 'Native stream session reconciliation failed'))
       .finally(() => { reconciling = false; });
   }, 2000);
   hdrTimer.unref();
@@ -62,9 +71,23 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true };
     } catch { return sendError(reply, 503, 'voice_disabled'); }
   });
+  app.post<{ Body: { identity?: string; trackSid?: string | null } }>('/api/livekit/sdr-publication', { preHandler: authenticate }, async (request, reply) => {
+    const { identity, trackSid } = request.body ?? {};
+    if (typeof identity !== 'string' || !identity.startsWith('__backspace_hdr_v1__') || identity.length > 256 ||
+        (trackSid !== null && (typeof trackSid !== 'string' || trackSid.length > 128))) return sendError(reply, 400, 'validation_failed');
+    if (trackSid === null) { await stopNativeHdrSession(request.userId, identity); return { ok: true }; }
+    try {
+      if (!await confirmNativeSdrPublication(request.userId, identity, trackSid)) return sendError(reply, 409, 'forbidden');
+      return { ok: true };
+    } catch { return sendError(reply, 503, 'voice_disabled'); }
+  });
   app.get('/api/livekit/status', { preHandler: authenticate }, async (_request, reply) => {
-    return reply.header('Cache-Control', 'no-store').send({ state: readVoiceServiceState(),
-      ...(config.livekit.nativeHdrEnabled && config.livekit.apiKey && config.livekit.apiSecret ? { nativeHdrProtocol: 1 } : {}) });
+    const hasKeys = Boolean(config.livekit.apiKey && config.livekit.apiSecret);
+    return reply.header('Cache-Control', 'no-store').send({
+      state: readVoiceServiceState(),
+      ...(config.livekit.nativeHdrEnabled && hasKeys ? { nativeHdrProtocol: 1 } : {}),
+      ...(config.livekit.nativeSdrEnabled !== false && hasKeys ? { nativeSdrProtocol: 1 } : {}),
+    });
   });
   if (config.livekit.recoveryStatePath) {
     const { connectionManager } = await import('../ws/handler.js');
@@ -79,7 +102,7 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
     timer.unref();
     app.addHook('onClose', async () => { clearInterval(timer); });
   }
-  app.post<{ Body: LiveKitTokenRequest & { dmChannelId?: string; nativeHdr?: NativeHdrTokenOptions } }>('/api/livekit/token', {
+  app.post<{ Body: LiveKitTokenRequest & { dmChannelId?: string; nativeHdr?: NativeHdrTokenOptions; nativeSdr?: NativeSdrTokenOptions } }>('/api/livekit/token', {
     preHandler: authenticate,
   }, async (request, reply) => {
     if (!config.livekit.apiKey || !config.livekit.apiSecret) {
@@ -129,6 +152,10 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const native = request.body.nativeHdr;
+    const nativeSdr = request.body.nativeSdr;
+    if (native !== undefined && nativeSdr !== undefined) {
+      return sendError(reply, 400, 'validation_failed');
+    }
     let hdrAudio = false;
     if (native !== undefined) {
       if (!config.livekit.nativeHdrEnabled) return sendError(reply, 503, 'voice_disabled');
@@ -152,12 +179,27 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
         hdrAudio = publication.hasAudio;
       }
     }
-    const identity = native ? nativeHdrIdentity(request.userId, native.role) : `${request.userId}:${request.username}`;
+    if (nativeSdr !== undefined) {
+      if (config.livekit.nativeSdrEnabled === false) return sendError(reply, 503, 'voice_disabled');
+      if (!nativeSdr || nativeSdr.role !== 'publish') {
+        return sendError(reply, 400, 'validation_failed');
+      }
+      const { connectionManager } = await import('../ws/handler.js');
+      const current = connectionManager.getUserRoom(request.userId);
+      if (!current || current.roomId !== (channelId ?? dmChannelId)) {
+        return sendError(reply, 403, 'voice_connect_forbidden');
+      }
+      if (!canStream) return sendError(reply, 403, 'forbidden');
+    }
+
+    const helperRole = native ? native.role : nativeSdr ? 'publish' : null;
+    const identity = helperRole ? nativeHdrIdentity(request.userId, helperRole) : `${request.userId}:${request.username}`;
 
     const token = new AccessToken(config.livekit.apiKey, config.livekit.apiSecret, {
       identity,
-      ttl: native ? '5m' : '1h',
+      ttl: helperRole ? '5m' : '1h',
       ...(native ? { metadata: JSON.stringify({ kind: 'backspace-native-hdr', protocol: 1, ownerId: request.userId, role: native.role }) } : {}),
+      ...(nativeSdr ? { metadata: JSON.stringify({ kind: 'backspace-native-sdr', protocol: 1, ownerId: request.userId, role: 'publish' }) } : {}),
     });
 
     // Build canPublishSources based on permissions
@@ -173,14 +215,22 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
     token.addGrant({
       room: roomName,
       roomJoin: true,
-      canPublish: native ? native.role === 'publish' : canSpeak || canStream,
-      canPublishSources: native ? (native.role === 'publish' ? [TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO] : []) : canPublishSources,
-      canSubscribe: native ? native.role === 'receive' : true,
-      canPublishData: !native,
+      canPublish: helperRole ? helperRole === 'publish' : canSpeak || canStream,
+      canPublishSources: native
+        ? (native.role === 'publish' ? [TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO] : [])
+        : nativeSdr
+          ? [TrackSource.SCREEN_SHARE]
+          : canPublishSources,
+      canSubscribe: helperRole ? helperRole === 'receive' : true,
+      canPublishData: !helperRole,
     });
 
     const jwt = await token.toJwt();
-    if (native) registerNativeHdrSession({ identity, userId: request.userId, roomId: channelId ?? dmChannelId!, livekitRoom: roomName, role: native.role });
+    if (native) {
+      registerNativeHdrSession({ identity, userId: request.userId, roomId: channelId ?? dmChannelId!, livekitRoom: roomName, role: native.role, mode: 'hdr' });
+    } else if (nativeSdr) {
+      registerNativeHdrSession({ identity, userId: request.userId, roomId: channelId ?? dmChannelId!, livekitRoom: roomName, role: 'publish', mode: 'sdr' });
+    }
 
     const livekitUrl = config.livekit.url ?? '';
 
@@ -188,6 +238,7 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
       token: jwt,
       url: livekitUrl,
       ...(native ? { nativeHdr: { protocol: 1 as const, identity, ownerId: request.userId, role: native.role, ...(native.role === 'receive' ? { hasAudio: hdrAudio } : {}) } } : {}),
+      ...(nativeSdr ? { nativeSdr: { protocol: 1 as const, identity, ownerId: request.userId, role: 'publish' as const } } : {}),
     };
     return reply.code(200).send(response);
   });

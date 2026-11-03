@@ -80,6 +80,18 @@ beforeEach(async () => {
 });
 
 describe('GET /api/settings/instance', () => {
+  it('surfaces 2K, Native, 120fps, and 35Mbps defaults on GET /api/settings/streaming', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/settings/streaming' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      maxBitrateKbps: 35000,
+      allowedResolutions: [540, 720, 1080, 1440, 'native'],
+      allowedFramerates: [30, 45, 60, 75, 90, 120],
+      maxResolution: 1440,
+      maxFramerate: 120,
+    });
+  });
+
   it('surfaces federatedRegistrationOpen (default true)', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/settings/instance' });
     expect(res.statusCode).toBe(200);

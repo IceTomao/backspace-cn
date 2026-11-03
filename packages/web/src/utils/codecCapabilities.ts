@@ -14,16 +14,33 @@ export interface ProbedCodecCapabilities {
   vp9: CodecHardwareSupport;
 }
 
+export interface CodecProbeTarget {
+  width?: number;
+  height?: number;
+  framerate?: number;
+  bitrate?: number;
+}
+
 const H265_MIME_CANDIDATES = ['video/H265', 'video/hevc'] as const;
 const H264_MIME_CANDIDATES = [
+  'video/H264; profile-level-id=640034',
   'video/H264; profile-level-id=4d0032',
   'video/H264; profile-level-id=42e01f',
   'video/H264',
 ] as const;
 const VP9_MIME_CANDIDATES = ['video/VP9; profile-id=0', 'video/VP9'] as const;
 
+const DEFAULT_PROBE_TARGET: Required<CodecProbeTarget> = {
+  width: 1920,
+  height: 1080,
+  framerate: 60,
+  bitrate: 8_000_000,
+};
+
 let cachedCapabilities: ProbedCodecCapabilities | null = null;
+let cachedProbeKey: string | null = null;
 let inFlightProbe: Promise<ProbedCodecCapabilities> | null = null;
+let inFlightProbeKey: string | null = null;
 const listeners = new Set<() => void>();
 
 export function isH265WebRtcSupported(): boolean {
@@ -35,6 +52,10 @@ export function isH265WebRtcSupported(): boolean {
   } catch {
     return false;
   }
+}
+
+export function isH264WebRtcSupported(): boolean {
+  return hasRtpSenderCodec(getRtpVideoCodecs(), 'h264');
 }
 
 function getRtpVideoCodecs(): RTCRtpCodec[] | null {
@@ -55,9 +76,22 @@ function hasRtpSenderCodec(codecs: RTCRtpCodec[] | null, codecSubstring: string)
   return codecs.some((c) => c.mimeType?.toLowerCase().includes(needle));
 }
 
+function normalizeProbeTarget(target?: CodecProbeTarget): Required<CodecProbeTarget> {
+  const width = target?.width && target.width > 0 ? Math.round(target.width) : DEFAULT_PROBE_TARGET.width;
+  const height = target?.height && target.height > 0 ? Math.round(target.height) : DEFAULT_PROBE_TARGET.height;
+  const framerate = target?.framerate && target.framerate > 0 ? Math.round(target.framerate) : DEFAULT_PROBE_TARGET.framerate;
+  const bitrate = target?.bitrate && target.bitrate > 0 ? Math.round(target.bitrate) : DEFAULT_PROBE_TARGET.bitrate;
+  return { width, height, framerate, bitrate };
+}
+
+function probeTargetKey(target: Required<CodecProbeTarget>): string {
+  return `${target.width}x${target.height}@${target.framerate}:${target.bitrate}`;
+}
+
 async function probeMimeCandidates(
   candidates: readonly string[],
   rtpSupported: boolean,
+  target: Required<CodecProbeTarget>,
 ): Promise<CodecHardwareSupport> {
   if (!rtpSupported) {
     return { supported: false, powerEfficient: false };
@@ -74,10 +108,10 @@ async function probeMimeCandidates(
         type: 'webrtc',
         video: {
           contentType,
-          width: 1920,
-          height: 1080,
-          bitrate: 8_000_000,
-          framerate: 60,
+          width: target.width,
+          height: target.height,
+          bitrate: target.bitrate,
+          framerate: target.framerate,
         },
       });
       if (info.supported) {
@@ -100,28 +134,41 @@ async function probeMimeCandidates(
 /**
  * Asynchronously probes WebRTC hardware encoder (`powerEfficient`) support via
  * `navigator.mediaCapabilities.encodingInfo`, caching the result for synchronous reads.
+ * Re-probes when an explicit target resolution/framerate differs from the cached probe.
  */
-export function probeHardwareScreenShareCodecs(): Promise<ProbedCodecCapabilities> {
-  if (cachedCapabilities) return Promise.resolve(cachedCapabilities);
-  if (inFlightProbe) return inFlightProbe;
+export function probeHardwareScreenShareCodecs(target?: CodecProbeTarget): Promise<ProbedCodecCapabilities> {
+  const resolvedTarget = normalizeProbeTarget(target);
+  const nextKey = probeTargetKey(resolvedTarget);
+
+  if (cachedCapabilities && (!target || cachedProbeKey === nextKey)) {
+    return Promise.resolve(cachedCapabilities);
+  }
+  if (inFlightProbe && (!target || inFlightProbeKey === nextKey)) {
+    return inFlightProbe;
+  }
 
   const previousResolved = computeAutoScreenShareCodec();
+  inFlightProbeKey = nextKey;
 
-  inFlightProbe = (async (): Promise<ProbedCodecCapabilities> => {
+  const currentProbe = (async (): Promise<ProbedCodecCapabilities> => {
     const rtpCodecs = getRtpVideoCodecs();
     const h265Rtp = isH265WebRtcSupported();
     const h264Rtp = rtpCodecs ? hasRtpSenderCodec(rtpCodecs, 'h264') : false;
     const vp9Rtp = rtpCodecs ? hasRtpSenderCodec(rtpCodecs, 'vp9') : true;
 
     const [h265, h264, vp9] = await Promise.all([
-      probeMimeCandidates(H265_MIME_CANDIDATES, h265Rtp),
-      probeMimeCandidates(H264_MIME_CANDIDATES, h264Rtp),
-      probeMimeCandidates(VP9_MIME_CANDIDATES, vp9Rtp),
+      probeMimeCandidates(H265_MIME_CANDIDATES, h265Rtp, resolvedTarget),
+      probeMimeCandidates(H264_MIME_CANDIDATES, h264Rtp, resolvedTarget),
+      probeMimeCandidates(VP9_MIME_CANDIDATES, vp9Rtp, resolvedTarget),
     ]);
 
     const result: ProbedCodecCapabilities = { h265, h264, vp9 };
     cachedCapabilities = result;
-    inFlightProbe = null;
+    cachedProbeKey = nextKey;
+    if (inFlightProbeKey === nextKey) {
+      inFlightProbe = null;
+      inFlightProbeKey = null;
+    }
 
     if (computeAutoScreenShareCodec() !== previousResolved) {
       for (const listener of listeners) {
@@ -135,7 +182,8 @@ export function probeHardwareScreenShareCodecs(): Promise<ProbedCodecCapabilitie
     return result;
   })();
 
-  return inFlightProbe;
+  inFlightProbe = currentProbe;
+  return currentProbe;
 }
 
 export function getProbedCodecCapabilities(): ProbedCodecCapabilities | null {
@@ -205,6 +253,8 @@ export function resolveEffectiveScreenShareCodec(
 
 export function resetCodecCapabilityCacheForTests(): void {
   cachedCapabilities = null;
+  cachedProbeKey = null;
   inFlightProbe = null;
+  inFlightProbeKey = null;
   listeners.clear();
 }

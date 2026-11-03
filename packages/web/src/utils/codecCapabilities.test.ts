@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  isH264WebRtcSupported,
   isH265WebRtcSupported,
   probeHardwareScreenShareCodecs,
   resetCodecCapabilityCacheForTests,
@@ -99,5 +100,26 @@ describe('codecCapabilities', () => {
     await probeHardwareScreenShareCodecs();
     expect(resolveAutoScreenShareCodec()).toBe('vp9');
     expect(resolveEffectiveScreenShareCodec('auto', true)).toBe('h265');
+  });
+
+  it('re-probes hardware support when target resolution/framerate shifts to 2K 120fps', async () => {
+    vi.stubGlobal('RTCRtpSender', {
+      getCapabilities: vi.fn(() => ({
+        codecs: [{ mimeType: 'video/H265' }, { mimeType: 'video/H264' }],
+      })),
+    });
+    const encodingInfo = vi.fn(async ({ video }: { video: { contentType: string; height: number; framerate: number } }) => ({
+      supported: true,
+      smooth: true,
+      powerEfficient: video.framerate <= 60 ? true : video.contentType.toLowerCase().includes('h264'),
+    }));
+    vi.stubGlobal('navigator', { mediaCapabilities: { encodingInfo } });
+
+    expect(isH264WebRtcSupported()).toBe(true);
+    await probeHardwareScreenShareCodecs({ width: 1920, height: 1080, framerate: 60, bitrate: 8_000_000 });
+    expect(resolveAutoScreenShareCodec()).toBe('h265');
+
+    await probeHardwareScreenShareCodecs({ width: 2560, height: 1440, framerate: 120, bitrate: 22_000_000 });
+    expect(resolveAutoScreenShareCodec()).toBe('h264');
   });
 });

@@ -74,9 +74,9 @@ function trackLabel(direction: 'send' | 'recv', source: string, participantName:
 }
 
 const Row = ({ label, value, colorClass }: { label: string; value: string; colorClass?: string }) => (
-  <div className="flex items-center justify-between py-[3px]">
-    <span className="text-[12px] text-txt-tertiary">{label}</span>
-    <span className={`text-[12px] font-medium ${colorClass ?? 'text-txt-secondary'}`}>{value}</span>
+  <div className="flex items-start justify-between gap-3 py-[3px]">
+    <span className="text-[12px] text-txt-tertiary flex-shrink-0">{label}</span>
+    <span className={`text-[12px] font-medium text-right ${colorClass ?? 'text-txt-secondary'}`}>{value}</span>
   </div>
 );
 
@@ -143,6 +143,7 @@ export function ConnectionInfoPopover({ open, onClose, anchorRef }: ConnectionIn
   const portalContainer = usePortalContainer();
   const stats = useTrackStats(open);
   const requestedCodec = useVoiceStore((s) => s.screenShareConfig.codec);
+  const targetFps = useVoiceStore((s) => s.screenShareConfig.fps);
 
   const { style } = useFloatingPosition(anchorRef, popoverRef, {
     placement: 'top',
@@ -173,15 +174,68 @@ export function ConnectionInfoPopover({ open, onClose, anchorRef }: ConnectionIn
     track.direction === 'send' && track.source === 'screen_share',
   );
   const publishedRequestedCodec = getRequestedPublishedScreenShareCodec();
+  const effectiveRequestedCodec = requestedCodec === 'auto'
+    ? (publishedRequestedCodec ?? resolveEffectiveScreenShareCodec('auto', false))
+    : requestedCodec;
   const requestedCodecDisplay = requestedCodec === 'auto'
-    ? `AUTO (${(publishedRequestedCodec ?? resolveEffectiveScreenShareCodec('auto', false)).toUpperCase()})`
+    ? `AUTO (${effectiveRequestedCodec.toUpperCase()})`
     : requestedCodec.toUpperCase();
+
+  const negotiatedNorm = outboundScreen?.codec
+    ? (outboundScreen.codec.toLowerCase().includes('hevc') ? 'h265' : outboundScreen.codec.toLowerCase())
+    : null;
+  const isSoftwareEncoder = Boolean(
+    outboundScreen?.encoderImpl && /libvpx|libaom|ffmpeg|openh264/i.test(outboundScreen.encoderImpl),
+  );
+  const frameBudgetMs = targetFps > 0 ? 1000 / targetFps : 16.7;
+
+  const bottleneck = outboundScreen ? (() => {
+    if (isSoftwareEncoder) {
+      return {
+        text: t('voice:connectionInfo.video.bottleneckStatus.softwareEncoder'),
+        colorClass: BAND_COLORS.bad,
+      };
+    }
+    if (outboundScreen.qualityLimitation === 'bandwidth') {
+      return {
+        text: t('voice:connectionInfo.video.bottleneckStatus.bandwidth'),
+        colorClass: BAND_COLORS.bad,
+      };
+    }
+    if (
+      outboundScreen.qualityLimitation === 'cpu' ||
+      (outboundScreen.encodeTimeMs !== null && outboundScreen.encodeTimeMs > frameBudgetMs * 0.85)
+    ) {
+      return {
+        text: t('voice:connectionInfo.video.bottleneckStatus.encoderOverload'),
+        colorClass: BAND_COLORS.bad,
+      };
+    }
+    if (outboundScreen.captureFps !== null && targetFps > 0 && outboundScreen.captureFps < Math.round(targetFps * 0.75)) {
+      return {
+        text: t('voice:connectionInfo.video.bottleneckStatus.captureStarved'),
+        colorClass: BAND_COLORS.warn,
+      };
+    }
+    if (negotiatedNorm && !negotiatedNorm.includes(effectiveRequestedCodec)) {
+      return {
+        text: t('voice:connectionInfo.video.bottleneckStatus.codecRegressed', {
+          codec: outboundScreen.codec ?? negotiatedNorm.toUpperCase(),
+        }),
+        colorClass: BAND_COLORS.warn,
+      };
+    }
+    return {
+      text: t('voice:connectionInfo.video.bottleneckStatus.ok'),
+      colorClass: BAND_COLORS.good,
+    };
+  })() : null;
 
   return createPortal(
     <div
       ref={popoverRef}
       style={style}
-      className="w-[300px] glass rounded-lg overflow-hidden"
+      className="w-[320px] glass rounded-lg overflow-hidden"
     >
       <div className="px-3 py-2 border-b border-border-hard">
         <span className="text-[14px] font-bold text-txt-primary">{t('voice:connectionInfo.title')}</span>
@@ -239,6 +293,65 @@ export function ConnectionInfoPopover({ open, onClose, anchorRef }: ConnectionIn
                 <SectionHeader title={t('voice:connectionInfo.section.video')} />
                 {outboundScreen && (
                   <>
+                    {bottleneck && (
+                      <Row
+                        label={t('voice:connectionInfo.video.bottleneck')}
+                        value={bottleneck.text}
+                        colorClass={bottleneck.colorClass}
+                      />
+                    )}
+                    <Row
+                      label={t('voice:connectionInfo.video.captureFps')}
+                      value={
+                        outboundScreen.captureFps !== null
+                          ? t('voice:connectionInfo.video.captureFpsValue', {
+                              capture: formatters.formatNumber(outboundScreen.captureFps),
+                              target: formatters.formatNumber(targetFps),
+                            })
+                          : '\u2014'
+                      }
+                      colorClass={
+                        outboundScreen.captureFps !== null && targetFps > 0
+                          ? (outboundScreen.captureFps < Math.round(targetFps * 0.75) ? BAND_COLORS.warn : BAND_COLORS.good)
+                          : undefined
+                      }
+                    />
+                    <Row
+                      label={t('voice:connectionInfo.video.encodeFps')}
+                      value={
+                        outboundScreen.fps !== null
+                          ? t('voice:connectionInfo.video.encodeFpsValue', {
+                              fps: formatters.formatNumber(outboundScreen.fps),
+                            })
+                          : '\u2014'
+                      }
+                      colorClass={
+                        outboundScreen.fps !== null && targetFps > 0
+                          ? (outboundScreen.fps < Math.round(targetFps * 0.75) ? BAND_COLORS.warn : BAND_COLORS.good)
+                          : undefined
+                      }
+                    />
+                    <Row
+                      label={t('voice:connectionInfo.video.encodeTime')}
+                      value={
+                        outboundScreen.encodeTimeMs !== null
+                          ? (() => {
+                              const hwState = isSoftwareEncoder || outboundScreen.powerEfficientEncoder === false
+                                ? t('voice:connectionInfo.video.swFallback')
+                                : outboundScreen.powerEfficientEncoder === true || outboundScreen.encoderImpl
+                                  ? t('voice:connectionInfo.video.hwAccel')
+                                  : null;
+                              const msText = formatMilliseconds(outboundScreen.encodeTimeMs);
+                              return hwState ? `${msText} (${hwState})` : msText;
+                            })()
+                          : '\u2014'
+                      }
+                      colorClass={
+                        outboundScreen.encodeTimeMs !== null
+                          ? (outboundScreen.encodeTimeMs > frameBudgetMs * 0.85 || isSoftwareEncoder ? BAND_COLORS.bad : BAND_COLORS.good)
+                          : undefined
+                      }
+                    />
                     <Row label={t('voice:connectionInfo.video.requestedCodec')} value={requestedCodecDisplay} />
                     <Row label={t('voice:connectionInfo.video.negotiatedCodec')} value={outboundScreen.codec ?? '\u2014'} />
                     {outboundScreen.encoderImpl && (

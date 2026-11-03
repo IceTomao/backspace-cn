@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Track } from 'livekit-client';
-import { getActiveRoom } from './useLiveKit';
+import { getActiveRoom, parseIdentity } from './useLiveKit';
 import { discoverPeerConnections } from '../utils/livekitInternals';
+import { HDR_IDENTITY_PREFIX, nativeHdrOwner } from '../utils/hdrStream';
+import { useNativeSdrStore } from '../stores/nativeSdrStore';
 
 // ── Types ──
 
@@ -34,6 +36,9 @@ export interface VideoTrackStat {
   width: number | null;
   height: number | null;
   fps: number | null;
+  captureFps: number | null;
+  encodeTimeMs: number | null;
+  powerEfficientEncoder: boolean | null;
   qualityLimitation: string | null;
   simulcastLayer: string | null;
   packetLoss: number | null;
@@ -80,6 +85,8 @@ interface TrackIdentity {
 interface PrevSample {
   bytes: number;
   frames: number;
+  sourceFrames: number;
+  totalEncodeTime: number;
   timestamp: number;
   packetsRecv: number;
   packetsLost: number;
@@ -237,29 +244,60 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
       // ── Step B: Build TrackIdentityMap ──
       const identityMap = new Map<string, TrackIdentity>();
 
-      // Local tracks
+      // Local tracks (including cloned REGRESSION/SIMULCAST backup codec tracks)
       for (const pub of room.localParticipant.trackPublications.values()) {
+        const localIdentity: TrackIdentity = {
+          source: mapSource(pub.source),
+          direction: 'send',
+          participantIdentity: null,
+          participantName: null,
+        };
         const mst = pub.track?.mediaStreamTrack;
         if (mst) {
-          identityMap.set(mst.id, {
-            source: mapSource(pub.source),
-            direction: 'send',
-            participantIdentity: null,
-            participantName: null,
-          });
+          identityMap.set(mst.id, localIdentity);
+        }
+        const simulcastCodecs = (pub.track as {
+          simulcastCodecs?: Map<string, { mediaStreamTrack?: MediaStreamTrack }>;
+        } | undefined)?.simulcastCodecs;
+        if (simulcastCodecs) {
+          for (const sc of simulcastCodecs.values()) {
+            if (sc.mediaStreamTrack) {
+              identityMap.set(sc.mediaStreamTrack.id, localIdentity);
+            }
+          }
         }
       }
 
-      // Remote tracks
+      // Remote tracks (mapping Native SDR/HDR helper identities back to their owner participant)
+      const localUserId = parseIdentity(room.localParticipant.identity).userId;
       for (const [, rp] of room.remoteParticipants) {
-        const name = parseUsername(rp.identity);
+        const helperOwnerId = nativeHdrOwner(rp.identity);
+        if (helperOwnerId && helperOwnerId === localUserId) {
+          // Local streamer self-preview subscription — omit from remote recv stats
+          continue;
+        }
+        let resolvedIdentity = rp.identity;
+        let name = parseUsername(rp.identity);
+        if (helperOwnerId) {
+          const ownerParticipant = [...room.remoteParticipants.values()].find(
+            (cand) =>
+              !cand.identity.startsWith(HDR_IDENTITY_PREFIX) &&
+              parseIdentity(cand.identity).userId === helperOwnerId,
+          );
+          if (ownerParticipant) {
+            resolvedIdentity = ownerParticipant.identity;
+            name = parseUsername(ownerParticipant.identity);
+          } else {
+            name = helperOwnerId;
+          }
+        }
         for (const pub of rp.trackPublications.values()) {
           const mst = pub.track?.mediaStreamTrack;
           if (mst) {
             identityMap.set(mst.id, {
               source: mapSource(pub.source),
               direction: 'recv',
-              participantIdentity: rp.identity,
+              participantIdentity: resolvedIdentity,
               participantName: name,
             });
           }
@@ -288,11 +326,17 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
             continue;
           }
 
-          // Build per-sender codec map
+          // Build per-sender codec & media-source maps
           const senderCodecMap = new Map<string, string>();
+          const senderMediaSourceMap = new Map<string, any>();
+          let fallbackVideoMediaSource: any = null;
           senderStats.forEach((report: any) => {
             if (report.type === 'codec') {
               senderCodecMap.set(report.id, report.mimeType?.split('/')[1] ?? report.mimeType ?? '');
+            }
+            if (report.type === 'media-source' && reportKind(report) === 'video') {
+              senderMediaSourceMap.set(report.id, report);
+              if (!fallbackVideoMediaSource) fallbackVideoMediaSource = report;
             }
           });
 
@@ -326,6 +370,8 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
               prev.set(ssrcKey, {
                 bytes: report.bytesSent,
                 frames: 0,
+                sourceFrames: 0,
+                totalEncodeTime: 0,
                 timestamp: now,
                 packetsRecv: 0,
                 packetsLost: 0,
@@ -354,7 +400,33 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
               const framesEncoded = report.framesEncoded ?? 0;
               const prevFrames = prevEntry?.frames ?? 0;
               const deltaFrames = framesEncoded - prevFrames;
-              const fps = (prevEntry && deltaSeconds > 0) ? Math.round(deltaFrames / deltaSeconds) : null;
+              const fps = (prevEntry && deltaSeconds > 0)
+                ? Math.round(deltaFrames / deltaSeconds)
+                : (report.framesPerSecond != null ? Math.round(report.framesPerSecond) : null);
+
+              const mediaSource = (report.mediaSourceId ? senderMediaSourceMap.get(report.mediaSourceId) : null)
+                ?? fallbackVideoMediaSource;
+              const sourceFrames = mediaSource?.frames ?? 0;
+              let captureFps: number | null = null;
+              if (mediaSource?.framesPerSecond != null) {
+                captureFps = Math.round(mediaSource.framesPerSecond);
+              } else if (prevEntry && deltaSeconds > 0 && mediaSource?.frames != null) {
+                captureFps = Math.round((sourceFrames - prevEntry.sourceFrames) / deltaSeconds);
+              }
+
+              const totalEncodeTime = typeof report.totalEncodeTime === 'number' ? report.totalEncodeTime : 0;
+              let encodeTimeMs: number | null = null;
+              if (prevEntry && deltaFrames > 0 && typeof report.totalEncodeTime === 'number') {
+                const deltaEncodeSec = totalEncodeTime - prevEntry.totalEncodeTime;
+                if (deltaEncodeSec >= 0) {
+                  encodeTimeMs = Math.round(((deltaEncodeSec / deltaFrames) * 1000) * 10) / 10;
+                }
+              }
+
+              const powerEfficientEncoder = typeof report.powerEfficientEncoder === 'boolean'
+                ? report.powerEfficientEncoder
+                : null;
+
               const qpSum = report.qpSum ?? 0;
               const nackCount = report.nackCount ?? 0;
               const pliCount = report.pliCount ?? 0;
@@ -375,6 +447,8 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
               prev.set(ssrcKey, {
                 bytes: report.bytesSent,
                 frames: framesEncoded,
+                sourceFrames,
+                totalEncodeTime,
                 timestamp: now,
                 packetsRecv: 0,
                 packetsLost: 0,
@@ -397,6 +471,9 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
                   width,
                   height,
                   fps,
+                  captureFps,
+                  encodeTimeMs,
+                  powerEfficientEncoder,
                   qualityLimitation: report.qualityLimitationReason ?? null,
                   simulcastLayer: null,
                   packetLoss: null,
@@ -482,6 +559,8 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
               prev.set(ssrcKey, {
                 bytes: report.bytesReceived,
                 frames: 0,
+                sourceFrames: 0,
+                totalEncodeTime: 0,
                 timestamp: now,
                 packetsRecv: packetsRecv,
                 packetsLost: packetsLost,
@@ -527,6 +606,8 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
               prev.set(ssrcKey, {
                 bytes: report.bytesReceived,
                 frames: framesDecoded,
+                sourceFrames: 0,
+                totalEncodeTime: 0,
                 timestamp: now,
                 packetsRecv: packetsRecv,
                 packetsLost: packetsLost,
@@ -549,6 +630,9 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
                   width,
                   height,
                   fps,
+                  captureFps: null,
+                  encodeTimeMs: null,
+                  powerEfficientEncoder: null,
                   qualityLimitation: null,
                   simulcastLayer: inferSimulcastLayer(width, height),
                   packetLoss: perTrackLoss,
@@ -571,7 +655,7 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
       }
 
       // ── Step F: Filter a dynacast-paused simulcast backup codec track ──
-      const filteredVideoTracks = videoTracks.filter((track) => {
+      let filteredVideoTracks = videoTracks.filter((track) => {
         if (track.direction !== 'send' || track.bitrate > 0) return true;
         const hasActiveSibling = videoTracks.some(
           (other) =>
@@ -582,6 +666,43 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
         );
         return !hasActiveSibling;
       });
+
+      // Inject Native Zero-Copy SDR GPU pipeline telemetry when active
+      const nativeSdr = useNativeSdrStore.getState();
+      if (nativeSdr.active && nativeSdr.stats) {
+        const sdrStats = nativeSdr.stats;
+        filteredVideoTracks = filteredVideoTracks.filter(
+          (t) => !(t.direction === 'send' && t.source === 'screen_share'),
+        );
+        filteredVideoTracks.unshift({
+          key: 'native-sdr-out',
+          direction: 'send',
+          source: 'screen_share',
+          participantIdentity: null,
+          participantName: null,
+          bitrate: sdrStats.bitrateKbps,
+          codec: sdrStats.codec === 'hevc' ? 'H265' : 'H264',
+          encoderImpl:
+            sdrStats.codec === 'hevc'
+              ? 'NVENC Direct Zero-Copy (HEVC VRAM)'
+              : 'NVENC Direct Zero-Copy (H.264 High VRAM)',
+          width: sdrStats.width > 0 ? sdrStats.width : null,
+          height: sdrStats.height > 0 ? sdrStats.height : null,
+          fps: Math.round(sdrStats.encodeFps),
+          captureFps: Math.round(Math.max(sdrStats.encodeFps, sdrStats.captureFps)),
+          encodeTimeMs:
+            sdrStats.encodeTimeMs > 0 ? Math.round(sdrStats.encodeTimeMs * 10) / 10 : null,
+          powerEfficientEncoder: true,
+          qualityLimitation: 'none',
+          simulcastLayer: null,
+          packetLoss: null,
+          jitter: null,
+          qpSumDelta: 0,
+          nackCountDelta: 0,
+          pliCountDelta: 0,
+          freezeCountDelta: null,
+        });
+      }
 
       // ── Step G: Cleanup stale prevSample entries ──
       for (const key of prev.keys()) {

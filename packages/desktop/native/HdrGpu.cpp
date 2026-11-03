@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <io.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -82,12 +83,15 @@ static bool hasNonDefaultStreamColor(const ColorSettings& s) {
         s.digitalVibrance != 50 || s.hueDegrees != 0;
 }
 
+enum class SdrCodec { Hevc, H264 };
+
 struct Options {
     UINT width = 1920, height = 1080, fps = 60, bitrate = 16000, frames = 0, pattern = 0;
     UINT syntheticWidth = 0, syntheticHeight = 0;
     ColorSettings color{};
     HMONITOR monitor = nullptr;
-    bool synthetic = false, watchParent = false, realtime = false;
+    bool synthetic = false, watchParent = false, realtime = false, sdr = false;
+    SdrCodec sdrCodec = SdrCodec::Hevc;
 };
 static unsigned long long number(const char* value) {
     if (!*value || strspn(value, "0123456789") != strlen(value) || strlen(value) > 20) throw std::runtime_error("invalid_numeric_argument");
@@ -106,7 +110,15 @@ static Options options(int argc, char** argv) {
         if (key == "--synthetic") { o.synthetic = true; continue; }
         if (key == "--watch-parent") { o.watchParent = true; continue; }
         if (key == "--realtime") { o.realtime = true; continue; }
+        if (key == "--sdr") { o.sdr = true; continue; }
         if (++i >= argc) throw std::runtime_error("missing_argument");
+        if (key == "--codec") {
+            std::string v(argv[i]);
+            if (v == "hevc" || v == "h265") o.sdrCodec = SdrCodec::Hevc;
+            else if (v == "h264") o.sdrCodec = SdrCodec::H264;
+            else throw std::runtime_error("invalid_codec");
+            continue;
+        }
         if (key == "--exposure-tenths") {
             const char* text = argv[i]; const char* digits = *text == '-' ? text + 1 : text;
             auto amount = number(digits);
@@ -148,14 +160,51 @@ static Options options(int argc, char** argv) {
         o.fps < 1 || o.fps > 120 || o.bitrate < 500 || o.bitrate > 200000 || o.pattern > 2 ||
         o.synthetic == (o.monitor != nullptr) || (o.synthetic && (!o.frames || o.frames > 7200)) ||
         ((o.syntheticWidth || o.syntheticHeight) && (!o.synthetic || !o.syntheticWidth || !o.syntheticHeight ||
-            o.syntheticWidth > 16384 || o.syntheticHeight > 16384))) throw std::runtime_error("invalid_hdr_configuration");
+            o.syntheticWidth > 16384 || o.syntheticHeight > 16384)) ||
+        (!o.sdr && o.sdrCodec != SdrCodec::Hevc)) throw std::runtime_error("invalid_hdr_configuration");
     return o;
 }
+
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+
+class HighResTimer {
+    HANDLE handle = nullptr;
+public:
+    HighResTimer() {
+        handle = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        if (!handle) handle = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+    }
+    ~HighResTimer() { if (handle) CloseHandle(handle); }
+    HighResTimer(const HighResTimer&) = delete;
+    HighResTimer& operator=(const HighResTimer&) = delete;
+    void waitUntil(std::chrono::steady_clock::time_point deadline) const {
+        for (;;) {
+            auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) return;
+            auto remainingNs = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now).count();
+            if (remainingNs <= 400000 || !handle) {
+                if (remainingNs > 50000) SwitchToThread();
+                continue;
+            }
+            LARGE_INTEGER due = {};
+            due.QuadPart = -((remainingNs - 350000) / 100);
+            if (due.QuadPart >= 0) due.QuadPart = -1;
+            if (SetWaitableTimer(handle, &due, 0, nullptr, nullptr, FALSE)) {
+                WaitForSingleObject(handle, 25);
+            } else {
+                Sleep(1);
+            }
+        }
+    }
+};
 
 struct ColorState {
     std::mutex mutex;
     uint32_t revision = 0;
     ColorSettings settings{};
+    std::atomic<bool> forceIdr{false};
 };
 struct ColorPacket {
     char magic[4];
@@ -292,6 +341,22 @@ class Pipeline {
         }
         if (!found) throw std::runtime_error("capture_monitor_removed");
     }
+    void requireSdrMonitor() {
+        bool found = false;
+        for (UINT i = 0; ; i++) {
+            Ptr<IDXGIOutput> screen;
+            auto status = adapter->EnumOutputs(i, screen.put());
+            if (status == DXGI_ERROR_NOT_FOUND) break;
+            check(status, "enumerate_outputs");
+            DXGI_OUTPUT_DESC d = {}; check(screen->GetDesc(&d), "output_description");
+            if (d.Monitor != o.monitor) continue;
+            if (!d.AttachedToDesktop) throw std::runtime_error("capture_monitor_removed");
+            if (sourceWidth && (d.DesktopCoordinates.right - d.DesktopCoordinates.left != static_cast<LONG>(sourceWidth) ||
+                d.DesktopCoordinates.bottom - d.DesktopCoordinates.top != static_cast<LONG>(sourceHeight))) throw std::runtime_error("capture_monitor_changed");
+            found = true; break;
+        }
+        if (!found) throw std::runtime_error("capture_monitor_removed");
+    }
     void createCapture() {
         check(RoInitialize(RO_INIT_MULTITHREADED), "runtime_initialization");
         Ptr<wgc::ItemInterop> interop; factory(L"Windows.Graphics.Capture.GraphicsCaptureItem", interop);
@@ -307,7 +372,8 @@ class Pipeline {
         check(create(dxgiDevice.get(), runtimeDevice.put()), "capture_device");
         Ptr<wgc::Device> graphicsDevice; query(runtimeDevice.get(), graphicsDevice);
         Ptr<wgc::PoolStatics> statics; factory(L"Windows.Graphics.Capture.Direct3D11CaptureFramePool", statics);
-        check(statics->CreateFreeThreaded(graphicsDevice.get(), static_cast<INT32>(DXGI_FORMAT_R16G16B16A16_FLOAT), 2, size, pool.put()), "capture_frame_pool");
+        const INT32 pixelFormat = o.sdr ? static_cast<INT32>(DXGI_FORMAT_B8G8R8A8_UNORM) : static_cast<INT32>(DXGI_FORMAT_R16G16B16A16_FLOAT);
+        check(statics->CreateFreeThreaded(graphicsDevice.get(), pixelFormat, 2, size, pool.put()), "capture_frame_pool");
         check(pool->CreateSession(item.get(), session.put()), "capture_session");
         check(session->StartCapture(), "capture_start");
     }
@@ -328,28 +394,32 @@ class Pipeline {
     void createTextures() {
         D3D11_TEXTURE2D_DESC d = {};
         d.Width = sourceWidth; d.Height = sourceHeight; d.MipLevels = 1; d.ArraySize = 1;
-        d.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; d.SampleDesc.Count = 1;
+        d.Format = o.sdr
+            ? (o.synthetic ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM)
+            : DXGI_FORMAT_R16G16B16A16_FLOAT;
+        d.SampleDesc.Count = 1;
         d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_SHADER_RESOURCE | (o.synthetic ? D3D11_BIND_UNORDERED_ACCESS : 0);
-        check(device->CreateTexture2D(&d, nullptr, input.put()), "fp16_texture");
-        check(device->CreateShaderResourceView(input.get(), nullptr, source.put()), "fp16_shader_view");
+        check(device->CreateTexture2D(&d, nullptr, input.put()), "input_texture");
+        check(device->CreateShaderResourceView(input.get(), nullptr, source.put()), "input_shader_view");
         if (o.synthetic) check(device->CreateUnorderedAccessView(input.get(), nullptr, inputUav.put()), "synthetic_texture_view");
-        d.Width = o.width; d.Height = o.height; d.Format = DXGI_FORMAT_P010;
+        d.Width = o.width; d.Height = o.height; d.Format = o.sdr ? DXGI_FORMAT_NV12 : DXGI_FORMAT_P010;
         d.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
-        check(device->CreateTexture2D(&d, nullptr, output.put()), "p010_texture");
+        check(device->CreateTexture2D(&d, nullptr, output.put()), "yuv_texture");
         Ptr<ID3D11Device3> modern; query(device.get(), modern);
         D3D11_UNORDERED_ACCESS_VIEW_DESC1 view = {};
         view.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-        view.Format = DXGI_FORMAT_R16_UINT;
+        view.Format = o.sdr ? DXGI_FORMAT_R8_UINT : DXGI_FORMAT_R16_UINT;
         Ptr<ID3D11UnorderedAccessView1> plane;
-        check(modern->CreateUnorderedAccessView1(output.get(), &view, plane.put()), "p010_luma_view"); query(plane.get(), luma);
-        view.Format = DXGI_FORMAT_R16G16_UINT; view.Texture2D.PlaneSlice = 1;
-        check(modern->CreateUnorderedAccessView1(output.get(), &view, plane.put()), "p010_chroma_view"); query(plane.get(), chroma);
+        check(modern->CreateUnorderedAccessView1(output.get(), &view, plane.put()), "yuv_luma_view"); query(plane.get(), luma);
+        view.Format = o.sdr ? DXGI_FORMAT_R8G8_UINT : DXGI_FORMAT_R16G16_UINT; view.Texture2D.PlaneSlice = 1;
+        check(modern->CreateUnorderedAccessView1(output.get(), &view, plane.put()), "yuv_chroma_view"); query(plane.get(), chroma);
         D3D11_BUFFER_DESC buffer = {}; buffer.ByteWidth = sizeof(ShaderParameters); buffer.Usage = D3D11_USAGE_DEFAULT; buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         check(device->CreateBuffer(&buffer, nullptr, parameters.put()), "shader_parameters");
         D3D11_SAMPLER_DESC sample = {}; sample.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
         sample.AddressU = sample.AddressV = sample.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sample.MaxLOD = D3D11_FLOAT32_MAX;
         check(device->CreateSamplerState(&sample, sampler.put()), "shader_sampler");
-        shader("Convert", converter); if (o.synthetic) shader("Generate", generator);
+        shader(o.sdr ? "ConvertSdr" : "Convert", converter);
+        if (o.synthetic) shader(o.sdr ? "GenerateSdr" : "Generate", generator);
     }
     void createEncoder() {
         // The driver DLL comes from System32, never an application search path.
@@ -365,29 +435,51 @@ class Pipeline {
         NV_ENC_PRESET_CONFIG preset = {}; preset.version = NV_ENC_PRESET_CONFIG_VER; preset.presetCfg.version = NV_ENC_CONFIG_VER;
         // Leave more encoding headroom for live WGC + transport at UHD sizes.
         const GUID presetGuid = o.width * o.height >= 3840u * 2160u ? NV_ENC_PRESET_P3_GUID : NV_ENC_PRESET_P4_GUID;
-        nvCheck(nv.nvEncGetEncodePresetConfigEx(encoder, NV_ENC_CODEC_HEVC_GUID, presetGuid,
+        const bool useH264 = o.sdr && o.sdrCodec == SdrCodec::H264;
+        const GUID codecGuid = useH264 ? NV_ENC_CODEC_H264_GUID : NV_ENC_CODEC_HEVC_GUID;
+        nvCheck(nv.nvEncGetEncodePresetConfigEx(encoder, codecGuid, presetGuid,
             NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY, &preset), "nvenc_preset");
         auto& config = preset.presetCfg;
-        config.profileGUID = NV_ENC_HEVC_PROFILE_MAIN10_GUID; config.gopLength = o.fps * 2; config.frameIntervalP = 1;
+        config.gopLength = o.fps * 2; config.frameIntervalP = 1;
         config.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR;
         config.rcParams.averageBitRate = config.rcParams.maxBitRate = o.bitrate * 1000;
         config.rcParams.vbvBufferSize = o.bitrate * 250; config.rcParams.vbvInitialDelay = o.bitrate * 250;
         config.rcParams.enableLookahead = 0; config.rcParams.lookaheadDepth = 0;
-        auto& hevc = config.encodeCodecConfig.hevcConfig;
-        hevc.chromaFormatIDC = 1; hevc.inputBitDepth = hevc.outputBitDepth = NV_ENC_BIT_DEPTH_10;
-        hevc.idrPeriod = o.fps * 2; hevc.outputAUD = 1; hevc.repeatSPSPPS = 1;
-        hevc.hevcVUIParameters.videoSignalTypePresentFlag = 1;
-        hevc.hevcVUIParameters.videoFormat = NV_ENC_VUI_VIDEO_FORMAT_UNSPECIFIED;
-        hevc.hevcVUIParameters.videoFullRangeFlag = 0; hevc.hevcVUIParameters.colourDescriptionPresentFlag = 1;
-        hevc.hevcVUIParameters.colourPrimaries = NV_ENC_VUI_COLOR_PRIMARIES_BT2020;
-        hevc.hevcVUIParameters.transferCharacteristics = NV_ENC_VUI_TRANSFER_CHARACTERISTIC_SMPTE2084;
-        hevc.hevcVUIParameters.colourMatrix = NV_ENC_VUI_MATRIX_COEFFS_BT2020_NCL;
-        // The shader averages each 2x2 block; signal centered chroma rather
-        // than the default left sample position used by many HEVC decoders.
-        hevc.hevcVUIParameters.chromaSampleLocationFlag = 1;
-        hevc.hevcVUIParameters.chromaSampleLocationTop = hevc.hevcVUIParameters.chromaSampleLocationBot = 1;
+        if (useH264) {
+            config.profileGUID = NV_ENC_H264_PROFILE_HIGH_GUID;
+            auto& h264 = config.encodeCodecConfig.h264Config;
+            h264.level = NV_ENC_LEVEL_AUTOSELECT;
+            h264.chromaFormatIDC = 1;
+            h264.inputBitDepth = h264.outputBitDepth = NV_ENC_BIT_DEPTH_8;
+            h264.idrPeriod = o.fps * 2; h264.outputAUD = 1; h264.repeatSPSPPS = 1;
+            h264.entropyCodingMode = NV_ENC_H264_ENTROPY_CODING_MODE_CABAC;
+            h264.h264VUIParameters.videoSignalTypePresentFlag = 1;
+            h264.h264VUIParameters.videoFormat = NV_ENC_VUI_VIDEO_FORMAT_UNSPECIFIED;
+            h264.h264VUIParameters.videoFullRangeFlag = 0; h264.h264VUIParameters.colourDescriptionPresentFlag = 1;
+            h264.h264VUIParameters.colourPrimaries = NV_ENC_VUI_COLOR_PRIMARIES_BT709;
+            h264.h264VUIParameters.transferCharacteristics = NV_ENC_VUI_TRANSFER_CHARACTERISTIC_BT709;
+            h264.h264VUIParameters.colourMatrix = NV_ENC_VUI_MATRIX_COEFFS_BT709;
+            h264.h264VUIParameters.chromaSampleLocationFlag = 1;
+            h264.h264VUIParameters.chromaSampleLocationTop = h264.h264VUIParameters.chromaSampleLocationBot = 1;
+        } else {
+            config.profileGUID = o.sdr ? NV_ENC_HEVC_PROFILE_MAIN_GUID : NV_ENC_HEVC_PROFILE_MAIN10_GUID;
+            auto& hevc = config.encodeCodecConfig.hevcConfig;
+            hevc.chromaFormatIDC = 1;
+            hevc.inputBitDepth = hevc.outputBitDepth = o.sdr ? NV_ENC_BIT_DEPTH_8 : NV_ENC_BIT_DEPTH_10;
+            hevc.idrPeriod = o.fps * 2; hevc.outputAUD = 1; hevc.repeatSPSPPS = 1;
+            hevc.hevcVUIParameters.videoSignalTypePresentFlag = 1;
+            hevc.hevcVUIParameters.videoFormat = NV_ENC_VUI_VIDEO_FORMAT_UNSPECIFIED;
+            hevc.hevcVUIParameters.videoFullRangeFlag = 0; hevc.hevcVUIParameters.colourDescriptionPresentFlag = 1;
+            hevc.hevcVUIParameters.colourPrimaries = o.sdr ? NV_ENC_VUI_COLOR_PRIMARIES_BT709 : NV_ENC_VUI_COLOR_PRIMARIES_BT2020;
+            hevc.hevcVUIParameters.transferCharacteristics = o.sdr ? NV_ENC_VUI_TRANSFER_CHARACTERISTIC_BT709 : NV_ENC_VUI_TRANSFER_CHARACTERISTIC_SMPTE2084;
+            hevc.hevcVUIParameters.colourMatrix = o.sdr ? NV_ENC_VUI_MATRIX_COEFFS_BT709 : NV_ENC_VUI_MATRIX_COEFFS_BT2020_NCL;
+            // The shader averages each 2x2 block; signal centered chroma rather
+            // than the default left sample position used by many HEVC decoders.
+            hevc.hevcVUIParameters.chromaSampleLocationFlag = 1;
+            hevc.hevcVUIParameters.chromaSampleLocationTop = hevc.hevcVUIParameters.chromaSampleLocationBot = 1;
+        }
         NV_ENC_INITIALIZE_PARAMS init = {}; init.version = NV_ENC_INITIALIZE_PARAMS_VER;
-        init.encodeGUID = NV_ENC_CODEC_HEVC_GUID; init.presetGUID = presetGuid;
+        init.encodeGUID = codecGuid; init.presetGUID = presetGuid;
         init.encodeWidth = init.darWidth = init.maxEncodeWidth = o.width;
         init.encodeHeight = init.darHeight = init.maxEncodeHeight = o.height;
         init.frameRateNum = o.fps; init.frameRateDen = 1; init.enablePTD = 1;
@@ -395,9 +487,10 @@ class Pipeline {
         nvCheck(nv.nvEncInitializeEncoder(encoder, &init), "nvenc_initialize");
         NV_ENC_REGISTER_RESOURCE resource = {}; resource.version = NV_ENC_REGISTER_RESOURCE_VER;
         resource.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX; resource.resourceToRegister = output.get();
-        resource.width = o.width; resource.height = o.height; resource.bufferFormat = NV_ENC_BUFFER_FORMAT_YUV420_10BIT;
+        resource.width = o.width; resource.height = o.height;
+        resource.bufferFormat = o.sdr ? NV_ENC_BUFFER_FORMAT_NV12 : NV_ENC_BUFFER_FORMAT_YUV420_10BIT;
         resource.bufferUsage = NV_ENC_INPUT_IMAGE;
-        nvCheck(nv.nvEncRegisterResource(encoder, &resource), "nvenc_register_p010"); registered = resource.registeredResource;
+        nvCheck(nv.nvEncRegisterResource(encoder, &resource), "nvenc_register_yuv"); registered = resource.registeredResource;
         NV_ENC_CREATE_BITSTREAM_BUFFER bits = {}; bits.version = NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
         nvCheck(nv.nvEncCreateBitstreamBuffer(encoder, &bits), "nvenc_bitstream_buffer"); bitstream = bits.bitstreamBuffer;
     }
@@ -417,7 +510,9 @@ class Pipeline {
             Ptr<ID3D11Texture2D> texture;
             check(access->GetInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(texture.put())), "capture_texture");
             D3D11_TEXTURE2D_DESC description = {}; texture->GetDesc(&description);
-            if (description.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || description.Width != sourceWidth || description.Height != sourceHeight) throw std::runtime_error("capture_not_fp16");
+            const DXGI_FORMAT expectedFmt = o.sdr ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
+            if (description.Format != expectedFmt || description.Width != sourceWidth || description.Height != sourceHeight)
+                throw std::runtime_error(o.sdr ? "capture_not_bgra8" : "capture_not_fp16");
             context->CopyResource(input.get(), texture.get()); context->Flush();
         } catch (...) { closeCapture(newest.get()); throw; }
         closeCapture(newest.get()); return true;
@@ -451,15 +546,19 @@ class Pipeline {
         context->CSSetUnorderedAccessViews(0, 2, empty, nullptr);
         image = nullptr; context->CSSetShaderResources(0, 1, &image); context->Flush();
     }
-    void encode(UINT frame) {
+    void encode(UINT frame, UINT64 timestamp100ns) {
         NV_ENC_MAP_INPUT_RESOURCE map = {}; map.version = NV_ENC_MAP_INPUT_RESOURCE_VER; map.registeredResource = registered;
         nvCheck(nv.nvEncMapInputResource(encoder, &map), "nvenc_map_texture");
         try {
             NV_ENC_PIC_PARAMS picture = {}; picture.version = NV_ENC_PIC_PARAMS_VER;
-            picture.inputBuffer = map.mappedResource; picture.bufferFmt = NV_ENC_BUFFER_FORMAT_YUV420_10BIT;
+            picture.inputBuffer = map.mappedResource;
+            picture.bufferFmt = o.sdr ? NV_ENC_BUFFER_FORMAT_NV12 : NV_ENC_BUFFER_FORMAT_YUV420_10BIT;
             picture.inputWidth = o.width; picture.inputHeight = o.height; picture.outputBitstream = bitstream;
             picture.pictureStruct = NV_ENC_PIC_STRUCT_FRAME; picture.frameIdx = frame;
-            picture.inputTimeStamp = static_cast<UINT64>(frame) * 10000000 / o.fps; picture.inputDuration = 10000000 / o.fps;
+            picture.inputTimeStamp = timestamp100ns; picture.inputDuration = 10000000 / o.fps;
+            if (color->forceIdr.exchange(false, std::memory_order_relaxed)) {
+                picture.encodePicFlags = NV_ENC_PIC_FLAG_FORCEIDR | NV_ENC_PIC_FLAG_OUTPUT_SPSPPS;
+            }
             nvCheck(nv.nvEncEncodePicture(encoder, &picture), "nvenc_encode");
             NV_ENC_LOCK_BITSTREAM lock = {}; lock.version = NV_ENC_LOCK_BITSTREAM_VER; lock.outputBitstream = bitstream;
             nvCheck(nv.nvEncLockBitstream(encoder, &lock), "nvenc_lock_bitstream");
@@ -483,11 +582,25 @@ public:
     }
     void run() {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        selectAdapter(); if (!o.synthetic) requireHdrOutput();
+        if (!o.synthetic) {
+            SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+        }
+        selectAdapter();
+        if (!o.synthetic) {
+            if (o.sdr) requireSdrMonitor();
+            else requireHdrOutput();
+        }
         D3D_FEATURE_LEVEL level;
         check(D3D11CreateDevice(adapter.get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
             D3D11_SDK_VERSION, device.put(), &level, context.put()), "d3d11_device");
         if (level < D3D_FEATURE_LEVEL_11_0) throw std::runtime_error("d3d11_compute_unavailable");
+        if (!o.synthetic) {
+            Ptr<IDXGIDevice> dxgiDevice;
+            if (SUCCEEDED(device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void**>(dxgiDevice.put())))) {
+                dxgiDevice->SetGPUThreadPriority(7);
+            }
+        }
         if (o.synthetic) { sourceWidth = o.syntheticWidth ? o.syntheticWidth : o.width; sourceHeight = o.syntheticHeight ? o.syntheticHeight : o.height; }
         else createCapture();
         createTextures(); createEncoder();
@@ -496,11 +609,16 @@ public:
             // No executable paths, JSON, credentials or image pixels enter it.
             _setmode(_fileno(stdin), _O_BINARY);
             auto state = color;
-            std::thread([state] {
+            const bool allowIdrCommand = o.sdr;
+            std::thread([state, allowIdrCommand] {
                 ColorPacket packet;
                 for (;;) {
                     size_t count = fread(&packet, 1, sizeof(packet), stdin);
                     if (!count) ExitProcess(0);
+                    if (allowIdrCommand && count == sizeof(packet) && memcmp(packet.magic, "IDR1", 4) == 0) {
+                        state->forceIdr.store(true, std::memory_order_relaxed);
+                        continue;
+                    }
                     ColorSettings next{};
                     next.exposureTenths = packet.exposureTenths;
                     next.all = {packet.allBrightness, packet.allContrast, packet.allGamma};
@@ -522,20 +640,41 @@ public:
         }
         fprintf(stderr, "{\"type\":\"gpu-ready\",\"pixelReadback\":false,\"videoEncoders\":1}\n"); fflush(stderr);
         using clock = std::chrono::steady_clock;
-        auto start = clock::now(), lastCheck = start;
-        UINT frames = 0; bool haveFrame = false;
+        HighResTimer timer;
+        const auto framePeriod = std::chrono::nanoseconds(1000000000ULL / o.fps);
+        auto start = clock::now(), lastCheck = start, lastStats = start, nextDeadline = start;
+        UINT frames = 0, statsEncodedFrames = 0, statsFreshFrames = 0;
+        double statsEncodeMsTotal = 0.0;
+        UINT64 lastStatsBytes = 0;
+        bool haveFrame = false;
         while (!o.frames || frames < o.frames) {
             if (!o.synthetic) {
                 bool fresh = captureFrame();
-                if (fresh && !haveFrame) start = clock::now();
+                if (fresh && !haveFrame) {
+                    start = lastCheck = lastStats = clock::now();
+                    nextDeadline = start;
+                }
+                if (fresh) statsFreshFrames++;
                 haveFrame = fresh || haveFrame;
                 if (!haveFrame) {
                     if (clock::now() - start > std::chrono::seconds(10)) throw std::runtime_error("capture_first_frame_timeout");
-                    Sleep(1); continue;
+                    timer.waitUntil(clock::now() + std::chrono::milliseconds(1));
+                    continue;
                 }
-                if (clock::now() - lastCheck >= std::chrono::seconds(1)) { requireHdrOutput(); lastCheck = clock::now(); }
+                if (clock::now() - lastCheck >= std::chrono::seconds(1)) {
+                    if (o.sdr) requireSdrMonitor();
+                    else requireHdrOutput();
+                    lastCheck = clock::now();
+                }
             }
-            convert(frames); encode(frames);
+            auto workStart = clock::now();
+            UINT64 ts100ns = (!o.synthetic && o.sdr)
+                ? static_cast<UINT64>(std::chrono::duration_cast<std::chrono::nanoseconds>(workStart - start).count() / 100)
+                : static_cast<UINT64>(frames) * 10000000 / o.fps;
+            convert(frames); encode(frames, ts100ns);
+            auto workEnd = clock::now();
+            statsEncodedFrames++;
+            statsEncodeMsTotal += std::chrono::duration<double, std::milli>(workEnd - workStart).count();
             if (appliedRevision != reportedRevision) {
                 reportedRevision = appliedRevision;
                 fprintf(stderr, "{\"type\":\"color-applied\",\"revision\":%u,\"frame\":%u,\"exposureTenths\":%d,\"allBrightness\":%u,\"allContrast\":%u,\"allGamma\":%u,\"vibrance\":%u,\"hue\":%u}\n",
@@ -547,8 +686,33 @@ public:
                     static_cast<unsigned>(appliedColor.hueDegrees));
                 fflush(stderr);
             }
+            if (!o.synthetic && workEnd - lastStats >= std::chrono::seconds(1)) {
+                double winSec = std::chrono::duration<double>(workEnd - lastStats).count();
+                double encFps = winSec > 0.0 ? statsEncodedFrames / winSec : 0.0;
+                double freshFps = winSec > 0.0 ? statsFreshFrames / winSec : 0.0;
+                double avgMs = statsEncodedFrames > 0 ? statsEncodeMsTotal / statsEncodedFrames : 0.0;
+                UINT64 deltaBytes = encodedBytes - lastStatsBytes;
+                double kbps = winSec > 0.0 ? (deltaBytes * 8.0) / (winSec * 1000.0) : 0.0;
+                fprintf(stderr, "{\"type\":\"gpu-stats\",\"encodeFps\":%.2f,\"freshFps\":%.2f,\"encodeTimeMs\":%.2f,\"bitrateKbps\":%.1f,\"encodedBytes\":%llu,\"sourceWidth\":%u,\"sourceHeight\":%u}\n",
+                    encFps, freshFps, avgMs, kbps, static_cast<unsigned long long>(encodedBytes), sourceWidth, sourceHeight);
+                fflush(stderr);
+                lastStats = workEnd;
+                statsEncodedFrames = 0;
+                statsFreshFrames = 0;
+                statsEncodeMsTotal = 0.0;
+                lastStatsBytes = encodedBytes;
+            }
             frames++;
-            if (!o.synthetic || o.realtime) std::this_thread::sleep_until(start + std::chrono::nanoseconds(static_cast<UINT64>(frames) * 1000000000 / o.fps));
+            if (!o.synthetic || o.realtime) {
+                if (!o.synthetic && o.sdr) {
+                    nextDeadline += framePeriod;
+                    auto now = clock::now();
+                    if (now > nextDeadline + framePeriod) nextDeadline = now + framePeriod;
+                    timer.waitUntil(nextDeadline);
+                } else {
+                    timer.waitUntil(start + std::chrono::nanoseconds(static_cast<UINT64>(frames) * 1000000000 / o.fps));
+                }
+            }
         }
         double seconds = std::chrono::duration<double>(clock::now() - start).count();
         fprintf(stderr, "{\"type\":\"gpu-complete\",\"frames\":%u,\"seconds\":%.6f,\"fps\":%.3f,\"encodedBytes\":%llu,\"pixelReadback\":false,\"videoEncoders\":1}\n",

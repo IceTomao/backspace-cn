@@ -155,7 +155,7 @@ describe('screen-share media options', () => {
       hdrExposureEv: 0,
       streamColor: DEFAULT_STREAM_COLOR,
       codec: 'h264',
-      degradationPreference: 'maintain-resolution',
+      degradationPreference: 'maintain-framerate',
     });
     expect('hdrBrightness' in useVoiceStore.getState().screenShareConfig).toBe(false);
 
@@ -250,7 +250,7 @@ describe('screen-share media options', () => {
         videoCodec: 'h265',
         videoEncoding: opts.publish.videoEncoding,
         screenShareEncoding: opts.publish.videoEncoding,
-        degradationPreference: 'maintain-resolution',
+        degradationPreference: 'maintain-framerate',
         simulcast: false,
         backupCodec: {
           codec: 'vp8',
@@ -501,10 +501,67 @@ describe('screen-share media options', () => {
     });
   });
 
-  it('keeps Gaming/Text content hints, maintain-resolution default, H.264 1.15x gaming boost, and REGRESSION backup', () => {
+  it('uses full-framerate H.264 REGRESSION backup when sender supports H.264 so Firefox viewers do not drop 60/120fps to 30fps VP8', async () => {
+    vi.stubGlobal('RTCRtpSender', {
+      getCapabilities: vi.fn(() => ({
+        codecs: [{ mimeType: 'video/H265' }, { mimeType: 'video/H264' }, { mimeType: 'video/VP9' }],
+      })),
+    });
+    useVoiceStore.getState().setScreenShareConfig({
+      height: 1440,
+      fps: 120,
+      mode: 'gaming',
+      codec: 'h265',
+      customBitrateKbps: null,
+      degradationPreference: 'maintain-framerate',
+    });
+
+    const opts = buildScreenShareOptions(useVoiceStore.getState().screenShareConfig);
+    expect(opts.publish.videoCodec).toBe('h265');
+    expect(opts.publish.backupCodecPolicy).toBe(BackupCodecPolicy.REGRESSION);
+    expect(opts.publish.backupCodec).toEqual({
+      codec: 'h264',
+      encoding: {
+        maxBitrate: 20_000_000, // clamped to mocked maxBitrateKbps=20_000
+        maxFramerate: 120,
+      },
+    });
+
+    const room = fakeRoom();
+    const video = makeVideoTrack('h265-to-h264', 2560, 1440);
+    const sender = attachPublishedSender(room, video, [
+      ['codec-h265', { id: 'codec-h265', type: 'codec', mimeType: 'video/H265' }],
+      ['codec-h264', { id: 'codec-h264', type: 'codec', mimeType: 'video/H264' }],
+      ['outbound-h265', { id: 'outbound-h265', type: 'outbound-rtp', kind: 'video', codecId: 'codec-h265', bytesSent: 0 }],
+      ['outbound-h264', {
+        id: 'outbound-h264', type: 'outbound-rtp', kind: 'video', codecId: 'codec-h264',
+        bytesSent: 4096, encoderImplementation: 'ExternalEncoder',
+      }],
+    ]);
+
+    expect(await publishScreenShare(room, makeStream(video))).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getRequestedPublishedScreenShareCodec()).toBe('h265');
+    expect(getPublishedScreenShareCodec()).toBe('h264');
+    expect(sender.setParameters).toHaveBeenCalledWith(expect.objectContaining({
+      encodings: [expect.objectContaining({ maxFramerate: 120 })],
+      degradationPreference: 'maintain-framerate',
+    }));
+  });
+
+  it('keeps Gaming/Text content hints, maintain-framerate gaming default, H.264 1.15x gaming boost, and REGRESSION backup', () => {
+    expect(useVoiceStore.getInitialState().screenShareConfig.degradationPreference).toBe('maintain-framerate');
     const base = useVoiceStore.getState().screenShareConfig;
-    const gaming = buildScreenShareOptions({ ...base, mode: 'gaming' });
-    const text = buildScreenShareOptions({ ...base, mode: 'text' });
+    const gamingDefault = buildScreenShareOptions({
+      ...base,
+      mode: 'gaming',
+      degradationPreference: undefined as unknown as RTCDegradationPreference,
+    });
+    const textDefault = buildScreenShareOptions({
+      ...base,
+      mode: 'text',
+      degradationPreference: undefined as unknown as RTCDegradationPreference,
+    });
     const h264AutoGaming = buildScreenShareOptions({
       ...base,
       height: 1080,
@@ -514,14 +571,14 @@ describe('screen-share media options', () => {
       customBitrateKbps: null,
     });
 
-    expect(gaming.contentHint).toBe('motion');
-    expect(gaming.overdrive.degradationPreference).toBe('maintain-resolution');
-    expect(text.contentHint).toBe('detail');
-    expect(text.overdrive.degradationPreference).toBe('maintain-resolution');
-    expect(gaming.publish.backupCodecPolicy).toBe(BackupCodecPolicy.REGRESSION);
+    expect(gamingDefault.contentHint).toBe('motion');
+    expect(gamingDefault.overdrive.degradationPreference).toBe('maintain-framerate');
+    expect(textDefault.contentHint).toBe('detail');
+    expect(textDefault.overdrive.degradationPreference).toBe('maintain-resolution');
+    expect(gamingDefault.publish.backupCodecPolicy).toBe(BackupCodecPolicy.REGRESSION);
     expect(h264AutoGaming.publish.backupCodec).toBeUndefined();
     expect(h264AutoGaming.publish.videoEncoding.maxBitrate).toBe(9_200_000);
-    expect(gaming.overdrive).not.toHaveProperty('minBitrate');
+    expect(gamingDefault.overdrive).not.toHaveProperty('minBitrate');
   });
 
   it('retries until the screen-share sender is ready and reasserts the ceiling at five seconds without min:15 constraint', async () => {
@@ -689,5 +746,53 @@ describe('screen-share media options', () => {
     await useVoiceStore.persist.rehydrate();
     expect(useVoiceStore.getState().screenShareConfig.codec).toBe('h264');
     expect(useVoiceStore.getState().screenShareConfig.degradationPreference).toBe('maintain-framerate');
+  });
+
+  it('bypasses CPU libyuv resize on Windows Electron fallback via zero-scale capture + scaleResolutionDownBy', async () => {
+    vi.stubGlobal('window', {
+      ...globalThis.window,
+      backspace: { platform: 'win32', setStreamingPowerMode: vi.fn() },
+    });
+    useVoiceStore.getState().setScreenShareConfig({ height: 1080, fps: 120, codec: 'h264' });
+    const video = makeVideoTrack('win-wgc-track', 2560, 1440);
+    const stream = makeStream(video);
+    const getDisplayMedia = vi.fn().mockResolvedValue(stream);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getDisplayMedia },
+    });
+
+    await stageScreenCapture();
+    // No width/height constraint passed to getDisplayMedia on win32 so WGC stays zero-scale D3D11
+    expect(getDisplayMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        video: { frameRate: { ideal: 120, max: 120 } },
+      }),
+    );
+
+    const room = fakeRoom();
+    const sender = attachPublishedSender(room, video, [
+      ['codec-h264', { id: 'codec-h264', type: 'codec', mimeType: 'video/H264' }],
+      [
+        'outbound-h264',
+        {
+          id: 'outbound-h264',
+          type: 'outbound-rtp',
+          kind: 'video',
+          codecId: 'codec-h264',
+          bytesSent: 1000,
+          encoderImplementation: 'MediaFoundationVideoEncodeAccelerator',
+        },
+      ],
+    ]);
+
+    await publishScreenShare(room, stream);
+    await vi.advanceTimersByTimeAsync(0);
+    // 1440 / 1080 = 1.333 scaled on GPU encoder path via scaleResolutionDownBy
+    expect(sender.setParameters).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encodings: [expect.objectContaining({ maxFramerate: 120, scaleResolutionDownBy: 1.333 })],
+      }),
+    );
   });
 });
