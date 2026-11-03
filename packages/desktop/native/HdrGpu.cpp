@@ -90,6 +90,7 @@ struct Options {
     UINT syntheticWidth = 0, syntheticHeight = 0;
     ColorSettings color{};
     HMONITOR monitor = nullptr;
+    HWND window = nullptr;
     bool synthetic = false, watchParent = false, realtime = false, sdr = false;
     SdrCodec sdrCodec = SdrCodec::Hevc;
 };
@@ -145,6 +146,10 @@ static Options options(int argc, char** argv) {
             if (!n) throw std::runtime_error("invalid_monitor");
             o.monitor = reinterpret_cast<HMONITOR>(static_cast<uintptr_t>(n)); continue;
         }
+        if (key == "--window") {
+            if (!n) throw std::runtime_error("invalid_window");
+            o.window = reinterpret_cast<HWND>(static_cast<uintptr_t>(n)); continue;
+        }
         if (n > 200000) throw std::runtime_error("argument_exceeds_limit");
         if (key == "--width") o.width = static_cast<UINT>(n);
         else if (key == "--height") o.height = static_cast<UINT>(n);
@@ -156,11 +161,13 @@ static Options options(int argc, char** argv) {
         else if (key == "--source-height") o.syntheticHeight = static_cast<UINT>(n);
         else throw std::runtime_error("unknown_argument");
     }
+    const int targetCount = (o.synthetic ? 1 : 0) + (o.monitor != nullptr ? 1 : 0) + (o.window != nullptr ? 1 : 0);
     if (o.width < 256 || o.width > 7680 || o.width % 2 || o.height < 128 || o.height > 4320 || o.height % 2 ||
         o.fps < 1 || o.fps > 120 || o.bitrate < 500 || o.bitrate > 200000 || o.pattern > 2 ||
-        o.synthetic == (o.monitor != nullptr) || (o.synthetic && (!o.frames || o.frames > 7200)) ||
+        targetCount != 1 || (o.synthetic && (!o.frames || o.frames > 7200)) ||
         ((o.syntheticWidth || o.syntheticHeight) && (!o.synthetic || !o.syntheticWidth || !o.syntheticHeight ||
             o.syntheticWidth > 16384 || o.syntheticHeight > 16384)) ||
+        (o.window != nullptr && !o.sdr) ||
         (!o.sdr && o.sdrCodec != SdrCodec::Hevc)) throw std::runtime_error("invalid_hdr_configuration");
     return o;
 }
@@ -283,10 +290,12 @@ class Pipeline {
     Ptr<ID3D11DeviceContext> context;
     Ptr<ID3D11Texture2D> input, output;
     Ptr<ID3D11ShaderResourceView> source;
+    Ptr<ID3D11RenderTargetView> inputRtv;
     Ptr<ID3D11UnorderedAccessView> inputUav, luma, chroma;
     Ptr<ID3D11ComputeShader> converter, generator;
     Ptr<ID3D11SamplerState> sampler;
     Ptr<ID3D11Buffer> parameters;
+    Ptr<wgc::Device> graphicsDevice;
     Ptr<wgc::Pool> pool;
     Ptr<wgc::Session> session;
     UINT sourceWidth = 0, sourceHeight = 0;
@@ -303,6 +312,8 @@ class Pipeline {
     void selectAdapter() {
         Ptr<IDXGIFactory1> dxgi;
         check(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(dxgi.put())), "dxgi_factory");
+        const HMONITOR preferredMonitor = o.window ? MonitorFromWindow(o.window, MONITOR_DEFAULTTONEAREST) : o.monitor;
+        Ptr<IDXGIAdapter1> firstNvidia;
         for (UINT a = 0; ; a++) {
             Ptr<IDXGIAdapter1> candidate;
             auto status = dxgi->EnumAdapters1(a, candidate.put());
@@ -310,18 +321,31 @@ class Pipeline {
             check(status, "enumerate_adapters");
             DXGI_ADAPTER_DESC1 desc = {}; check(candidate->GetDesc1(&desc), "adapter_description");
             if (desc.VendorId != 0x10de || (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) continue;
+            if (!firstNvidia.get()) {
+                candidate->AddRef();
+                *firstNvidia.put() = candidate.get();
+            }
             bool selected = o.synthetic;
-            for (UINT i = 0; !selected; i++) {
+            for (UINT i = 0; !selected && preferredMonitor; i++) {
                 Ptr<IDXGIOutput> screen;
                 auto outputStatus = candidate->EnumOutputs(i, screen.put());
                 if (outputStatus == DXGI_ERROR_NOT_FOUND) break;
                 check(outputStatus, "enumerate_outputs");
                 DXGI_OUTPUT_DESC d = {}; check(screen->GetDesc(&d), "output_description");
-                selected = d.Monitor == o.monitor;
+                selected = d.Monitor == preferredMonitor;
             }
             if (selected) { adapter.swap(candidate); return; }
         }
-        throw std::runtime_error("selected_monitor_requires_supported_nvidia_adapter");
+        if (o.sdr && firstNvidia.get()) {
+            adapter.swap(firstNvidia);
+            return;
+        }
+        throw std::runtime_error(o.window
+            ? "selected_window_requires_supported_nvidia_adapter"
+            : "selected_monitor_requires_supported_nvidia_adapter");
+    }
+    void requireSdrWindow() {
+        if (!o.window || !IsWindow(o.window)) throw std::runtime_error("capture_window_closed");
     }
     void requireHdrOutput() {
         bool found = false;
@@ -355,14 +379,40 @@ class Pipeline {
                 d.DesktopCoordinates.bottom - d.DesktopCoordinates.top != static_cast<LONG>(sourceHeight))) throw std::runtime_error("capture_monitor_changed");
             found = true; break;
         }
-        if (!found) throw std::runtime_error("capture_monitor_removed");
+        if (!found) {
+            MONITORINFO mi = {};
+            mi.cbSize = sizeof(mi);
+            if (!GetMonitorInfoW(o.monitor, &mi)) throw std::runtime_error("capture_monitor_removed");
+            if (sourceWidth && (mi.rcMonitor.right - mi.rcMonitor.left != static_cast<LONG>(sourceWidth) ||
+                mi.rcMonitor.bottom - mi.rcMonitor.top != static_cast<LONG>(sourceHeight))) {
+                throw std::runtime_error("capture_monitor_changed");
+            }
+        }
     }
     void createCapture() {
         check(RoInitialize(RO_INIT_MULTITHREADED), "runtime_initialization");
         Ptr<wgc::ItemInterop> interop; factory(L"Windows.Graphics.Capture.GraphicsCaptureItem", interop);
         Ptr<wgc::Item> item;
-        check(interop->ForMonitor(o.monitor, __uuidof(wgc::Item), reinterpret_cast<void**>(item.put())), "capture_monitor");
+        if (o.window) {
+            check(interop->ForWindow(o.window, __uuidof(wgc::Item), reinterpret_cast<void**>(item.put())), "capture_window");
+        } else {
+            check(interop->ForMonitor(o.monitor, __uuidof(wgc::Item), reinterpret_cast<void**>(item.put())), "capture_monitor");
+        }
         wgc::Size size = {}; check(item->GetSize(&size), "capture_size");
+        if (o.window && (size.Width < 2 || size.Height < 2 || (IsIconic(o.window) && size.Width <= 200 && size.Height <= 60))) {
+            WINDOWPLACEMENT wp = {};
+            wp.length = sizeof(wp);
+            if (GetWindowPlacement(o.window, &wp)) {
+                INT32 normalW = wp.rcNormalPosition.right - wp.rcNormalPosition.left;
+                INT32 normalH = wp.rcNormalPosition.bottom - wp.rcNormalPosition.top;
+                if (normalW >= 2 && normalH >= 2) {
+                    size.Width = std::min<INT32>(16384, normalW);
+                    size.Height = std::min<INT32>(16384, normalH);
+                }
+            }
+            if (size.Width < 2) size.Width = static_cast<INT32>(o.width);
+            if (size.Height < 2) size.Height = static_cast<INT32>(o.height);
+        }
         if (size.Width < 1 || size.Height < 1 || size.Width > 16384 || size.Height > 16384) throw std::runtime_error("invalid_capture_size");
         sourceWidth = static_cast<UINT>(size.Width); sourceHeight = static_cast<UINT>(size.Height);
         Ptr<IDXGIDevice> dxgiDevice; query(device.get(), dxgiDevice);
@@ -370,11 +420,15 @@ class Pipeline {
         auto create = reinterpret_cast<HRESULT(WINAPI*)(IDXGIDevice*, IInspectable**)>(GetProcAddress(GetModuleHandleW(L"d3d11.dll"), "CreateDirect3D11DeviceFromDXGIDevice"));
         if (!create) throw std::runtime_error("capture_device_unavailable");
         check(create(dxgiDevice.get(), runtimeDevice.put()), "capture_device");
-        Ptr<wgc::Device> graphicsDevice; query(runtimeDevice.get(), graphicsDevice);
+        query(runtimeDevice.get(), graphicsDevice);
         Ptr<wgc::PoolStatics> statics; factory(L"Windows.Graphics.Capture.Direct3D11CaptureFramePool", statics);
         const INT32 pixelFormat = o.sdr ? static_cast<INT32>(DXGI_FORMAT_B8G8R8A8_UNORM) : static_cast<INT32>(DXGI_FORMAT_R16G16B16A16_FLOAT);
         check(statics->CreateFreeThreaded(graphicsDevice.get(), pixelFormat, 2, size, pool.put()), "capture_frame_pool");
         check(pool->CreateSession(item.get(), session.put()), "capture_session");
+        Ptr<wgc::Session3> session3;
+        if (SUCCEEDED(session->QueryInterface(__uuidof(wgc::Session3), reinterpret_cast<void**>(session3.put())))) {
+            session3->put_IsBorderRequired(0);
+        }
         check(session->StartCapture(), "capture_start");
     }
     void shader(const char* entry, Ptr<ID3D11ComputeShader>& result) {
@@ -391,17 +445,38 @@ class Pipeline {
         // Blob vtables belong to the compiler DLL; release before unloading it.
         errors.reset(); code.reset(); FreeLibrary(compiler);
     }
-    void createTextures() {
+    void clearInputBlack() {
+        if (!inputRtv.get()) return;
+        const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        context->ClearRenderTargetView(inputRtv.get(), black);
+    }
+    void recreateInputTexture() {
+        inputRtv.reset();
+        source.reset();
+        inputUav.reset();
+        input.reset();
         D3D11_TEXTURE2D_DESC d = {};
         d.Width = sourceWidth; d.Height = sourceHeight; d.MipLevels = 1; d.ArraySize = 1;
         d.Format = o.sdr
             ? (o.synthetic ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM)
             : DXGI_FORMAT_R16G16B16A16_FLOAT;
         d.SampleDesc.Count = 1;
-        d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_SHADER_RESOURCE | (o.synthetic ? D3D11_BIND_UNORDERED_ACCESS : 0);
+        d.Usage = D3D11_USAGE_DEFAULT;
+        d.BindFlags = D3D11_BIND_SHADER_RESOURCE
+            | (o.synthetic ? D3D11_BIND_UNORDERED_ACCESS : 0)
+            | (!o.synthetic && o.sdr ? D3D11_BIND_RENDER_TARGET : 0);
         check(device->CreateTexture2D(&d, nullptr, input.put()), "input_texture");
         check(device->CreateShaderResourceView(input.get(), nullptr, source.put()), "input_shader_view");
         if (o.synthetic) check(device->CreateUnorderedAccessView(input.get(), nullptr, inputUav.put()), "synthetic_texture_view");
+        if (!o.synthetic && o.sdr) {
+            check(device->CreateRenderTargetView(input.get(), nullptr, inputRtv.put()), "input_rtv");
+            clearInputBlack();
+        }
+    }
+    void createTextures() {
+        recreateInputTexture();
+        D3D11_TEXTURE2D_DESC d = {};
+        d.MipLevels = 1; d.ArraySize = 1; d.SampleDesc.Count = 1; d.Usage = D3D11_USAGE_DEFAULT;
         d.Width = o.width; d.Height = o.height; d.Format = o.sdr ? DXGI_FORMAT_NV12 : DXGI_FORMAT_P010;
         d.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
         check(device->CreateTexture2D(&d, nullptr, output.put()), "yuv_texture");
@@ -504,16 +579,45 @@ class Pipeline {
         if (!newest.get()) return false;
         try {
             wgc::Size size = {}; check(newest->ContentSize(&size), "capture_content_size");
-            if (size.Width != static_cast<INT32>(sourceWidth) || size.Height != static_cast<INT32>(sourceHeight)) throw std::runtime_error("capture_monitor_changed");
+            if (o.window) {
+                if (size.Width < 1 || size.Height < 1 || size.Width > 16384 || size.Height > 16384) {
+                    closeCapture(newest.get());
+                    return false;
+                }
+                if (size.Width != static_cast<INT32>(sourceWidth) || size.Height != static_cast<INT32>(sourceHeight)) {
+                    sourceWidth = static_cast<UINT>(size.Width);
+                    sourceHeight = static_cast<UINT>(size.Height);
+                    recreateInputTexture();
+                    const INT32 pixelFormat = o.sdr ? static_cast<INT32>(DXGI_FORMAT_B8G8R8A8_UNORM) : static_cast<INT32>(DXGI_FORMAT_R16G16B16A16_FLOAT);
+                    check(pool->Recreate(graphicsDevice.get(), pixelFormat, 2, size), "capture_pool_recreate");
+                }
+            } else if (size.Width != static_cast<INT32>(sourceWidth) || size.Height != static_cast<INT32>(sourceHeight)) {
+                throw std::runtime_error("capture_monitor_changed");
+            }
             Ptr<IInspectable> surface; check(newest->Surface(surface.put()), "capture_surface");
             Ptr<wgc::DxgiAccess> access; query(surface.get(), access);
             Ptr<ID3D11Texture2D> texture;
             check(access->GetInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(texture.put())), "capture_texture");
             D3D11_TEXTURE2D_DESC description = {}; texture->GetDesc(&description);
             const DXGI_FORMAT expectedFmt = o.sdr ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
-            if (description.Format != expectedFmt || description.Width != sourceWidth || description.Height != sourceHeight)
+            if (description.Format != expectedFmt) {
                 throw std::runtime_error(o.sdr ? "capture_not_bgra8" : "capture_not_fp16");
-            context->CopyResource(input.get(), texture.get()); context->Flush();
+            }
+            if (!o.window && (description.Width != sourceWidth || description.Height != sourceHeight)) {
+                throw std::runtime_error(o.sdr ? "capture_not_bgra8" : "capture_not_fp16");
+            }
+            if (description.Width == sourceWidth && description.Height == sourceHeight) {
+                context->CopyResource(input.get(), texture.get());
+            } else {
+                clearInputBlack();
+                const UINT copyW = std::min(sourceWidth, description.Width);
+                const UINT copyH = std::min(sourceHeight, description.Height);
+                if (copyW > 0 && copyH > 0) {
+                    D3D11_BOX box = {0, 0, 0, copyW, copyH, 1};
+                    context->CopySubresourceRegion(input.get(), 0, 0, 0, 0, texture.get(), 0, &box);
+                }
+            }
+            context->Flush();
         } catch (...) { closeCapture(newest.get()); throw; }
         closeCapture(newest.get()); return true;
     }
@@ -586,9 +690,11 @@ public:
             SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
         }
+        if (!o.synthetic && o.window) requireSdrWindow();
         selectAdapter();
         if (!o.synthetic) {
-            if (o.sdr) requireSdrMonitor();
+            if (o.window) requireSdrWindow();
+            else if (o.sdr) requireSdrMonitor();
             else requireHdrOutput();
         }
         D3D_FEATURE_LEVEL level;
@@ -656,13 +762,20 @@ public:
                 }
                 if (fresh) statsFreshFrames++;
                 haveFrame = fresh || haveFrame;
+                if (!haveFrame && o.window && IsIconic(o.window)) {
+                    requireSdrWindow();
+                    start = lastCheck = lastStats = clock::now();
+                    nextDeadline = start;
+                    haveFrame = true;
+                }
                 if (!haveFrame) {
                     if (clock::now() - start > std::chrono::seconds(10)) throw std::runtime_error("capture_first_frame_timeout");
                     timer.waitUntil(clock::now() + std::chrono::milliseconds(1));
                     continue;
                 }
                 if (clock::now() - lastCheck >= std::chrono::seconds(1)) {
-                    if (o.sdr) requireSdrMonitor();
+                    if (o.window) requireSdrWindow();
+                    else if (o.sdr) requireSdrMonitor();
                     else requireHdrOutput();
                     lastCheck = clock::now();
                 }

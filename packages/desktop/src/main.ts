@@ -71,7 +71,7 @@ import { ThemeManager, registerThemeStyles, registerThemeControls, windowThemeCo
 import { registerFavoriteImages } from './favoriteImages';
 import { registerHdrNative } from './hdrIpc';
 import { registerSdrNative } from './sdrIpc';
-import type { ScreenMonitorHint } from './sdrNative';
+import { parseWindowHwndFromSourceId, type ScreenMonitorHint, type SdrCaptureTarget } from './sdrNative';
 import { ActivityAssetPublisher, registerActivityAssetSession } from './activityAssetPublisher';
 
 function showManagedUpdateNotice(): void {
@@ -534,7 +534,7 @@ function createWindow(): void {
     disposeHdrNative?.();
     disposeSdrNative?.();
     disposeHdrNative = registerHdrNative(ipcMain, () => mainWindow, getResolvedInstanceUrl);
-    disposeSdrNative = registerSdrNative(ipcMain, () => mainWindow, getResolvedInstanceUrl, resolveMonitorHintForScreenSource);
+    disposeSdrNative = registerSdrNative(ipcMain, () => mainWindow, getResolvedInstanceUrl, resolveCaptureTargetForSdr);
   }
   attachRecoveryHandlers(mainWindow);
   keybindManager.setWindow(mainWindow);
@@ -775,7 +775,46 @@ async function enumerateScreenSources(): Promise<Electron.DesktopCapturerSource[
     fetchWindowIcons: true,
   });
   lastScreenSources = sources;
+  recordAuthorizedWindowSources(sources);
   return sources;
+}
+
+const authorizedWindowSourceIds = new Set<string>();
+
+function recordAuthorizedWindowSources(sources: ReadonlyArray<{ id: string }>): void {
+  for (const s of sources) {
+    if (!s.id.startsWith('window:')) continue;
+    if (!authorizedWindowSourceIds.has(s.id) && authorizedWindowSourceIds.size >= 512) {
+      const oldest = authorizedWindowSourceIds.values().next().value;
+      if (oldest !== undefined) authorizedWindowSourceIds.delete(oldest);
+    }
+    authorizedWindowSourceIds.add(s.id);
+  }
+}
+
+async function resolveCaptureTargetForSdr(sourceId: string): Promise<SdrCaptureTarget | null> {
+  if (sourceId.startsWith('screen:')) {
+    return resolveMonitorHintForScreenSource(sourceId);
+  }
+  if (sourceId.startsWith('window:')) {
+    const hwnd = parseWindowHwndFromSourceId(sourceId);
+    if (!hwnd) return null;
+    if (!authorizedWindowSourceIds.has(sourceId) && !lastScreenSources.some(s => s.id === sourceId)) {
+      try {
+        const refreshed = await desktopCapturer.getSources({
+          types: ['window'],
+          thumbnailSize: { width: 1, height: 1 },
+          fetchWindowIcons: false,
+        });
+        recordAuthorizedWindowSources(refreshed);
+      } catch {
+        return null;
+      }
+    }
+    if (!authorizedWindowSourceIds.has(sourceId)) return null;
+    return { kind: 'window', sourceId, hwnd };
+  }
+  return null;
 }
 
 async function resolveMonitorHintForScreenSource(sourceId: string): Promise<ScreenMonitorHint | null> {

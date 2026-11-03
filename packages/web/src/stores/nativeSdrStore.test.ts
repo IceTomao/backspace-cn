@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Track, type Room } from 'livekit-client';
-import { useNativeSdrStore } from './nativeSdrStore';
+import { isNativeSdrEligibleSourceId, useNativeSdrStore } from './nativeSdrStore';
 import { useVoiceStore } from './voiceStore';
 import { useAuthStore } from './authStore';
 import { cloneStreamColor, DEFAULT_STREAM_COLOR } from '../utils/streamColor';
@@ -268,13 +268,65 @@ describe('nativeSdrStore', () => {
     expect(setStreamingPowerModeMock).toHaveBeenLastCalledWith(false);
   });
 
-  it('returns false immediately for window capture or VP9 so caller falls back to Electron WebRTC', async () => {
-    const room = makeFakeRoom('u1:streamer');
-    const config = useVoiceStore.getState().screenShareConfig;
+  it('publishes window:* sources via zero-copy SDR, updates resized window stats, and falls back only for VP9 or non-SDR sources', async () => {
+    expect(isNativeSdrEligibleSourceId('screen:0:0')).toBe(true);
+    expect(isNativeSdrEligibleSourceId('window:263960:0')).toBe(true);
+    expect(isNativeSdrEligibleSourceId('hdr:DISPLAY1')).toBe(false);
+    expect(isNativeSdrEligibleSourceId(null)).toBe(false);
 
-    expect(await useNativeSdrStore.getState().publish(room, 'window:123:0', config)).toBe(false);
+    const room = makeFakeRoom('u1:streamer');
+    const config = { ...useVoiceStore.getState().screenShareConfig, shareAudio: false };
+
+    const winOk = await useNativeSdrStore.getState().publish(room, 'window:263960:0', config, {
+      width: 1600,
+      height: 900,
+    });
+    expect(winOk).toBe(true);
+    expect(useNativeSdrStore.getState().active).toBe(true);
+    expect(useNativeSdrStore.getState().sourceId).toBe('window:263960:0');
+
+    const publishCall = sdrNativeMock.mock.calls.find(
+      ([arg]) => arg.action === 'publish' && arg.sourceId === 'window:263960:0',
+    )?.[0] as { requestId: string };
+    expect(publishCall?.requestId).toBeTruthy();
+
+    // Window dynamically resized from 1600x900 to 2560x1440 while keeping output canvas fixed
+    eventListener?.({
+      kind: 'stats',
+      requestId: publishCall.requestId,
+      codec: 'hevc',
+      encodeFps: 120,
+      captureFps: 120,
+      encodeTimeMs: 1.2,
+      bitrateKbps: 18000,
+      width: 1600,
+      height: 900,
+      sourceWidth: 2560,
+      sourceHeight: 1440,
+    });
+    expect(useNativeSdrStore.getState().stats?.sourceWidth).toBe(2560);
+    expect(useNativeSdrStore.getState().stats?.sourceHeight).toBe(1440);
+
+    // HEVC-capable viewer joining triggers instant keyframe request
+    useNativeSdrStore.getState().onViewerWatch(room, 'u3:desktopViewer', true, true);
+    expect(sdrNativeMock).toHaveBeenCalledWith({
+      action: 'keyframe',
+      requestId: publishCall.requestId,
+    });
+
+    // Window closed by user -> native process emits stopped(capture_window_closed) -> cleanly ends share
+    eventListener?.({
+      kind: 'publisher',
+      requestId: publishCall.requestId,
+      state: 'stopped',
+      reason: 'capture_window_closed',
+    });
+    expect(useNativeSdrStore.getState().active).toBe(false);
+    expect(useVoiceStore.getState().isScreenSharing).toBe(false);
+
+    expect(await useNativeSdrStore.getState().publish(room, 'hdr:DISPLAY1', config)).toBe(false);
     expect(
-      await useNativeSdrStore.getState().publish(room, 'screen:0:0', { ...config, codec: 'vp9' }),
+      await useNativeSdrStore.getState().publish(room, 'window:263960:0', { ...config, codec: 'vp9' }),
     ).toBe(false);
   });
 });

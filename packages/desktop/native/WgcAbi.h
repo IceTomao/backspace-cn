@@ -29,6 +29,10 @@ struct __declspec(uuid("fa50c623-38da-4b32-acf3-fa9734ad800e")) Frame : IInspect
 struct __declspec(uuid("814e42a9-f70f-4ad7-939b-fddcc6eb880d")) Session : IInspectable {
     virtual HRESULT STDMETHODCALLTYPE StartCapture() = 0;
 };
+struct __declspec(uuid("f2cdd966-22ae-5ea1-9596-3a289344c3be")) Session3 : IInspectable {
+    virtual HRESULT STDMETHODCALLTYPE get_IsBorderRequired(BYTE*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsBorderRequired(BYTE) = 0;
+};
 struct __declspec(uuid("24eb6d22-1975-422e-82e7-780dbd8ddf24")) Pool : IInspectable {
     virtual HRESULT STDMETHODCALLTYPE Recreate(IInspectable*, INT32, INT32, Size) = 0;
     virtual HRESULT STDMETHODCALLTYPE NextFrame(Frame**) = 0;
@@ -54,4 +58,5 @@ __CRT_UUID_DECL(wgc::ItemInterop, 0x3628e81b,0x3cac,0x4c60,0xb7,0xf4,0x23,0xce,0
 __CRT_UUID_DECL(wgc::PoolStatics, 0x589b103f,0x6bbc,0x5df5,0xa9,0x91,0x02,0xe2,0x8b,0x3b,0x66,0xd5)
 __CRT_UUID_DECL(wgc::DxgiAccess, 0xa9b3d012,0x3df2,0x4ee3,0xb8,0xd1,0x86,0x95,0xf4,0x57,0xd3,0xc1)
 __CRT_UUID_DECL(wgc::Closable, 0x30d5a829,0x7fa4,0x4026,0x83,0xbb,0xd7,0x5b,0xae,0x4e,0xa9,0x9e)
+__CRT_UUID_DECL(wgc::Session3, 0xf2cdd966,0x22ae,0x5ea1,0x95,0x96,0x3a,0x28,0x93,0x44,0xc3,0xbe)
 #endif

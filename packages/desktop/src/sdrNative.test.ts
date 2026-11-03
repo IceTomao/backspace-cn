@@ -3,7 +3,9 @@ import {
   decodePcmChunkToStereoOrMonoFloat32,
   hasAnnexBStartCode,
   matchSdrDisplay,
+  parseWindowHwndFromSourceId,
   resolveSdrOutputDimensions,
+  sdrAudioArgs,
   sdrGpuArgs,
   sdrKeyFramePacket,
   validateSdrVideo,
@@ -53,6 +55,38 @@ describe('native SDR zero-copy runtime helpers', () => {
       '--bitrate-kbps', '25000', '--exposure-tenths', '0', '--vibrance', '70', '--monitor', '65537', '--watch-parent',
     ]);
     expect(() => validateSdrVideo({ width: 1920, height: 1080, fps: 60, bitrateKbps: 10000, codec: 'vp9' as any, shareAudio: false })).toThrow();
+  });
+
+  it('parses Electron window source IDs, builds --window GPU args and scopes per-process audio args', () => {
+    expect(parseWindowHwndFromSourceId('window:263960:0')).toBe('263960');
+    expect(parseWindowHwndFromSourceId('window:131072:1')).toBe('131072');
+    expect(parseWindowHwndFromSourceId('window:0:0')).toBeNull();
+    expect(parseWindowHwndFromSourceId('window:abc:0')).toBeNull();
+    expect(parseWindowHwndFromSourceId('screen:0:0')).toBeNull();
+
+    expect(sdrGpuArgs({
+      width: 1920,
+      height: 1080,
+      fps: 120,
+      bitrateKbps: 20000,
+      codec: 'h264',
+      shareAudio: true,
+    }, { window: '263960' })).toEqual([
+      '--sdr', '--codec', 'h264', '--width', '1920', '--height', '1080', '--fps', '120',
+      '--bitrate-kbps', '20000', '--window', '263960', '--watch-parent',
+    ]);
+    expect(() => sdrGpuArgs({
+      width: 1920,
+      height: 1080,
+      fps: 60,
+      bitrateKbps: 10000,
+      codec: 'hevc',
+      shareAudio: false,
+    }, { window: '0' })).toThrow('Invalid SDR window');
+
+    expect(sdrAudioArgs(undefined, 9000)).toEqual([]);
+    expect(sdrAudioArgs(25192, 9000)).toEqual(['--pid', '25192']);
+    expect(sdrAudioArgs(9000, 9000)).toEqual([]);
   });
 
   it('decodes WASAPI loopback PCM and downmixes surround channels cleanly', () => {

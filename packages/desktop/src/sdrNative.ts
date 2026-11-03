@@ -27,6 +27,14 @@ export interface ScreenMonitorHint {
   totalScreens: number;
 }
 
+export interface WindowCaptureHint {
+  kind: 'window';
+  sourceId: string;
+  hwnd: string;
+}
+
+export type SdrCaptureTarget = ScreenMonitorHint | WindowCaptureHint;
+
 export interface SdrCapabilities {
   protocol: 1;
   available: boolean;
@@ -182,13 +190,60 @@ export function matchSdrDisplay(displays: SdrDisplay[], hint: ScreenMonitorHint)
   return displays[0] ?? null;
 }
 
+export function parseWindowHwndFromSourceId(sourceId: string): string | null {
+  if (typeof sourceId !== 'string') return null;
+  const match = /^window:([1-9][0-9]{0,19}):[0-9]+$/.exec(sourceId);
+  if (!match?.[1]) return null;
+  try {
+    if (BigInt(match[1]) > 0xffffffffffffffffn) return null;
+    return match[1];
+  } catch {
+    return null;
+  }
+}
+
+export function sdrAudioArgs(targetPid?: number, ownPid = process.pid): string[] {
+  if (
+    targetPid !== undefined &&
+    Number.isSafeInteger(targetPid) &&
+    targetPid > 0 &&
+    targetPid <= 0xffffffff &&
+    targetPid !== ownPid
+  ) {
+    return ['--pid', String(targetPid)];
+  }
+  return [];
+}
+
+function isWindowCaptureTarget(target: SdrCaptureTarget): target is WindowCaptureHint {
+  return 'kind' in target && target.kind === 'window';
+}
+
+function validateNativeHandle(handle: string, label: string): void {
+  if (!/^[1-9][0-9]{0,19}$/.test(handle) || BigInt(handle) > 0xffffffffffffffffn) {
+    throw new Error(`Invalid SDR ${label}`);
+  }
+}
+
 export function sdrGpuArgs(
   config: SdrVideoConfig & { width: number; height: number },
-  monitor?: string,
+  target?: string | { monitor: string } | { window: string },
 ): string[] {
   validateSdrVideo(config);
-  if (monitor !== undefined && (!/^[1-9][0-9]{0,19}$/.test(monitor) || BigInt(monitor) > 0xffffffffffffffffn)) {
-    throw new Error('Invalid SDR monitor');
+  let targetArgs: string[];
+  if (target === undefined) {
+    targetArgs = ['--synthetic', '--frames', '2'];
+  } else if (typeof target === 'string') {
+    validateNativeHandle(target, 'monitor');
+    targetArgs = ['--monitor', target, '--watch-parent'];
+  } else if ('monitor' in target) {
+    validateNativeHandle(target.monitor, 'monitor');
+    targetArgs = ['--monitor', target.monitor, '--watch-parent'];
+  } else if ('window' in target) {
+    validateNativeHandle(target.window, 'window');
+    targetArgs = ['--window', target.window, '--watch-parent'];
+  } else {
+    throw new Error('Invalid SDR capture target');
   }
   return [
     '--sdr',
@@ -198,7 +253,7 @@ export function sdrGpuArgs(
     '--fps', String(config.fps),
     '--bitrate-kbps', String(config.bitrateKbps),
     ...(config.color ? hdrColorCliArgs(config.color) : []),
-    ...(monitor === undefined ? ['--synthetic', '--frames', '2'] : ['--monitor', monitor, '--watch-parent']),
+    ...targetArgs,
   ];
 }
 
@@ -343,6 +398,34 @@ export class SdrNativeRuntime {
     }));
   }
 
+  private async probeWindow(hwnd: string): Promise<{ width: number; height: number; pid: number }> {
+    validateNativeHandle(hwnd, 'window');
+    const result = await runJson(this.file('DisplayProbe.exe'), ['--window', hwnd]) as {
+      schemaVersion?: unknown;
+      window?: {
+        valid?: boolean;
+        width?: number;
+        height?: number;
+        monitorWidth?: number;
+        monitorHeight?: number;
+        pid?: number;
+      };
+    };
+    if (result.schemaVersion !== 2 || !result.window || result.window.valid !== true) {
+      throw new Error('Selected window is no longer available');
+    }
+    const rawW = typeof result.window.width === 'number' ? result.window.width : 0;
+    const rawH = typeof result.window.height === 'number' ? result.window.height : 0;
+    const monW = typeof result.window.monitorWidth === 'number' ? result.window.monitorWidth : 0;
+    const monH = typeof result.window.monitorHeight === 'number' ? result.window.monitorHeight : 0;
+    const width = rawW >= 64 && rawH >= 64 ? rawW : (monW >= 256 && monH >= 128 ? monW : 1920);
+    const height = rawW >= 64 && rawH >= 64 ? rawH : (monW >= 256 && monH >= 128 ? monH : 1080);
+    const pid = typeof result.window.pid === 'number' && Number.isSafeInteger(result.window.pid) && result.window.pid > 0
+      ? result.window.pid
+      : 0;
+    return { width, height, pid };
+  }
+
   private async probeCodec(codec: SdrNativeCodec): Promise<boolean> {
     try {
       const probeConfig = { width: 256, height: 128, fps: 60, bitrateKbps: 1000, codec, shareAudio: false };
@@ -433,11 +516,11 @@ export class SdrNativeRuntime {
     return child;
   }
 
-  private startAudioLoopback(op: PublisherOperation): void {
+  private startAudioLoopback(op: PublisherOperation, targetPid?: number): void {
     if (!this.onAudioChunk || op.stopped) return;
     let audio: ChildProcessWithoutNullStreams;
     try {
-      audio = spawn(this.file('HdrAudio.exe'), [], { windowsHide: true, stdio: 'pipe', cwd: this.root });
+      audio = spawn(this.file('HdrAudio.exe'), sdrAudioArgs(targetPid), { windowsHide: true, stdio: 'pipe', cwd: this.root });
     } catch {
       this.notify({ kind: 'audio-stopped', reason: 'audio_spawn_failed' });
       return;
@@ -498,7 +581,7 @@ export class SdrNativeRuntime {
   }
 
   async startPublisher(
-    monitorHint: ScreenMonitorHint,
+    captureTarget: SdrCaptureTarget,
     config: SdrVideoConfig,
     credentials: SdrCredentials,
   ): Promise<SdrPublishResult> {
@@ -518,16 +601,31 @@ export class SdrNativeRuntime {
       if ((config.codec === 'hevc' && !support.hevc) || (config.codec === 'h264' && !support.h264)) {
         throw new Error(`NVENC ${config.codec} encoder unavailable`);
       }
-      const displays = await this.displays();
-      const target = matchSdrDisplay(displays, monitorHint);
-      if (!target || !/^[1-9][0-9]*$/.test(target.hmonitor)) {
-        throw new Error('Selected monitor handle unavailable');
+
+      let sourceDims: { width: number; height: number };
+      let gpuTarget: { monitor: string } | { window: string };
+      let audioTargetPid: number | undefined;
+
+      if (isWindowCaptureTarget(captureTarget)) {
+        validateNativeHandle(captureTarget.hwnd, 'window');
+        const winInfo = await this.probeWindow(captureTarget.hwnd);
+        sourceDims = { width: winInfo.width, height: winInfo.height };
+        gpuTarget = { window: captureTarget.hwnd };
+        audioTargetPid = winInfo.pid || undefined;
+      } else {
+        const displays = await this.displays();
+        const target = matchSdrDisplay(displays, captureTarget);
+        if (!target || !/^[1-9][0-9]*$/.test(target.hmonitor)) {
+          throw new Error('Selected monitor handle unavailable');
+        }
+        sourceDims = { width: target.width, height: target.height };
+        gpuTarget = { monitor: target.hmonitor };
       }
       if (op.stopped) throw new Error('SDR operation cancelled');
 
-      const { width, height } = resolveSdrOutputDimensions(target, config);
+      const { width, height } = resolveSdrOutputDimensions(sourceDims, config);
       const resolvedConfig = { ...config, width, height };
-      const encoder = this.spawnCriticalChild(op, 'HdrGpu.exe', sdrGpuArgs(resolvedConfig, target.hmonitor));
+      const encoder = this.spawnCriticalChild(op, 'HdrGpu.exe', sdrGpuArgs(resolvedConfig, gpuTarget));
       op.encoder = encoder;
 
       this.events(encoder, 'stderr', event => {
@@ -545,8 +643,8 @@ export class SdrNativeRuntime {
             bitrateKbps: typeof event.bitrateKbps === 'number' ? event.bitrateKbps : 0,
             width: typeof event.width === 'number' ? event.width : width,
             height: typeof event.height === 'number' ? event.height : height,
-            sourceWidth: typeof event.sourceWidth === 'number' ? event.sourceWidth : target.width,
-            sourceHeight: typeof event.sourceHeight === 'number' ? event.sourceHeight : target.height,
+            sourceWidth: typeof event.sourceWidth === 'number' ? event.sourceWidth : sourceDims.width,
+            sourceHeight: typeof event.sourceHeight === 'number' ? event.sourceHeight : sourceDims.height,
           });
         }
       });
@@ -601,7 +699,7 @@ export class SdrNativeRuntime {
       }
 
       if (config.shareAudio) {
-        this.startAudioLoopback(op);
+        this.startAudioLoopback(op, audioTargetPid);
       }
 
       return {

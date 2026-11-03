@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -41,6 +42,18 @@ internal static class DisplayProbe
     }
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPlacement
+    {
+        public uint Length;
+        public uint Flags;
+        public uint ShowCmd;
+        public Point MinPosition;
+        public Point MaxPosition;
+        public Rect NormalPosition;
+    }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct MonitorInfo
     {
@@ -51,10 +64,27 @@ internal static class DisplayProbe
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Device;
     }
     private delegate bool MonitorCallback(IntPtr monitor, IntPtr dc, ref Rect rect, IntPtr data);
+    private delegate bool ChildWindowCallback(IntPtr hwnd, IntPtr lParam);
     [DllImport("user32.dll")]
     private static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorCallback callback, IntPtr data);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowPlacement(IntPtr hwnd, ref WindowPlacement placement);
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr hwndParent, ChildWindowCallback callback, IntPtr lParam);
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect pvAttribute, int cbAttribute);
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
     public static void UsePhysicalPixels() { try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { } }
     [DllImport("dxgi.dll")]
@@ -170,11 +200,99 @@ internal static class DisplayProbe
         return new DeviceInfoHeader { Type = type, Size = (uint)size, Adapter = adapter, Id = id };
     }
 
-    private static int Main()
+    private static int ProbeWindow(string hwndText)
+    {
+        ulong raw;
+        if (string.IsNullOrEmpty(hwndText) || hwndText.Length > 20 || !ulong.TryParse(hwndText, out raw) || raw == 0)
+            throw new InvalidOperationException("Invalid window handle");
+        IntPtr hwnd = unchecked((IntPtr)(long)raw);
+        Console.OutputEncoding = new UTF8Encoding(false);
+        if (!IsWindow(hwnd))
+        {
+            Console.WriteLine("{\"schemaVersion\":2,\"window\":{\"hwnd\":" + Json(hwndText) + ",\"valid\":false}}");
+            return 0;
+        }
+        bool minimized = IsIconic(hwnd);
+        int width = 0, height = 0;
+        Rect rect;
+        if (!minimized)
+        {
+            if (DwmGetWindowAttribute(hwnd, 9, out rect, Marshal.SizeOf(typeof(Rect))) == 0)
+            {
+                width = rect.Right - rect.Left;
+                height = rect.Bottom - rect.Top;
+            }
+            if ((width < 2 || height < 2) && GetWindowRect(hwnd, out rect))
+            {
+                width = rect.Right - rect.Left;
+                height = rect.Bottom - rect.Top;
+            }
+        }
+        if (minimized || width < 2 || height < 2)
+        {
+            var placement = new WindowPlacement { Length = (uint)Marshal.SizeOf(typeof(WindowPlacement)) };
+            if (GetWindowPlacement(hwnd, ref placement))
+            {
+                int normalW = placement.NormalPosition.Right - placement.NormalPosition.Left;
+                int normalH = placement.NormalPosition.Bottom - placement.NormalPosition.Top;
+                if (normalW >= 2 && normalH >= 2)
+                {
+                    width = normalW;
+                    height = normalH;
+                }
+            }
+        }
+        IntPtr mon = MonitorFromWindow(hwnd, 2);
+        var monitorInfo = new MonitorInfo { Size = (uint)Marshal.SizeOf(typeof(MonitorInfo)) };
+        bool hasMonitor = mon != IntPtr.Zero && GetMonitorInfo(mon, ref monitorInfo);
+        int monitorWidth = hasMonitor ? (monitorInfo.Monitor.Right - monitorInfo.Monitor.Left) : 0;
+        int monitorHeight = hasMonitor ? (monitorInfo.Monitor.Bottom - monitorInfo.Monitor.Top) : 0;
+        uint pid = 0;
+        GetWindowThreadProcessId(hwnd, out pid);
+        if (pid != 0)
+        {
+            try
+            {
+                using (var proc = Process.GetProcessById((int)pid))
+                {
+                    if (string.Equals(proc.ProcessName, "ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
+                    {
+                        uint childPid = 0;
+                        EnumChildWindows(hwnd, delegate(IntPtr child, IntPtr lParam)
+                        {
+                            uint cpid;
+                            GetWindowThreadProcessId(child, out cpid);
+                            if (cpid != 0 && cpid != pid) { childPid = cpid; return false; }
+                            return true;
+                        }, IntPtr.Zero);
+                        if (childPid != 0) pid = childPid;
+                    }
+                }
+            }
+            catch { }
+        }
+        string monHandle = hasMonitor ? unchecked((ulong)mon.ToInt64()).ToString() : null;
+        Console.WriteLine("{\"schemaVersion\":2,\"window\":{\"hwnd\":" + Json(hwndText) +
+            ",\"valid\":true,\"minimized\":" + (minimized ? "true" : "false") +
+            ",\"hmonitor\":" + (monHandle == null ? "null" : Json(monHandle)) +
+            ",\"width\":" + width.ToString() +
+            ",\"height\":" + height.ToString() +
+            ",\"monitorWidth\":" + monitorWidth.ToString() +
+            ",\"monitorHeight\":" + monitorHeight.ToString() +
+            ",\"pid\":" + pid.ToString() + "}}");
+        return 0;
+    }
+
+    private static int Main(string[] args)
     {
         UsePhysicalPixels();
         try
         {
+            if (args != null && args.Length > 0)
+            {
+                if (args.Length == 2 && args[0] == "--window") return ProbeWindow(args[1]);
+                throw new InvalidOperationException("Unsupported probe arguments");
+            }
             var colorSpaces = OutputColorSpaces();
             var monitors = new Dictionary<string, string>();
             MonitorCallback callback = delegate(IntPtr monitor, IntPtr dc, ref Rect rect, IntPtr data)

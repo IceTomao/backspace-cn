@@ -1,18 +1,18 @@
 import path from 'node:path';
 import { app, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from 'electron';
-import { SdrNativeRuntime, type ScreenMonitorHint, type SdrVideoConfig } from './sdrNative';
+import { SdrNativeRuntime, type SdrCaptureTarget, type SdrVideoConfig } from './sdrNative';
 import { validateHdrColor } from './hdrColor';
 
 /**
- * Trusted main-process IPC bridge for Native Zero-Copy SDR whole-screen capture.
- * The renderer supplies only screen source IDs and bounded numeric parameters,
- * never executable paths, shell arguments, or raw OS handles.
+ * Trusted main-process IPC bridge for Native Zero-Copy SDR display & window capture.
+ * The renderer supplies only enumerated screen/window source IDs and bounded numeric
+ * parameters, never executable paths, shell arguments, or unverified OS handles.
  */
 export function registerSdrNative(
   ipc: IpcMain,
   getWindow: () => BrowserWindow | null,
   getInstance: () => string,
-  resolveMonitorHint: (sourceId: string) => Promise<ScreenMonitorHint | null>,
+  resolveCaptureTarget: (sourceId: string) => Promise<SdrCaptureTarget | null>,
 ): () => void {
   let generation = 0;
   let activeLease: { identity: string; requestId: string; revoke: () => Promise<void> } | null = null;
@@ -92,7 +92,7 @@ export function registerSdrNative(
       return { ok: true };
     }
 
-    if (request.action === 'request-idr') {
+    if (request.action === 'request-idr' || request.action === 'keyframe') {
       if (!activeLease || (typeof request.requestId === 'string' && request.requestId !== activeLease.requestId)) {
         return { ok: false };
       }
@@ -118,8 +118,11 @@ export function registerSdrNative(
         typeof request.isDm !== 'boolean') {
       throw new Error('Invalid SDR voice session');
     }
-    if (typeof request.sourceId !== 'string' || !request.sourceId.startsWith('screen:')) {
-      throw new Error('SDR zero-copy requires a display source');
+    if (
+      typeof request.sourceId !== 'string' ||
+      (!request.sourceId.startsWith('screen:') && !request.sourceId.startsWith('window:'))
+    ) {
+      throw new Error('SDR zero-copy requires a display or window source');
     }
 
     const revision = ++generation;
@@ -127,10 +130,10 @@ export function registerSdrNative(
     activeLease = null;
     runtime.stop();
 
-    const monitorHint = await resolveMonitorHint(request.sourceId);
-    if (!monitorHint) {
+    const captureTarget = await resolveCaptureTarget(request.sourceId);
+    if (!captureTarget) {
       revokeLease(previousLease);
-      throw new Error('Selected screen display could not be resolved');
+      throw new Error('Selected capture source could not be resolved');
     }
 
     const origin = new URL(getInstance()).origin;
@@ -187,7 +190,7 @@ export function registerSdrNative(
       };
       activeLease = newLease;
 
-      const result = await runtime.startPublisher(monitorHint, request.config as SdrVideoConfig, credentials);
+      const result = await runtime.startPublisher(captureTarget, request.config as SdrVideoConfig, credentials);
       let confirmed = await publication(result.trackSid);
       for (let attempt = 0; !confirmed.ok && confirmed.status === 409 && attempt < 19 && revision === generation; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 200));

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { getElectronAPI, isElectron, isElectronMac } from '../../platform/platform';
 import { useVoiceStore } from '../../stores/voiceStore';
 import { useNativeHdrStore } from '../../stores/nativeHdrStore';
-import { useNativeSdrStore } from '../../stores/nativeSdrStore';
+import { isNativeSdrEligibleSourceId, useNativeSdrStore } from '../../stores/nativeSdrStore';
 import { useScreenShareSetupStore } from '../../stores/screenShareSetupStore';
 import { usePortalContainer } from '../../hooks/usePortalContainer';
 import { getActiveRoom } from '../../hooks/useLiveKit';
@@ -84,6 +84,7 @@ export function ScreenShareSetup() {
   const lastSourceId = useVoiceStore((s) => s.lastScreenShareSourceId);
   const isScreenSharing = useVoiceStore((s) => s.isScreenSharing);
   const nativeHdr = useNativeHdrStore();
+  const nativeSdrCaps = useNativeSdrStore((s) => s.capabilities);
 
   const api = getElectronAPI();
   const electron = isElectron();
@@ -303,6 +304,9 @@ export function ScreenShareSetup() {
   useEffect(() => {
     if (!isOpen) return;
     void probeHardwareScreenShareCodecs();
+    if (isElectron() && getElectronAPI()?.platform === 'win32') {
+      void useNativeSdrStore.getState().refreshCapabilities(true);
+    }
     setActiveTab('screens');
     setSearch('');
     setSelectedId(null);
@@ -451,7 +455,7 @@ export function ScreenShareSetup() {
     if (
       electron &&
       api?.platform === 'win32' &&
-      selectedId?.startsWith('screen:') &&
+      isNativeSdrEligibleSourceId(selectedId) &&
       currentConfig.codec !== 'vp9'
     ) {
       const stagedSettings = stream.getVideoTracks()[0]?.getSettings();
@@ -505,7 +509,16 @@ export function ScreenShareSetup() {
   const showGrid = electron && (canListSources || promptInFlight || sources.length > 0);
   const activeSources = activeTab === 'windows' ? windows : screens;
   const supported = config.hdrEnabled ? nativeHdr.publisherAvailable : isScreenCaptureSupported();
-  const audioNeedsRepick = !!staged && stagedShareAudio !== config.shareAudio;
+  const nativeSdrActiveForSetup =
+    electron &&
+    api?.platform === 'win32' &&
+    !config.hdrEnabled &&
+    config.codec !== 'vp9' &&
+    (!nativeSdrCaps.checked || nativeSdrCaps.available);
+  const audioNeedsRepick =
+    !!staged &&
+    stagedShareAudio !== config.shareAudio &&
+    !(nativeSdrActiveForSetup && isNativeSdrEligibleSourceId(selectedId));
   const canStart = (config.hdrEnabled ? nativeHdr.publisherAvailable && !!selectedId?.startsWith('hdr:') : !!staged) && !staging && !starting;
   const chooseHint = !electron
     ? t('voice:screenPicker.chooseHint')
@@ -581,7 +594,14 @@ export function ScreenShareSetup() {
           </div>
         )}
 
-        {showGrid && electron && api?.platform === 'win32' && !config.hdrEnabled && config.fps >= 60 && (activeTab === 'windows' || stagedKind === 'window') && (
+        {showGrid &&
+          electron &&
+          api?.platform === 'win32' &&
+          !config.hdrEnabled &&
+          config.fps >= 60 &&
+          (activeTab === 'windows' || stagedKind === 'window') &&
+          nativeSdrCaps.checked &&
+          (!nativeSdrCaps.available || config.codec === 'vp9') && (
           <div className="px-6 pb-2.5 flex-shrink-0">
             <div className="rounded-lg bg-accent-amber/10 ring-1 ring-accent-amber/25 px-3 py-1.5 text-[12px] text-accent-amber/95">
               {t('voice:screenPicker.windowsHighFpsScreenHint')}

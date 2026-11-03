@@ -542,6 +542,10 @@ function buildPublishSpecSignature(
   return `${sourceId}|${maxHeight}|${fps}|${bitrateKbps}|${codec}|${shareAudio ? 1 : 0}`;
 }
 
+export function isNativeSdrEligibleSourceId(sourceId: string | null | undefined): sourceId is string {
+  return typeof sourceId === 'string' && (sourceId.startsWith('screen:') || sourceId.startsWith('window:'));
+}
+
 export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
   active: false,
   reconfiguring: false,
@@ -626,7 +630,7 @@ export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
     if (
       config.hdrEnabled ||
       config.codec === 'vp9' ||
-      !sourceId.startsWith('screen:') ||
+      !isNativeSdrEligibleSourceId(sourceId) ||
       !window.backspace?.sdrNative ||
       window.backspace.platform !== 'win32'
     ) {
