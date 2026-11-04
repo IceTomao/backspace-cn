@@ -53,6 +53,7 @@ export interface SdrVideoConfig {
   bitrateKbps: number;
   codec: SdrNativeCodec;
   shareAudio: boolean;
+  forceSdr?: boolean;
   color?: HdrColor;
 }
 
@@ -135,6 +136,9 @@ export function validateSdrVideo(config: SdrVideoConfig): void {
         config.height! < 128 || config.height! > 4320 || config.height! % 2 !== 0) {
       throw new Error('Invalid SDR dimensions');
     }
+  }
+  if (config.forceSdr !== undefined && typeof config.forceSdr !== 'boolean') {
+    throw new Error('Invalid SDR forceSdr');
   }
   if (config.color !== undefined) validateHdrColor(config.color);
 }
@@ -247,6 +251,7 @@ export function sdrGpuArgs(
   }
   return [
     '--sdr',
+    ...(config.forceSdr === true ? ['--force-sdr'] : []),
     '--codec', config.codec,
     '--width', String(config.width),
     '--height', String(config.height),

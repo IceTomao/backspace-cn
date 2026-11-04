@@ -119,6 +119,21 @@ it('publishes enumerated window:* sources via zero-copy SDR and supports keyfram
   await expect(handle(event, { action: 'request-idr', requestId: 'win-req-1' })).resolves.toEqual({ ok: true });
   expect(state.runtime.requestKeyFrame).toHaveBeenCalledTimes(2);
   await expect(handle(event, { action: 'keyframe', requestId: 'stale-req' })).resolves.toEqual({ ok: false });
+
+  // Live SDR exposure EV & color adjustments forward cleanly to publisher-color
+  const colorPayload = {
+    exposureEv: -0.7,
+    streamColor: {
+      all: { brightness: 50, contrast: 50, gamma: 1 },
+      red: { brightness: 50, contrast: 50, gamma: 1 },
+      green: { brightness: 50, contrast: 50, gamma: 1 },
+      blue: { brightness: 50, contrast: 50, gamma: 1 },
+      digitalVibrance: 55,
+      hue: 0,
+    },
+  };
+  await expect(handle(event, { action: 'publisher-color', requestId: 'win-req-1', color: colorPayload })).resolves.toEqual({ ok: true });
+  expect(state.runtime.setPublisherColor).toHaveBeenCalledWith(colorPayload);
 });
 
 it('rejects unenumerated window handles and unsupported source prefixes', async () => {

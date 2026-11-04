@@ -54,7 +54,21 @@ describe('native SDR zero-copy runtime helpers', () => {
       '--sdr', '--codec', 'hevc', '--width', '2560', '--height', '1440', '--fps', '120',
       '--bitrate-kbps', '25000', '--exposure-tenths', '0', '--vibrance', '70', '--monitor', '65537', '--watch-parent',
     ]);
+    expect(sdrGpuArgs({
+      width: 3840,
+      height: 2160,
+      fps: 120,
+      bitrateKbps: 35000,
+      codec: 'hevc',
+      shareAudio: true,
+      forceSdr: true,
+      color: { exposureEv: -0.8, streamColor: DEFAULT_STREAM_COLOR },
+    }, '65537')).toEqual([
+      '--sdr', '--force-sdr', '--codec', 'hevc', '--width', '3840', '--height', '2160', '--fps', '120',
+      '--bitrate-kbps', '35000', '--exposure-tenths', '-8', '--monitor', '65537', '--watch-parent',
+    ]);
     expect(() => validateSdrVideo({ width: 1920, height: 1080, fps: 60, bitrateKbps: 10000, codec: 'vp9' as any, shareAudio: false })).toThrow();
+    expect(() => validateSdrVideo({ width: 1920, height: 1080, fps: 60, bitrateKbps: 10000, codec: 'hevc', shareAudio: false, forceSdr: 'yes' as any })).toThrow('Invalid SDR forceSdr');
   });
 
   it('parses Electron window source IDs, builds --window GPU args and scopes per-process audio args', () => {

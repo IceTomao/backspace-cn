@@ -190,4 +190,47 @@ describe('screen-share codec & color controls', () => {
     expect(maintainFpsBtn).toHaveAttribute('aria-pressed', 'true');
     expect(useVoiceStore.getState().screenShareConfig.degradationPreference).toBe('maintain-framerate');
   });
+
+  it('shows Force SDR toggle and live SDR Exposure (EV) slider on Windows Electron, and allows mid-stream toggling and reset', () => {
+    const winObj = window as unknown as { backspace?: unknown };
+    const prevBackspace = winObj.backspace;
+    winObj.backspace = { platform: 'win32' };
+    try {
+      const { rerender } = render(<StreamQualityControls />);
+
+      const forceSdrSwitch = screen.getByRole('switch', { name: i18n.t('voice:streamSettings.forceSdr') });
+      expect(forceSdrSwitch).toHaveAttribute('aria-checked', 'false');
+      expect(screen.getByText(i18n.t('voice:streamSettings.forceSdrHintOff'))).toBeVisible();
+
+      // Remains interactive mid-stream for OBS-style live toggle
+      useVoiceStore.setState({ isScreenSharing: true });
+      rerender(<StreamQualityControls />);
+      expect(forceSdrSwitch).toBeEnabled();
+      fireEvent.click(forceSdrSwitch);
+      expect(useVoiceStore.getState().screenShareConfig.forceSdr).toBe(true);
+      expect(screen.getByText(i18n.t('voice:streamSettings.forceSdrHintOn'))).toBeVisible();
+
+      // Expand Color Channels and verify SDR Exposure (EV) slider + reset
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('voice:streamSettings.colorChannels.title') }));
+      const sdrExposure = screen.getByRole('slider', { name: i18n.t('voice:streamSettings.colorChannels.exposure') });
+      expect(sdrExposure).toHaveValue('0');
+
+      fireEvent.change(sdrExposure, { target: { value: '-1.2' } });
+      expect(useVoiceStore.getState().screenShareConfig.sdrExposureEv).toBe(-1.2);
+      expect(screen.getByText(i18n.t('voice:streamSettings.colorChannels.modified'))).toBeVisible();
+
+      fireEvent.doubleClick(sdrExposure);
+      expect(useVoiceStore.getState().screenShareConfig.sdrExposureEv).toBe(0);
+
+      fireEvent.change(sdrExposure, { target: { value: '0.8' } });
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('voice:streamSettings.colorChannels.reset') }));
+      expect(useVoiceStore.getState().screenShareConfig.sdrExposureEv).toBe(0);
+    } finally {
+      if (prevBackspace === undefined) {
+        delete winObj.backspace;
+      } else {
+        winObj.backspace = prevBackspace;
+      }
+    }
+  });
 });

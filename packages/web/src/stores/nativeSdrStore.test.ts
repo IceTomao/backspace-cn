@@ -153,6 +153,8 @@ describe('nativeSdrStore', () => {
         degradationPreference: 'maintain-framerate',
         hdrEnabled: false,
         hdrExposureEv: 0,
+        forceSdr: false,
+        sdrExposureEv: 0,
         streamColor: cloneStreamColor(DEFAULT_STREAM_COLOR),
       },
     });
@@ -252,13 +254,40 @@ describe('nativeSdrStore', () => {
     // requestedResolvedCodec stays 'h265' so ConnectionInfoPopover reports AUTO (H265) -> H264 compat switch
     expect(useNativeSdrStore.getState().requestedResolvedCodec).toBe('h265');
 
-    // Live color adjustment sends publisher-color without restarting encoder
+    // Live color + SDR exposure adjustment sends publisher-color without restarting encoder
     const customColor = cloneStreamColor(DEFAULT_STREAM_COLOR);
     customColor.digitalVibrance = 75;
-    useNativeSdrStore.getState().setColor({ exposureEv: 0, streamColor: customColor });
+    const publishCallsBeforeColor = sdrNativeMock.mock.calls.filter(([arg]) => arg.action === 'publish').length;
+    await useNativeSdrStore.getState().reconfigure(room, {
+      ...useVoiceStore.getState().screenShareConfig,
+      sdrExposureEv: -0.7,
+      streamColor: customColor,
+    });
     await vi.advanceTimersByTimeAsync(100);
+    expect(sdrNativeMock.mock.calls.filter(([arg]) => arg.action === 'publish')).toHaveLength(publishCallsBeforeColor);
     expect(sdrNativeMock).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'publisher-color' }),
+      expect.objectContaining({
+        action: 'publisher-color',
+        color: expect.objectContaining({ exposureEv: -0.7 }),
+      }),
+    );
+
+    // Toggling Force SDR mid-stream reconfigures the native publisher with forceSdr: true
+    const reconfiguredOk = await useNativeSdrStore.getState().reconfigure(room, {
+      ...useVoiceStore.getState().screenShareConfig,
+      forceSdr: true,
+      sdrExposureEv: -0.7,
+      streamColor: customColor,
+    });
+    expect(reconfiguredOk).toBe(true);
+    expect(sdrNativeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'publish',
+        config: expect.objectContaining({
+          forceSdr: true,
+          color: expect.objectContaining({ exposureEv: -0.7 }),
+        }),
+      }),
     );
 
     // Clean stop tears down native pipeline, audio track, and power mode

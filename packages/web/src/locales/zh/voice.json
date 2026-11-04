@@ -170,7 +170,9 @@
       "gamma": "灰度",
       "digitalVibrance": "数字亮丽 (%)",
       "hue": "色调 (°)",
-      "degreeValue": "{{value}}°"
+      "degreeValue": "{{value}}°",
+      "exposure": "曝光微调 (EV)",
+      "evValue": "{{value}} EV"
     },
     "hdrChecking": "正在检查 HDR 编码能力…",
     "hdrExperimental": "实验性 HDR：尚未完成双机显示验收，默认关闭。开启后仅上传 HDR 视频。",
@@ -205,7 +207,11 @@
       "maintainFramerate": "保持帧速率",
       "balanced": "均衡"
     },
-    "summary": "{{bitrate}} · {{degradation}}"
+    "summary": "{{bitrate}} · {{degradation}}",
+    "forceSdr": "强制使用标准动态范围 (SDR)",
+    "forceSdrHintOff": "默认关闭：自动对 HDR 屏幕或窗口启用防过曝色调映射；若画面偏暗可开启此项",
+    "forceSdrHintOn": "已开启：强制按 8-bit 标准动态范围直采，开启系统 HDR 时高光可能过曝",
+    "sdrColorFailed": "画面调整未生效，请重试；保留上次确认的设置。"
   },
   "stream": {
     "quality": "流媒体质量",

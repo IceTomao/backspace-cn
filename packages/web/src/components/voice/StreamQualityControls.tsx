@@ -174,6 +174,25 @@ export function StreamQualityControls() {
   return (
     <div className="flex flex-col gap-3">
       <HdrStreamControls />
+      {electronPlatform === 'win32' && !config.hdrEnabled && (
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-txt-tertiary font-semibold">
+              {t('voice:streamSettings.forceSdr')}
+            </span>
+            <Toggle
+              enabled={config.forceSdr === true}
+              onChange={(value) => setConfig({ forceSdr: value })}
+              ariaLabel={t('voice:streamSettings.forceSdr')}
+            />
+          </div>
+          <p className="text-[10px] text-txt-tertiary mt-1.5" role="status">
+            {config.forceSdr
+              ? t('voice:streamSettings.forceSdrHintOn')
+              : t('voice:streamSettings.forceSdrHintOff')}
+          </p>
+        </div>
+      )}
       <StreamColorControls />
       {/* Resolution */}
       <div>

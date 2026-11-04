@@ -170,7 +170,9 @@
       "gamma": "Gamma",
       "digitalVibrance": "Digital Vibrance (%)",
       "hue": "Hue (°)",
-      "degreeValue": "{{value}}°"
+      "degreeValue": "{{value}}°",
+      "exposure": "Exposure (EV)",
+      "evValue": "{{value}} EV"
     },
     "hdrChecking": "Checking HDR encoding support…",
     "hdrExperimental": "Experimental HDR: two-PC HDR display validation is pending. Off by default; uploads HDR video only when enabled.",
@@ -205,7 +207,11 @@
       "maintainFramerate": "hold framerate",
       "balanced": "balanced"
     },
-    "summary": "{{bitrate}} · {{degradation}}"
+    "summary": "{{bitrate}} · {{degradation}}",
+    "forceSdr": "Force SDR (Standard Dynamic Range)",
+    "forceSdrHintOff": "Off by default: automatically tone-maps HDR screens and windows to prevent overexposure",
+    "forceSdrHintOn": "Enabled: forces direct 8-bit SDR capture; highlights may clip when system HDR is active",
+    "sdrColorFailed": "Picture adjustment failed. Please retry; the last confirmed settings are retained."
   },
   "stream": {
     "quality": "Stream Quality",

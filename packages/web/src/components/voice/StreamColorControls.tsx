@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useFloatingPosition } from '../../hooks/useFloatingPosition';
 import { usePortalContainer } from '../../hooks/usePortalContainer';
 import { useFormatters } from '../../i18n/formatters';
+import { isElectron } from '../../platform/platform';
 import { useNativeHdrStore } from '../../stores/nativeHdrStore';
 import { useNativeSdrStore } from '../../stores/nativeSdrStore';
 import { useVoiceStore } from '../../stores/voiceStore';
@@ -56,6 +57,7 @@ export function StreamColorControls() {
 
   const hdrEnabled = useVoiceStore((s) => s.screenShareConfig.hdrEnabled);
   const hdrExposureEv = useVoiceStore((s) => s.screenShareConfig.hdrExposureEv);
+  const sdrExposureEv = useVoiceStore((s) => s.screenShareConfig.sdrExposureEv ?? 0);
   const storedStreamColor = useVoiceStore((s) => s.screenShareConfig.streamColor);
   const isScreenSharing = useVoiceStore((s) => s.isScreenSharing);
   const setConfig = useVoiceStore((s) => s.setScreenShareConfig);
@@ -66,6 +68,8 @@ export function StreamColorControls() {
     colorError,
     setColor: setHdrColor,
   } = useNativeHdrStore();
+  const pendingSdrColor = useNativeSdrStore((s) => s.pendingColor);
+  const sdrColorError = useNativeSdrStore((s) => s.colorError);
 
   const [expanded, setExpanded] = useState(false);
   const [activeChannel, setActiveChannel] = useState<ColorChannelKey>('all');
@@ -96,24 +100,40 @@ export function StreamColorControls() {
     };
   }, [infoOpen]);
 
+  const showSdrExposure = !hdrEnabled && isElectron() && window.backspace?.platform === 'win32';
   const effectiveColor: StreamColorSettings =
-    hdrEnabled && pendingColor ? pendingColor.streamColor : (storedStreamColor ?? DEFAULT_STREAM_COLOR);
+    hdrEnabled && pendingColor
+      ? pendingColor.streamColor
+      : !hdrEnabled && pendingSdrColor
+        ? pendingSdrColor.streamColor
+        : (storedStreamColor ?? DEFAULT_STREAM_COLOR);
   const effectiveExposureEv =
     hdrEnabled && pendingColor ? pendingColor.exposureEv : hdrExposureEv;
+  const effectiveSdrExposureEv =
+    !hdrEnabled && pendingSdrColor ? pendingSdrColor.exposureEv : sdrExposureEv;
 
   const controlsDisabled = hdrEnabled && isScreenSharing && !colorControl;
-  const modified = !isDefaultStreamColor(effectiveColor);
+  const modified = !isDefaultStreamColor(effectiveColor) || (showSdrExposure && effectiveSdrExposureEv !== 0);
   const activeCurve: ColorChannelCurve = effectiveColor[activeChannel];
+
+  const applySdrColorAndExposure = (nextExposureEv: number, nextColor: StreamColorSettings) => {
+    setConfig({ sdrExposureEv: nextExposureEv, streamColor: nextColor });
+    if (useNativeSdrStore.getState().active) {
+      useNativeSdrStore.getState().setColor({ exposureEv: nextExposureEv, streamColor: nextColor });
+    }
+  };
 
   const applyStreamColor = (next: StreamColorSettings) => {
     if (hdrEnabled) {
       setHdrColor({ exposureEv: effectiveExposureEv, streamColor: next });
     } else {
-      setConfig({ streamColor: next });
-      if (useNativeSdrStore.getState().active) {
-        useNativeSdrStore.getState().setColor({ exposureEv: 0, streamColor: next });
-      }
+      applySdrColorAndExposure(effectiveSdrExposureEv, next);
     }
+  };
+
+  const updateSdrExposure = (nextEv: number) => {
+    const rounded = Math.round(nextEv * 10) / 10;
+    applySdrColorAndExposure(rounded, cloneStreamColor(effectiveColor));
   };
 
   const updateChannelCurve = (patch: Partial<ColorChannelCurve>) => {
@@ -130,7 +150,12 @@ export function StreamColorControls() {
   };
 
   const resetAll = () => {
-    applyStreamColor(cloneStreamColor(DEFAULT_STREAM_COLOR));
+    const defaultColor = cloneStreamColor(DEFAULT_STREAM_COLOR);
+    if (hdrEnabled) {
+      applyStreamColor(defaultColor);
+    } else {
+      applySdrColorAndExposure(0, defaultColor);
+    }
   };
 
   return (
@@ -212,6 +237,35 @@ export function StreamColorControls() {
           disabled={controlsDisabled}
           className="px-2.5 pb-3 pt-1 border-t border-border-hard space-y-3"
         >
+          {showSdrExposure && (
+            <div className="space-y-1.5 pt-1">
+              <label
+                htmlFor={`${id}-sdr-exposure`}
+                className="flex items-center justify-between text-[12px] text-txt-secondary"
+              >
+                <span>{t('voice:streamSettings.colorChannels.exposure')}</span>
+                <span className="text-[11px] font-medium text-txt-primary tabular-nums">
+                  {t('voice:streamSettings.colorChannels.evValue', {
+                    value: `${effectiveSdrExposureEv > 0 ? '+' : ''}${effectiveSdrExposureEv.toFixed(1)}`,
+                  })}
+                </span>
+              </label>
+              <input
+                id={`${id}-sdr-exposure`}
+                aria-label={t('voice:streamSettings.colorChannels.exposure')}
+                type="range"
+                min={-3}
+                max={3}
+                step={0.1}
+                value={effectiveSdrExposureEv}
+                onChange={(e) => updateSdrExposure(Number(e.target.value))}
+                onDoubleClick={() => updateSdrExposure(0)}
+                className={sliderClassName}
+                style={sliderTrackStyle(effectiveSdrExposureEv, -3, 3)}
+              />
+            </div>
+          )}
+
           {/* Channel selector buttons */}
           <div className="grid grid-cols-4 gap-1 pt-1">
             {CHANNEL_TABS.map((item) => {
@@ -381,6 +435,11 @@ export function StreamColorControls() {
           {hdrEnabled && colorError && (
             <p className="text-xs text-accent-rose" role="alert">
               {t('voice:streamSettings.hdrColorFailed')}
+            </p>
+          )}
+          {!hdrEnabled && sdrColorError && (
+            <p className="text-xs text-accent-rose" role="alert">
+              {t('voice:streamSettings.sdrColorFailed')}
             </p>
           )}
         </fieldset>

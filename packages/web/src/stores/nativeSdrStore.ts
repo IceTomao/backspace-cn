@@ -538,8 +538,9 @@ function buildPublishSpecSignature(
   bitrateKbps: number,
   codec: NativeSdrCodec,
   shareAudio: boolean,
+  forceSdr: boolean,
 ): string {
-  return `${sourceId}|${maxHeight}|${fps}|${bitrateKbps}|${codec}|${shareAudio ? 1 : 0}`;
+  return `${sourceId}|${maxHeight}|${fps}|${bitrateKbps}|${codec}|${shareAudio ? 1 : 0}|${forceSdr ? 1 : 0}`;
 }
 
 export function isNativeSdrEligibleSourceId(sourceId: string | null | undefined): sourceId is string {
@@ -656,6 +657,8 @@ export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
       activeSession = session;
       const maxHeight = config.height;
       const bitrateKbps = computeTargetBitrateKbps(config, resolved.nativeCodec, fallbackDimensions);
+      const forceSdr = Boolean(config.forceSdr);
+      const startedExposureEv = config.sdrExposureEv ?? 0;
       const startedStreamColor = cloneStreamColor(config.streamColor ?? DEFAULT_STREAM_COLOR);
 
       const result = (await window.backspace.sdrNative({
@@ -668,7 +671,8 @@ export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
           bitrateKbps,
           codec: resolved.nativeCodec,
           shareAudio: config.shareAudio,
-          color: { exposureEv: 0, streamColor: startedStreamColor },
+          forceSdr,
+          color: { exposureEv: startedExposureEv, streamColor: startedStreamColor },
         },
         ...session,
       })) as {
@@ -705,6 +709,7 @@ export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
         bitrateKbps,
         confirmedCodec,
         config.shareAudio,
+        forceSdr,
       );
 
       await ensureAudioPublication(room, requestId, config.shareAudio);
@@ -736,9 +741,11 @@ export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
 
       useVoiceStore.setState({ isScreenSharing: true, screenShareDynamicRange: 'sdr' });
 
-      const latestColor = useVoiceStore.getState().screenShareConfig.streamColor ?? DEFAULT_STREAM_COLOR;
-      if (!sameStreamColor(latestColor, startedStreamColor)) {
-        get().setColor({ exposureEv: 0, streamColor: latestColor });
+      const latestCfg = useVoiceStore.getState().screenShareConfig;
+      const latestColor = latestCfg.streamColor ?? DEFAULT_STREAM_COLOR;
+      const latestExposureEv = latestCfg.sdrExposureEv ?? 0;
+      if (latestExposureEv !== startedExposureEv || !sameStreamColor(latestColor, startedStreamColor)) {
+        get().setColor({ exposureEv: latestExposureEv, streamColor: latestColor });
       }
       broadcastVoiceStatus();
       return true;
@@ -780,6 +787,8 @@ export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
 
     const maxHeight = config.height;
     const bitrateKbps = computeTargetBitrateKbps(config, resolved.nativeCodec, activeFallbackDims);
+    const forceSdr = Boolean(config.forceSdr);
+    const exposureEv = config.sdrExposureEv ?? 0;
     const nextSpec = buildPublishSpecSignature(
       state.sourceId,
       maxHeight,
@@ -787,11 +796,12 @@ export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
       bitrateKbps,
       resolved.nativeCodec,
       config.shareAudio,
+      forceSdr,
     );
 
     const streamColor = config.streamColor ?? DEFAULT_STREAM_COLOR;
     if (nextSpec === lastPublishedSpec) {
-      get().setColor({ exposureEv: 0, streamColor });
+      get().setColor({ exposureEv, streamColor });
       return true;
     }
 
@@ -817,7 +827,8 @@ export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
           bitrateKbps,
           codec: resolved.nativeCodec,
           shareAudio: config.shareAudio,
-          color: { exposureEv: 0, streamColor: startedStreamColor },
+          forceSdr,
+          color: { exposureEv, streamColor: startedStreamColor },
         },
         ...session,
       })) as {
@@ -916,7 +927,7 @@ export const useNativeSdrStore = create<NativeSdrState>((set, get) => ({
       return;
     }
     set({
-      pendingColor: { exposureEv: 0, streamColor: cloneStreamColor(color.streamColor) },
+      pendingColor: { exposureEv: color.exposureEv, streamColor: cloneStreamColor(color.streamColor) },
       colorError: false,
     });
     queueColor();

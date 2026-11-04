@@ -2,8 +2,8 @@
 // Quantize only after the gamut and transfer transforms. No SDR intermediate.
 cbuffer Parameters : register(b0) {
     uint Width, Height, SourceWidth, SourceHeight;
-    uint FrameIndex, Pattern, HasColorAdjust, Pad0;
-    float ExposureGain, Vibrance, Pad1, Pad2;
+    uint FrameIndex, Pattern, HasColorAdjust, SdrTonemap;
+    float ExposureGain, Vibrance, SdrWhiteScale, InvMaxLumRatioSq;
     float4 Contrast;
     float4 BrightnessOffset;
     float4 InvGamma;
@@ -67,14 +67,42 @@ void Convert(uint3 id : SV_DispatchThreadID) {
     Chroma[id.xy] = uint2(round(512.0 + 896.0 * uv)) << 6;
 }
 
-// WGC BGRA8 sRGB -> hardware aspect-fit scale + optional color grade -> limited-range BT.709 NV12.
+// WGC BGRA8 sRGB or FP16 scRGB -> hardware aspect-fit scale + optional HDR->SDR
+// MaxRGB Reinhard tone-mapping + color grade -> limited-range BT.709 NV12.
 // Zero raw pixel readback to CPU memory.
+float3 linearToSrgb(float3 x) {
+    float3 c = saturate(x);
+    float3 lo = c * 12.92;
+    float3 hi = 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+    return saturate(lerp(lo, hi, step(0.0031308, c)));
+}
+float3 srgbToLinear(float3 x) {
+    float3 c = saturate(x);
+    float3 lo = c / 12.92;
+    float3 hi = pow(saturate((c + 0.055) / 1.055), 2.4);
+    return lerp(lo, hi, step(0.04045, c));
+}
 float3 sampleSdr(uint2 pixel) {
     float scale = min(float(Width) / SourceWidth, float(Height) / SourceHeight);
     float2 content = float2(SourceWidth, SourceHeight) * scale;
     float2 position = float2(pixel) + 0.5 - (float2(Width, Height) - content) * 0.5;
     if (any(position < 0.0) || any(position >= content)) return 0.0;
-    float3 srgb = saturate(Source.SampleLevel(LinearClamp, position / content, 0).rgb);
+    float3 raw = Source.SampleLevel(LinearClamp, position / content, 0).rgb;
+    float3 srgb;
+    if (SdrTonemap != 0) {
+        float3 lin = max(0.0, raw) * (SdrWhiteScale * ExposureGain);
+        float peak = max(lin.r, max(lin.g, lin.b));
+        if (peak > 0.0) {
+            float mapped = (peak * (1.0 + peak * InvMaxLumRatioSq)) / (1.0 + peak);
+            lin *= saturate(mapped) / peak;
+        }
+        srgb = linearToSrgb(lin);
+    } else {
+        srgb = saturate(raw);
+        if (abs(ExposureGain - 1.0) > 0.0001) {
+            srgb = linearToSrgb(srgbToLinear(srgb) * ExposureGain);
+        }
+    }
     return applyColorChannels(srgb);
 }
 float3 yuv709(float3 rgb) {

@@ -44,6 +44,9 @@ export interface ScreenShareConfig {
   /** Independent of codec, which always retains the user's SDR preference. */
   hdrEnabled: boolean;
   hdrExposureEv: number;
+  /** OBS-style Force SDR (BGRA8 direct capture); false auto-tonemaps HDR monitors in GPU FP16. */
+  forceSdr: boolean;
+  sdrExposureEv: number;
   streamColor: StreamColorSettings;
 }
 
@@ -249,6 +252,8 @@ export const useVoiceStore = create<VoiceState>()(
         codec: 'auto',
         hdrEnabled: false,
         hdrExposureEv: 0,
+        forceSdr: false,
+        sdrExposureEv: 0,
         streamColor: cloneStreamColor(DEFAULT_STREAM_COLOR),
       },
       lastScreenShareSourceId: null,
@@ -558,6 +563,12 @@ export const useVoiceStore = create<VoiceState>()(
           hdrExposureEv: config.hdrExposureEv !== undefined
             ? (isExposureEv(config.hdrExposureEv) ? config.hdrExposureEv : state.screenShareConfig.hdrExposureEv)
             : state.screenShareConfig.hdrExposureEv,
+          forceSdr: config.forceSdr !== undefined
+            ? (typeof config.forceSdr === 'boolean' ? config.forceSdr : state.screenShareConfig.forceSdr)
+            : state.screenShareConfig.forceSdr,
+          sdrExposureEv: config.sdrExposureEv !== undefined
+            ? (isExposureEv(config.sdrExposureEv) ? config.sdrExposureEv : state.screenShareConfig.sdrExposureEv)
+            : state.screenShareConfig.sdrExposureEv,
           streamColor: config.streamColor !== undefined
             ? (isStreamColor(config.streamColor) ? cloneStreamColor(config.streamColor) : state.screenShareConfig.streamColor)
             : state.screenShareConfig.streamColor,
@@ -838,7 +849,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: 'backspace-voice-settings',
-      version: 20,
+      version: 21,
       migrate: (persistedState: any, version: number) => {
         if (version === 0) {
           persistedState.streamAttenuationEnabled = false;
@@ -931,6 +942,14 @@ export const useVoiceStore = create<VoiceState>()(
             persistedState.screenShareConfig.degradationPreference = 'maintain-framerate';
           }
         }
+        if (version < 21 && persistedState.screenShareConfig) {
+          if (typeof persistedState.screenShareConfig.forceSdr !== 'boolean') {
+            persistedState.screenShareConfig.forceSdr = false;
+          }
+          if (!isExposureEv(persistedState.screenShareConfig.sdrExposureEv)) {
+            persistedState.screenShareConfig.sdrExposureEv = 0;
+          }
+        }
         return persistedState;
       },
       storage: createJSONStorage(() => appStorage),
@@ -975,6 +994,8 @@ export const useVoiceStore = create<VoiceState>()(
             : currentState.screenShareConfig.degradationPreference,
           hdrEnabled: persistedCfg?.hdrEnabled === true,
           hdrExposureEv: isExposureEv(persistedCfg?.hdrExposureEv) ? persistedCfg.hdrExposureEv : 0,
+          forceSdr: persistedCfg?.forceSdr === true,
+          sdrExposureEv: isExposureEv(persistedCfg?.sdrExposureEv) ? persistedCfg.sdrExposureEv : 0,
           streamColor: sanitizeStreamColor(persistedCfg?.streamColor),
         };
         merged.lowLatencyStreamViewing = typeof persistedState?.lowLatencyStreamViewing === 'boolean'

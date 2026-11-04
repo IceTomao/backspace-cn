@@ -52,5 +52,6 @@
   "x64",
   "arm64",
   "AppImage",
-  "deb"
+  "deb",
+  "{{value}} EV"
 ]

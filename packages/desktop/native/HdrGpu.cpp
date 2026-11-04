@@ -22,6 +22,7 @@
 #include <thread>
 #include <memory>
 #include <mutex>
+#include <vector>
 #include "WgcAbi.h"
 #include "vendor/nvEncodeAPI.h"
 #include "HdrGpuShader.h"
@@ -91,7 +92,7 @@ struct Options {
     ColorSettings color{};
     HMONITOR monitor = nullptr;
     HWND window = nullptr;
-    bool synthetic = false, watchParent = false, realtime = false, sdr = false;
+    bool synthetic = false, watchParent = false, realtime = false, sdr = false, forceSdr = false;
     SdrCodec sdrCodec = SdrCodec::Hevc;
 };
 static unsigned long long number(const char* value) {
@@ -112,6 +113,7 @@ static Options options(int argc, char** argv) {
         if (key == "--watch-parent") { o.watchParent = true; continue; }
         if (key == "--realtime") { o.realtime = true; continue; }
         if (key == "--sdr") { o.sdr = true; continue; }
+        if (key == "--force-sdr") { o.forceSdr = true; continue; }
         if (++i >= argc) throw std::runtime_error("missing_argument");
         if (key == "--codec") {
             std::string v(argv[i]);
@@ -168,6 +170,7 @@ static Options options(int argc, char** argv) {
         ((o.syntheticWidth || o.syntheticHeight) && (!o.synthetic || !o.syntheticWidth || !o.syntheticHeight ||
             o.syntheticWidth > 16384 || o.syntheticHeight > 16384)) ||
         (o.window != nullptr && !o.sdr) ||
+        (o.forceSdr && !o.sdr) ||
         (!o.sdr && o.sdrCodec != SdrCodec::Hevc)) throw std::runtime_error("invalid_hdr_configuration");
     return o;
 }
@@ -229,8 +232,8 @@ static_assert(sizeof(ColorPacket) == 40, "HDR stdin protocol size");
 
 struct ShaderParameters {
     UINT width, height, sourceWidth, sourceHeight;
-    UINT frame, pattern, hasColorAdjust, pad0;
-    float exposureGain, vibrance, pad1, pad2;
+    UINT frame, pattern, hasColorAdjust, sdrTonemap;
+    float exposureGain, vibrance, sdrWhiteScale, invMaxLumRatioSq;
     float contrast[4];
     float brightnessOffset[4];
     float invGamma[4];
@@ -280,11 +283,121 @@ static void fillShaderColorParameters(const ColorSettings& s, ShaderParameters& 
     }
 }
 
+struct MonitorHdrInfo {
+    bool hdrActive = false;
+    float sdrWhiteNits = 300.0f;
+    float maxLuminanceNits = 1000.0f;
+};
+struct LocalSdrWhiteLevelInfo {
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    ULONG sdrWhiteLevel;
+};
+struct LocalAdvancedColorInfo2 {
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    UINT32 flags;
+    UINT32 colorEncoding;
+    UINT32 bitsPerColorChannel;
+    UINT32 activeColorMode;
+};
+static_assert(sizeof(LocalSdrWhiteLevelInfo) == 24, "CCD SDR white level layout");
+static_assert(sizeof(LocalAdvancedColorInfo2) == 36, "CCD advanced color info 2 layout");
+
+static MonitorHdrInfo queryMonitorHdrInfo(HMONITOR targetMon) {
+    MonitorHdrInfo info{};
+    if (!targetMon) return info;
+    MONITORINFOEXW mi = {};
+    mi.cbSize = sizeof(mi);
+    const bool hasMonitorInfo = GetMonitorInfoW(targetMon, reinterpret_cast<MONITORINFO*>(&mi)) != 0;
+
+    Ptr<IDXGIFactory1> dxgi;
+    if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(dxgi.put())))) {
+        bool foundDxgi = false;
+        for (UINT a = 0; !foundDxgi; a++) {
+            Ptr<IDXGIAdapter1> cand;
+            if (dxgi->EnumAdapters1(a, cand.put()) == DXGI_ERROR_NOT_FOUND) break;
+            if (!cand.get()) continue;
+            for (UINT i = 0; ; i++) {
+                Ptr<IDXGIOutput> out;
+                if (cand->EnumOutputs(i, out.put()) == DXGI_ERROR_NOT_FOUND) break;
+                if (!out.get()) continue;
+                DXGI_OUTPUT_DESC d = {};
+                if (FAILED(out->GetDesc(&d)) || !d.AttachedToDesktop || d.Monitor != targetMon) continue;
+                Ptr<IDXGIOutput6> out6;
+                if (SUCCEEDED(out->QueryInterface(__uuidof(IDXGIOutput6), reinterpret_cast<void**>(out6.put())))) {
+                    DXGI_OUTPUT_DESC1 d1 = {};
+                    if (SUCCEEDED(out6->GetDesc1(&d1))) {
+                        if (d1.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
+                            info.hdrActive = true;
+                        }
+                        if (d1.MaxLuminance >= 400.0f && d1.MaxLuminance <= 10000.0f) {
+                            info.maxLuminanceNits = d1.MaxLuminance;
+                        }
+                    }
+                }
+                foundDxgi = true;
+                break;
+            }
+        }
+    }
+
+    if (hasMonitorInfo && mi.szDevice[0] != L'\0') {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            UINT32 pathCount = 0, modeCount = 0;
+            if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS ||
+                !pathCount || pathCount > 128 || modeCount > 1024) {
+                break;
+            }
+            std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+            std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+            LONG qdc = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr);
+            if (qdc == ERROR_INSUFFICIENT_BUFFER) continue;
+            if (qdc != ERROR_SUCCESS) break;
+            for (UINT32 p = 0; p < pathCount; p++) {
+                DISPLAYCONFIG_SOURCE_DEVICE_NAME srcName = {};
+                srcName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+                srcName.header.size = sizeof(srcName);
+                srcName.header.adapterId = paths[p].sourceInfo.adapterId;
+                srcName.header.id = paths[p].sourceInfo.id;
+                if (DisplayConfigGetDeviceInfo(&srcName.header) != ERROR_SUCCESS) continue;
+                if (wcscmp(srcName.viewGdiDeviceName, mi.szDevice) != 0) continue;
+
+                LocalAdvancedColorInfo2 ac2 = {};
+                ac2.header.type = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(15);
+                ac2.header.size = sizeof(ac2);
+                ac2.header.adapterId = paths[p].targetInfo.adapterId;
+                ac2.header.id = paths[p].targetInfo.id;
+                if (DisplayConfigGetDeviceInfo(&ac2.header) == ERROR_SUCCESS) {
+                    info.hdrActive = (ac2.activeColorMode == 2);
+                }
+
+                LocalSdrWhiteLevelInfo white = {};
+                white.header.type = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(11);
+                white.header.size = sizeof(white);
+                white.header.adapterId = paths[p].targetInfo.adapterId;
+                white.header.id = paths[p].targetInfo.id;
+                if (DisplayConfigGetDeviceInfo(&white.header) == ERROR_SUCCESS &&
+                    white.sdrWhiteLevel >= 500 && white.sdrWhiteLevel <= 12500) {
+                    info.sdrWhiteNits = (static_cast<float>(white.sdrWhiteLevel) / 1000.0f) * 80.0f;
+                }
+                break;
+            }
+            break;
+        }
+    }
+
+    info.sdrWhiteNits = std::min(1000.0f, std::max(80.0f, info.sdrWhiteNits));
+    const float minPeak = std::max(600.0f, info.sdrWhiteNits * 2.5f);
+    info.maxLuminanceNits = std::min(4000.0f, std::max(minPeak, info.maxLuminanceNits));
+    return info;
+}
+
 class Pipeline {
     Options o;
     std::shared_ptr<ColorState> color = std::make_shared<ColorState>();
     uint32_t appliedRevision = 0, reportedRevision = 0;
     ColorSettings appliedColor{};
+    MonitorHdrInfo currentHdrInfo{};
+    bool sdrCaptureFp16 = false;
     Ptr<IDXGIAdapter1> adapter;
     Ptr<ID3D11Device> device;
     Ptr<ID3D11DeviceContext> context;
@@ -389,6 +502,11 @@ class Pipeline {
             }
         }
     }
+    INT32 activeCapturePixelFormat() const {
+        return (!o.sdr || sdrCaptureFp16)
+            ? static_cast<INT32>(DXGI_FORMAT_R16G16B16A16_FLOAT)
+            : static_cast<INT32>(DXGI_FORMAT_B8G8R8A8_UNORM);
+    }
     void createCapture() {
         check(RoInitialize(RO_INIT_MULTITHREADED), "runtime_initialization");
         Ptr<wgc::ItemInterop> interop; factory(L"Windows.Graphics.Capture.GraphicsCaptureItem", interop);
@@ -415,6 +533,11 @@ class Pipeline {
         }
         if (size.Width < 1 || size.Height < 1 || size.Width > 16384 || size.Height > 16384) throw std::runtime_error("invalid_capture_size");
         sourceWidth = static_cast<UINT>(size.Width); sourceHeight = static_cast<UINT>(size.Height);
+        if (o.sdr && !o.forceSdr) {
+            const HMONITOR targetMon = o.window ? MonitorFromWindow(o.window, MONITOR_DEFAULTTONEAREST) : o.monitor;
+            currentHdrInfo = queryMonitorHdrInfo(targetMon);
+            sdrCaptureFp16 = currentHdrInfo.hdrActive;
+        }
         Ptr<IDXGIDevice> dxgiDevice; query(device.get(), dxgiDevice);
         Ptr<IInspectable> runtimeDevice;
         auto create = reinterpret_cast<HRESULT(WINAPI*)(IDXGIDevice*, IInspectable**)>(GetProcAddress(GetModuleHandleW(L"d3d11.dll"), "CreateDirect3D11DeviceFromDXGIDevice"));
@@ -422,8 +545,7 @@ class Pipeline {
         check(create(dxgiDevice.get(), runtimeDevice.put()), "capture_device");
         query(runtimeDevice.get(), graphicsDevice);
         Ptr<wgc::PoolStatics> statics; factory(L"Windows.Graphics.Capture.Direct3D11CaptureFramePool", statics);
-        const INT32 pixelFormat = o.sdr ? static_cast<INT32>(DXGI_FORMAT_B8G8R8A8_UNORM) : static_cast<INT32>(DXGI_FORMAT_R16G16B16A16_FLOAT);
-        check(statics->CreateFreeThreaded(graphicsDevice.get(), pixelFormat, 2, size, pool.put()), "capture_frame_pool");
+        check(statics->CreateFreeThreaded(graphicsDevice.get(), activeCapturePixelFormat(), 2, size, pool.put()), "capture_frame_pool");
         check(pool->CreateSession(item.get(), session.put()), "capture_session");
         Ptr<wgc::Session3> session3;
         if (SUCCEEDED(session->QueryInterface(__uuidof(wgc::Session3), reinterpret_cast<void**>(session3.put())))) {
@@ -458,7 +580,9 @@ class Pipeline {
         D3D11_TEXTURE2D_DESC d = {};
         d.Width = sourceWidth; d.Height = sourceHeight; d.MipLevels = 1; d.ArraySize = 1;
         d.Format = o.sdr
-            ? (o.synthetic ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM)
+            ? (o.synthetic
+                ? DXGI_FORMAT_R8G8B8A8_UNORM
+                : (sdrCaptureFp16 ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM))
             : DXGI_FORMAT_R16G16B16A16_FLOAT;
         d.SampleDesc.Count = 1;
         d.Usage = D3D11_USAGE_DEFAULT;
@@ -588,8 +712,7 @@ class Pipeline {
                     sourceWidth = static_cast<UINT>(size.Width);
                     sourceHeight = static_cast<UINT>(size.Height);
                     recreateInputTexture();
-                    const INT32 pixelFormat = o.sdr ? static_cast<INT32>(DXGI_FORMAT_B8G8R8A8_UNORM) : static_cast<INT32>(DXGI_FORMAT_R16G16B16A16_FLOAT);
-                    check(pool->Recreate(graphicsDevice.get(), pixelFormat, 2, size), "capture_pool_recreate");
+                    check(pool->Recreate(graphicsDevice.get(), activeCapturePixelFormat(), 2, size), "capture_pool_recreate");
                 }
             } else if (size.Width != static_cast<INT32>(sourceWidth) || size.Height != static_cast<INT32>(sourceHeight)) {
                 throw std::runtime_error("capture_monitor_changed");
@@ -599,12 +722,18 @@ class Pipeline {
             Ptr<ID3D11Texture2D> texture;
             check(access->GetInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(texture.put())), "capture_texture");
             D3D11_TEXTURE2D_DESC description = {}; texture->GetDesc(&description);
-            const DXGI_FORMAT expectedFmt = o.sdr ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
+            const DXGI_FORMAT expectedFmt = (!o.sdr || sdrCaptureFp16)
+                ? DXGI_FORMAT_R16G16B16A16_FLOAT
+                : DXGI_FORMAT_B8G8R8A8_UNORM;
             if (description.Format != expectedFmt) {
-                throw std::runtime_error(o.sdr ? "capture_not_bgra8" : "capture_not_fp16");
+                if (o.sdr && (description.Format == DXGI_FORMAT_B8G8R8A8_UNORM || description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)) {
+                    closeCapture(newest.get());
+                    return false;
+                }
+                throw std::runtime_error(expectedFmt == DXGI_FORMAT_B8G8R8A8_UNORM ? "capture_not_bgra8" : "capture_not_fp16");
             }
             if (!o.window && (description.Width != sourceWidth || description.Height != sourceHeight)) {
-                throw std::runtime_error(o.sdr ? "capture_not_bgra8" : "capture_not_fp16");
+                throw std::runtime_error(expectedFmt == DXGI_FORMAT_B8G8R8A8_UNORM ? "capture_not_bgra8" : "capture_not_fp16");
             }
             if (description.Width == sourceWidth && description.Height == sourceHeight) {
                 context->CopyResource(input.get(), texture.get());
@@ -634,6 +763,11 @@ class Pipeline {
         params.sourceHeight = sourceHeight;
         params.frame = frame;
         params.pattern = o.pattern;
+        params.sdrTonemap = (o.sdr && !o.synthetic && sdrCaptureFp16) ? 1u : 0u;
+        const float whiteNits = std::min(1000.0f, std::max(80.0f, currentHdrInfo.sdrWhiteNits));
+        const float maxLumRatio = std::min(20.0f, std::max(2.0f, currentHdrInfo.maxLuminanceNits / whiteNits));
+        params.sdrWhiteScale = 80.0f / whiteNits;
+        params.invMaxLumRatioSq = 1.0f / (maxLumRatio * maxLumRatio);
         fillShaderColorParameters(appliedColor, params);
         context->UpdateSubresource(parameters.get(), 0, nullptr, &params, 0, 0);
         auto cb = parameters.get(); context->CSSetConstantBuffers(0, 1, &cb);
@@ -744,7 +878,8 @@ public:
                 }
             }).detach();
         }
-        fprintf(stderr, "{\"type\":\"gpu-ready\",\"pixelReadback\":false,\"videoEncoders\":1}\n"); fflush(stderr);
+        fprintf(stderr, "{\"type\":\"gpu-ready\",\"pixelReadback\":false,\"videoEncoders\":1,\"hdrTonemap\":%s,\"sdrWhiteNits\":%.1f}\n",
+            sdrCaptureFp16 ? "true" : "false", currentHdrInfo.sdrWhiteNits); fflush(stderr);
         using clock = std::chrono::steady_clock;
         HighResTimer timer;
         const auto framePeriod = std::chrono::nanoseconds(1000000000ULL / o.fps);
@@ -777,6 +912,17 @@ public:
                     if (o.window) requireSdrWindow();
                     else if (o.sdr) requireSdrMonitor();
                     else requireHdrOutput();
+                    if (o.sdr && !o.forceSdr) {
+                        const HMONITOR targetMon = o.window ? MonitorFromWindow(o.window, MONITOR_DEFAULTTONEAREST) : o.monitor;
+                        MonitorHdrInfo nextHdr = queryMonitorHdrInfo(targetMon);
+                        currentHdrInfo = nextHdr;
+                        if (nextHdr.hdrActive != sdrCaptureFp16) {
+                            sdrCaptureFp16 = nextHdr.hdrActive;
+                            recreateInputTexture();
+                            wgc::Size poolSize = {static_cast<INT32>(sourceWidth), static_cast<INT32>(sourceHeight)};
+                            check(pool->Recreate(graphicsDevice.get(), activeCapturePixelFormat(), 2, poolSize), "capture_pool_recreate");
+                        }
+                    }
                     lastCheck = clock::now();
                 }
             }

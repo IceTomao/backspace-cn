@@ -114,6 +114,8 @@ beforeEach(() => {
       degradationPreference: 'maintain-resolution',
       hdrEnabled: false,
       hdrExposureEv: 0,
+      forceSdr: false,
+      sdrExposureEv: 0,
       streamColor: cloneStreamColor(DEFAULT_STREAM_COLOR),
     },
   });
@@ -153,6 +155,8 @@ describe('screen-share media options', () => {
     await useVoiceStore.persist.rehydrate();
     expect(useVoiceStore.getState().screenShareConfig).toMatchObject({
       hdrExposureEv: 0,
+      forceSdr: false,
+      sdrExposureEv: 0,
       streamColor: DEFAULT_STREAM_COLOR,
       codec: 'h264',
       degradationPreference: 'maintain-framerate',
@@ -163,21 +167,36 @@ describe('screen-share media options', () => {
     customColor.red = { brightness: 65, contrast: 55, gamma: 1.3 };
     customColor.digitalVibrance = 75;
     customColor.hue = 45;
-    useVoiceStore.getState().setScreenShareConfig({ hdrExposureEv: -1.5, streamColor: customColor });
+    useVoiceStore.getState().setScreenShareConfig({
+      hdrExposureEv: -1.5,
+      forceSdr: true,
+      sdrExposureEv: -0.8,
+      streamColor: customColor,
+    });
     await useVoiceStore.persist.rehydrate();
     expect(useVoiceStore.getState().screenShareConfig).toMatchObject({
       hdrExposureEv: -1.5,
+      forceSdr: true,
+      sdrExposureEv: -0.8,
       streamColor: customColor,
       hdrEnabled: false,
     });
     for (const invalid of [
       { hdrExposureEv: NaN },
       { hdrExposureEv: 0.05 },
+      { sdrExposureEv: NaN },
+      { sdrExposureEv: 4 },
+      { forceSdr: 'yes' as unknown as boolean },
       { streamColor: { ...customColor, hue: 360 } },
       { streamColor: { ...customColor, digitalVibrance: -1 } },
     ]) {
       useVoiceStore.getState().setScreenShareConfig(invalid);
-      expect(useVoiceStore.getState().screenShareConfig).toMatchObject({ hdrExposureEv: -1.5, streamColor: customColor });
+      expect(useVoiceStore.getState().screenShareConfig).toMatchObject({
+        hdrExposureEv: -1.5,
+        forceSdr: true,
+        sdrExposureEv: -0.8,
+        streamColor: customColor,
+      });
     }
   });
 

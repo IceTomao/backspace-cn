@@ -170,7 +170,9 @@
       "gamma": "Gammawert",
       "digitalVibrance": "Digitale Farbanpassung (%)",
       "hue": "Farbton (°)",
-      "degreeValue": "{{value}}°"
+      "degreeValue": "{{value}}°",
+      "exposure": "Belichtung (EV)",
+      "evValue": "{{value}} EV"
     },
     "hdrChecking": "HDR-Encoder wird geprüft…",
     "hdrExperimental": "Experimentelles HDR: Die HDR-Anzeige auf zwei PCs wurde noch nicht geprüft. Standardmäßig aus; bei Aktivierung wird nur HDR-Video übertragen.",
@@ -205,7 +207,11 @@
       "maintainFramerate": "Framerate halten",
       "balanced": "ausgewogen"
     },
-    "summary": "{{bitrate}} · {{degradation}}"
+    "summary": "{{bitrate}} · {{degradation}}",
+    "forceSdr": "SDR erzwingen (Standard-Dynamikumfang)",
+    "forceSdrHintOff": "Standardmäßig aus: wendet auf HDR-Bildschirme und -Fenster automatisch Tone Mapping gegen Überbelichtung an",
+    "forceSdrHintOn": "Aktiviert: erzwingt direkte 8-Bit-SDR-Aufnahme; helle Bereiche können bei aktivem System-HDR überstrahlen",
+    "sdrColorFailed": "Bildänderung fehlgeschlagen. Bitte erneut versuchen; die zuletzt bestätigten Werte bleiben erhalten."
   },
   "stream": {
     "quality": "Stream-Qualität",

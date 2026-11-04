@@ -1253,6 +1253,8 @@ function useBrowserLiveKit() {
     codec: shareCodec,
     degradationPreference: shareDegradation,
     hdrEnabled: shareHdrEnabled,
+    forceSdr: shareForceSdr,
+    sdrExposureEv: shareSdrExposureEv,
     streamColor: shareStreamColor,
   } = screenShareConfig;
 
@@ -1336,7 +1338,7 @@ function useBrowserLiveKit() {
     };
     _activeTrackUpdate = _activeTrackUpdate.then(updateActiveTracks).catch(() => {});
     return () => { superseded = true; };
-  }, [room, shareHeight, shareFps, shareMode, shareCustomBitrate, shareAudioEnabled, shareCodec, shareDegradation, shareHdrEnabled, shareStreamColor, isScreenSharing, isCameraOn, updateParticipants]);
+  }, [room, shareHeight, shareFps, shareMode, shareCustomBitrate, shareAudioEnabled, shareCodec, shareDegradation, shareHdrEnabled, shareForceSdr, shareSdrExposureEv, shareStreamColor, isScreenSharing, isCameraOn, updateParticipants]);
 
   useEffect(() => {
     return () => {

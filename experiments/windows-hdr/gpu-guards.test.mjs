@@ -24,7 +24,8 @@ test('native GPU rejects invalid modes, dimensions and injected arguments before
     [...synthetic, '--width', '-1'], [...synthetic, '--output', 'anything'], [...synthetic, '--width'],
     ['--sdr', ...synthetic, '--codec', 'vp9'], ['--sdr', ...synthetic, '--codec'], [...synthetic, '--codec', 'h264'],
     ['--sdr', '--window', '0'], ['--window', '12345'], ['--sdr', '--window', '12345', '--monitor', '1'],
-    ['--sdr', ...synthetic, '--window', '12345'], ['--sdr', '--window', '12345:inject'], ['--sdr', '--window']];
+    ['--sdr', ...synthetic, '--window', '12345'], ['--sdr', '--window', '12345:inject'], ['--sdr', '--window'],
+    [...synthetic, '--force-sdr'], ['--monitor', '1', '--force-sdr']];
   for (const args of cases) {
     const result = spawnSync(executable, args, { windowsHide: true, timeout: 5000 });
     assert.ifError(result.error);
