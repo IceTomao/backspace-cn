@@ -7,6 +7,15 @@ import { useVoiceStore } from '../../stores/voiceStore';
 import { useSpaceStore, getChannelOrigin } from '../../stores/spaceStore';
 import { wsSend } from '../../hooks/useWebSocket';
 import { hasPermissionBit, PermissionBits } from '../../utils/permissions';
+import { isAndroid } from '../../platform/android';
+import {
+  DEFAULT_PARTICIPANT_EQ,
+  EQ_BANDS,
+  EQ_GAIN_MAX,
+  EQ_GAIN_MIN,
+  type EqBandId,
+  type EqPresetId,
+} from '../../audio/participantEq';
 
 /**
  * Build moderation context menu items for a voice user.
@@ -107,6 +116,34 @@ export function buildVoiceModMenuItems(targetUserId: string, channelId: string):
 // ── Shared custom menu item components ────────────────────────────────────
 
 /**
+ * The volume and sound-shaping controls every participant menu offers, in the
+ * order they appear. Shared so the voice grid, the channel member list and the
+ * mobile member list cannot drift apart.
+ */
+export function buildParticipantAudioMenuItems(targetUserId: string): ContextMenuItem[] {
+  const items: ContextMenuItem[] = [
+    {
+      key: 'volume',
+      type: 'custom',
+      render: () => React.createElement(VolumeSliderItem, { userId: targetUserId }),
+    },
+  ];
+
+  // The Android app plays remote audio through the native voice bridge, not
+  // through Web Audio, so an equalizer here would be a slider that does
+  // nothing. Android's own volume control still reaches the store above.
+  if (!isAndroid()) {
+    items.push({
+      key: 'eq',
+      type: 'custom',
+      render: () => React.createElement(ParticipantEqItem, { userId: targetUserId }),
+    });
+  }
+
+  return items;
+}
+
+/**
  * Volume slider for a voice participant, used as a `custom` context menu item.
  * Must be a component (not a plain function) because it subscribes to store state.
  */
@@ -136,6 +173,108 @@ export function VolumeSliderItem({ userId }: { userId: string }) {
         <span className="text-xs text-txt-secondary min-w-[32px] flex-shrink-0 text-right">
           {f.formatPercent(volume)}
         </span>
+      </div>
+    </div>
+  );
+}
+
+const EQ_PRESET_ORDER: readonly EqPresetId[] = ['flat', 'bass', 'vocal', 'custom'];
+
+const EQ_PRESET_LABEL_KEYS = {
+  flat: 'voice:participantMenu.eq.presetFlat',
+  bass: 'voice:participantMenu.eq.presetBass',
+  vocal: 'voice:participantMenu.eq.presetVocal',
+  custom: 'voice:participantMenu.eq.presetCustom',
+} as const;
+
+/**
+ * Five-band equalizer for one voice participant, used as a `custom` context
+ * menu item.
+ *
+ * Presets apply a fixed curve; touching a slider flips the participant to
+ * `custom` while keeping the other bands where they were, so a user can start
+ * from "vocal" and only lift the low end. The gains of the last preset stay
+ * visible in the sliders, which is what makes that edit discoverable.
+ */
+export function ParticipantEqItem({ userId }: { userId: string }) {
+  const { t } = useTranslation(['voice', 'common']);
+  const f = useFormatters();
+  const eq = useVoiceStore((s) => s.participantEqs.get(userId)) ?? DEFAULT_PARTICIPANT_EQ;
+  const setParticipantEqPreset = useVoiceStore((s) => s.setParticipantEqPreset);
+  const setParticipantEqBand = useVoiceStore((s) => s.setParticipantEqBand);
+  const resetParticipantEq = useVoiceStore((s) => s.resetParticipantEq);
+
+  const bandLabels: Record<EqBandId, string> = {
+    low: t('voice:participantMenu.eq.bands.low'),
+    lowMid: t('voice:participantMenu.eq.bands.lowMid'),
+    mid: t('voice:participantMenu.eq.bands.mid'),
+    presence: t('voice:participantMenu.eq.bands.presence'),
+    high: t('voice:participantMenu.eq.bands.high'),
+  };
+
+  return (
+    <div className="p-3 w-[280px]">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="text-xs text-txt-tertiary font-medium uppercase tracking-wider">
+          {t('voice:participantMenu.eq.title')}
+        </div>
+        <button
+          type="button"
+          onClick={() => resetParticipantEq(userId)}
+          className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors"
+        >
+          {t('voice:participantMenu.eq.reset')}
+        </button>
+      </div>
+
+      <div className="flex gap-1 mb-3">
+        {EQ_PRESET_ORDER.map((preset) => {
+          const active = eq.preset === preset;
+          return (
+            <button
+              key={preset}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setParticipantEqPreset(userId, preset)}
+              className={`flex-1 min-w-0 truncate rounded-md px-1.5 py-1 text-[11px] transition-colors ${
+                active
+                  ? 'bg-white/[0.09] text-txt-primary'
+                  : 'text-txt-tertiary hover:bg-white/[0.05] hover:text-txt-secondary'
+              }`}
+            >
+              {t(EQ_PRESET_LABEL_KEYS[preset])}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="space-y-1.5">
+        {EQ_BANDS.map((band) => {
+          const gain = eq.gains[band.id];
+          const label = bandLabels[band.id];
+          return (
+            <div key={band.id} className="flex items-center gap-2">
+              <span className="w-14 shrink-0 truncate text-[11px] text-txt-tertiary" title={label}>
+                {label}
+              </span>
+              <input
+                type="range"
+                min={EQ_GAIN_MIN}
+                max={EQ_GAIN_MAX}
+                step={1}
+                value={gain}
+                aria-label={label}
+                onChange={(e) => setParticipantEqBand(userId, band.id, Number(e.target.value))}
+                className="h-1 min-w-0 flex-1 accent-accent-primary"
+              />
+              <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-txt-secondary">
+                {t('voice:participantMenu.eq.gainDb', {
+                  value: `${gain > 0 ? '+' : ''}${f.formatNumber(gain)}`,
+                })}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

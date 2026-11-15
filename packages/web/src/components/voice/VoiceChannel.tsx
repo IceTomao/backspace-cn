@@ -3,7 +3,7 @@ import { useVoiceStore, type VoiceChannelElapsed } from '../../stores/voiceStore
 import { useSpaceStore } from '../../stores/spaceStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useContextMenuStore, type ContextMenuItem } from '../../stores/contextMenuStore';
-import { buildVoiceModMenuItems, VolumeSliderItem } from './voiceMenuItems';
+import { buildParticipantAudioMenuItems, buildVoiceModMenuItems } from './voiceMenuItems';
 import { VoiceUserRow } from './VoiceUserRow';
 import { useTranslation } from 'react-i18next';
 import { useFormatters } from '../../i18n/formatters';
@@ -129,12 +129,8 @@ export function VoiceChannel({ channelId, channelName, onClick, locked, canManag
 
       items.push({ key: 'vol-sep', type: 'separator' });
 
-      // Volume slider
-      items.push({
-        key: 'volume',
-        type: 'custom',
-        render: () => React.createElement(VolumeSliderItem, { userId }),
-      });
+      // Volume + per-participant sound shaping
+      items.push(...buildParticipantAudioMenuItems(userId));
 
       openContextMenu({ x: e.clientX, y: e.clientY }, items);
     },

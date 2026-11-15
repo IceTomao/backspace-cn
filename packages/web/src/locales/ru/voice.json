@@ -30,7 +30,23 @@
     "watchCamera": "Смотреть камеру",
     "stopWatchingCamera": "Не смотреть камеру",
     "muteUser": "Заглушить пользователя",
-    "userVolume": "Громкость пользователя"
+    "userVolume": "Громкость пользователя",
+    "eq": {
+      "title": "Звук",
+      "reset": "Сбросить",
+      "presetFlat": "Оригинал",
+      "presetBass": "Бас",
+      "presetVocal": "Голос",
+      "presetCustom": "Своя",
+      "gainDb": "{{value}} дБ",
+      "bands": {
+        "low": "Низкие",
+        "lowMid": "Нижние средние",
+        "mid": "Средние",
+        "presence": "Присутствие",
+        "high": "Высокие"
+      }
+    }
   },
   "incomingCall": {
     "status": "Входящий голосовой звонок…"

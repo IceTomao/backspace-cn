@@ -30,7 +30,23 @@
     "watchCamera": "观看相机",
     "stopWatchingCamera": "停止监视摄像头",
     "muteUser": "将用户静音",
-    "userVolume": "用户音量"
+    "userVolume": "用户音量",
+    "eq": {
+      "title": "音效",
+      "reset": "重置",
+      "presetFlat": "原声",
+      "presetBass": "低音",
+      "presetVocal": "人声",
+      "presetCustom": "自定义",
+      "gainDb": "{{value}} dB",
+      "bands": {
+        "low": "低频",
+        "lowMid": "低中频",
+        "mid": "中频",
+        "presence": "齿音",
+        "high": "高频"
+      }
+    }
   },
   "incomingCall": {
     "status": "传入语音呼叫..."

@@ -30,7 +30,23 @@
     "watchCamera": "Kamera ansehen",
     "stopWatchingCamera": "Kamera nicht mehr ansehen",
     "muteUser": "Nutzer stummschalten",
-    "userVolume": "Nutzerlautstärke"
+    "userVolume": "Nutzerlautstärke",
+    "eq": {
+      "title": "Klang",
+      "reset": "Zurücksetzen",
+      "presetFlat": "Neutral",
+      "presetBass": "Bassbetont",
+      "presetVocal": "Stimme",
+      "presetCustom": "Manuell",
+      "gainDb": "{{value}} dB",
+      "bands": {
+        "low": "Tiefen",
+        "lowMid": "Tiefmitten",
+        "mid": "Mitten",
+        "presence": "Präsenz",
+        "high": "Höhen"
+      }
+    }
   },
   "incomingCall": {
     "status": "Eingehender Sprachanruf…"

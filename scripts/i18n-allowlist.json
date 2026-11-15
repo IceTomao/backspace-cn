@@ -53,5 +53,6 @@
   "arm64",
   "AppImage",
   "deb",
-  "{{value}} EV"
+  "{{value}} EV",
+  "{{value}} dB"
 ]

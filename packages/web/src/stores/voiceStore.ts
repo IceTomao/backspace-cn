@@ -15,6 +15,17 @@ import {
   sanitizeStreamColor,
   type StreamColorSettings,
 } from '../utils/streamColor';
+import {
+  clampEqGain,
+  cloneParticipantEq,
+  DEFAULT_PARTICIPANT_EQ,
+  gainsForPreset,
+  isFlatParticipantEq,
+  sanitizeParticipantEq,
+  type EqBandId,
+  type EqPresetId,
+  type ParticipantEq,
+} from '../audio/participantEq';
 
 export type ScreenShareDegradationPreference =
   | 'maintain-resolution'
@@ -100,6 +111,17 @@ interface VoiceState {
   // Per-participant local mute (userId → muted?)
   participantMutes: Map<string, boolean>;
   setParticipantMute: (userId: string, muted: boolean) => void;
+  /**
+   * Per-participant sound shaping (userId → equalizer). Only participants that
+   * are not flat are stored, so the map stays empty for anyone who never
+   * touched the sliders.
+   */
+  participantEqs: Map<string, ParticipantEq>;
+  setParticipantEq: (userId: string, eq: ParticipantEq) => void;
+  setParticipantEqPreset: (userId: string, preset: EqPresetId) => void;
+  setParticipantEqBand: (userId: string, band: EqBandId, gain: number) => void;
+  resetParticipantEq: (userId: string) => void;
+  getParticipantEq: (userId: string) => ParticipantEq;
   // Stream widget state
   streamVolumes: Map<string, number>;       // userId → 0-200 (100 default)
   streamMutes: Map<string, boolean>;        // userId → muted?
@@ -266,6 +288,41 @@ export const useVoiceStore = create<VoiceState>()(
         });
       },
       getParticipantVolume: (userId) => get().participantVolumes.get(userId) ?? 100,
+
+      participantEqs: new Map(),
+      setParticipantEq: (userId, eq) => {
+        const sanitized = sanitizeParticipantEq(eq);
+        set((state) => {
+          const newMap = new Map(state.participantEqs);
+          if (isFlatParticipantEq(sanitized)) newMap.delete(userId);
+          else newMap.set(userId, sanitized);
+          return { participantEqs: newMap };
+        });
+      },
+      setParticipantEqPreset: (userId, preset) => {
+        const current = get().participantEqs.get(userId);
+        const gains = preset === 'custom'
+          ? cloneParticipantEq(current ?? DEFAULT_PARTICIPANT_EQ).gains
+          : gainsForPreset(preset);
+        get().setParticipantEq(userId, { preset, gains });
+      },
+      setParticipantEqBand: (userId, band, gain) => {
+        const current = get().participantEqs.get(userId) ?? DEFAULT_PARTICIPANT_EQ;
+        // Touching a slider means the result no longer matches the preset.
+        get().setParticipantEq(userId, {
+          preset: 'custom',
+          gains: { ...current.gains, [band]: clampEqGain(gain) },
+        });
+      },
+      resetParticipantEq: (userId) => {
+        set((state) => {
+          if (!state.participantEqs.has(userId)) return state;
+          const newMap = new Map(state.participantEqs);
+          newMap.delete(userId);
+          return { participantEqs: newMap };
+        });
+      },
+      getParticipantEq: (userId) => get().participantEqs.get(userId) ?? DEFAULT_PARTICIPANT_EQ,
 
       participantMutes: new Map(),
       setParticipantMute: (userId, muted) => {
@@ -827,6 +884,7 @@ export const useVoiceStore = create<VoiceState>()(
         focusedParticipantId: null,
         participantVolumes: new Map(),
         participantMutes: new Map(),
+        participantEqs: new Map(),
         incomingCall: null,
         outgoingCall: null,
         activeDmCall: null,
@@ -978,6 +1036,7 @@ export const useVoiceStore = create<VoiceState>()(
         // Per-user preferences (Map → plain object for JSON)
         participantVolumes: Object.fromEntries(state.participantVolumes),
         participantMutes: Object.fromEntries(state.participantMutes),
+        participantEqs: Object.fromEntries(state.participantEqs),
       }),
       merge: (persistedState: any, currentState: VoiceState) => {
         const merged = { ...currentState, ...persistedState };
@@ -1019,6 +1078,16 @@ export const useVoiceStore = create<VoiceState>()(
         merged.participantMutes = persistedState?.participantMutes
           ? new Map(Object.entries(persistedState.participantMutes))
           : currentState.participantMutes;
+        // Equalizer settings outlive schema changes, so every entry is coerced
+        // back into a valid shape; a flat one is dropped instead of stored.
+        merged.participantEqs = new Map<string, ParticipantEq>();
+        const persistedEqs: unknown = persistedState?.participantEqs;
+        if (typeof persistedEqs === 'object' && persistedEqs !== null) {
+          for (const [userId, rawEq] of Object.entries(persistedEqs as Record<string, unknown>)) {
+            const eq = sanitizeParticipantEq(rawEq);
+            if (!isFlatParticipantEq(eq)) merged.participantEqs.set(userId, eq);
+          }
+        }
         merged.streamVolumes = currentState.streamVolumes;
         merged.streamMutes = currentState.streamMutes;
         merged.watchingStreams = currentState.watchingStreams;

@@ -20,7 +20,7 @@ import { MobileFolderSheet } from './MobileFolderSheet';
 import { useInstanceStore } from '../../stores/instanceStore';
 import { VoiceUserRow } from '../voice/VoiceUserRow';
 import { MobileVoiceJoinSheet } from '../voice/MobileVoiceJoinSheet';
-import { buildVoiceModMenuItems, VolumeSliderItem } from '../voice/voiceMenuItems';
+import { buildParticipantAudioMenuItems, buildVoiceModMenuItems } from '../voice/voiceMenuItems';
 import { joinVoiceChannel } from '../../utils/voice';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 
@@ -570,11 +570,8 @@ export function MobileSpacesScreen() {
 
       items.push({ key: 'vol-sep', type: 'separator' });
 
-      items.push({
-        key: 'volume',
-        type: 'custom',
-        render: () => React.createElement(VolumeSliderItem, { userId }),
-      });
+      // Volume + per-participant sound shaping
+      items.push(...buildParticipantAudioMenuItems(userId));
 
       openContextMenu({ x: e.clientX, y: e.clientY }, items);
     },

@@ -473,6 +473,52 @@ that behavior visibly. The functional change is the preset upgrade from
 
 **Persistence:** `voiceStore` with Zustand localStorage. Keys: `echoCancellation`, `autoGainControl`, `rnnoiseEnabled`, `screenShareConfig`.
 
+### Per-participant output equalizer — `audio/participantEq.ts`
+
+Every listener hears each participant through that participant's microphone,
+room and encoder, so volume alone cannot fix a voice that is thin, boomy or
+harsh. Each remote microphone track can be shaped individually on the receiving
+side, the way a music player's EQ shapes a song but per speaker:
+
+| Band | Filter | Frequency | What it fixes |
+|------|--------|-----------|---------------|
+| Low | lowshelf | 200 Hz | room rumble, missing chest weight |
+| Low-mid | peaking | 500 Hz | boxiness |
+| Mid | peaking | 1.5 kHz | nasal honk |
+| Presence | peaking | 3.5 kHz | consonant clarity |
+| High | highshelf | 6 kHz | sibilance and hiss |
+
+Each band moves between −12 dB and +12 dB. Presets: **Original** (flat),
+**Bass** (+8 / +3 / 0 / −1 / −3 dB — weight without mud) and **Voice**
+(−6 / −2 / +1 / +4 / +2 dB — removes rumble, adds presence). Moving any slider
+switches the participant to **Custom** while keeping the other bands, so a user
+can start from a preset and adjust one band instead of rebuilding a curve by
+hand.
+
+**Signal path.** `useAudioTrackPlayer` builds
+`MediaStreamAudioSourceNode → [five biquads in series] → GainNode → master bus`.
+The filters always exist, even for a flat curve (a biquad at 0 dB is
+transparent), so a slider change ramps gains with `setTargetAtTime` (20 ms)
+instead of rebuilding Web Audio nodes mid-call. A track change still rebuilds
+the whole chain, as it did before the equalizer existed.
+
+**Scope.** Only the microphone track is equalized. Screen-share audio keeps its
+own volume and speaking-attenuation path, because a speech preset would damage
+music or game audio. The Android app plays remote audio through the native
+voice bridge, so the menu hides the equalizer there
+(`buildParticipantAudioMenuItems`), and the Electron native HDR viewer-audio
+path is likewise untouched.
+
+**State.** `voiceStore.participantEqs: Map<userId, ParticipantEq>` persists with
+the other per-user preferences. A flat entry is never stored, so the map holds
+only participants the listener actually shaped. `merge` runs every persisted
+entry through `sanitizeParticipantEq`, which clamps gains, fills missing bands
+and restores a named preset from its table — a tuned preset cannot drift between
+releases, and corrupt persisted data cannot break rehydration. The UI is
+`ParticipantEqItem` in `components/voice/voiceMenuItems.tsx`, shared by the
+voice grid, the channel member list and the mobile member list through
+`buildParticipantAudioMenuItems`.
+
 **Diagnostics polling:** `VoiceGrid` owns one `useTrackStats` poller for all
 visible/observed stream tiles. The poll interval is 2 s (raised from 1 s when
 the poller became shared), so the connection inspector refreshes at that rate

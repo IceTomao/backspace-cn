@@ -30,7 +30,23 @@
     "watchCamera": "Watch Camera",
     "stopWatchingCamera": "Stop Watching Camera",
     "muteUser": "Mute User",
-    "userVolume": "User Volume"
+    "userVolume": "User Volume",
+    "eq": {
+      "title": "Sound effect",
+      "reset": "Reset",
+      "presetFlat": "Original",
+      "presetBass": "Bass",
+      "presetVocal": "Voice",
+      "presetCustom": "Custom",
+      "gainDb": "{{value}} dB",
+      "bands": {
+        "low": "Low",
+        "lowMid": "Low-mid",
+        "mid": "Mid",
+        "presence": "Presence",
+        "high": "High"
+      }
+    }
   },
   "incomingCall": {
     "status": "Incoming Voice Call..."

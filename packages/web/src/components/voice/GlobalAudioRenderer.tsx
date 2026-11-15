@@ -2,6 +2,7 @@ import React from 'react';
 import { useVoiceStore } from '../../stores/voiceStore';
 import { useSpaceStore, getChannelOrigin, getMyUserIdForOrigin } from '../../stores/spaceStore';
 import { useAudioTrackPlayer } from '../../hooks/useAudioTrackPlayer';
+import type { ParticipantEq } from '../../audio/participantEq';
 import type { ParticipantInfo } from '../../hooks/useLiveKit';
 
 /**
@@ -19,6 +20,7 @@ function AudioTrackElement({
   someoneIsSpeaking,
   attenuationEnabled,
   attenuationStrength,
+  eq,
 }: {
   track: MediaStreamTrack | null;
   globalVolume: number;
@@ -29,6 +31,7 @@ function AudioTrackElement({
   someoneIsSpeaking: boolean;
   attenuationEnabled: boolean;
   attenuationStrength: number;
+  eq?: ParticipantEq | null;
 }) {
   const globalScale = globalVolume / 100;
   const sourceScale = perSourceVolume / 100;
@@ -45,6 +48,7 @@ function AudioTrackElement({
     track,
     volume: finalVolume,
     muted: shouldMute,
+    eq,
   });
 
   // The <audio> element is always muted — it serves only as a Chrome
@@ -74,6 +78,7 @@ export function GlobalAudioRenderer() {
   const participantVolumes = useVoiceStore((s) => s.participantVolumes);
   const streamVolumes = useVoiceStore((s) => s.streamVolumes);
   const participantMutes = useVoiceStore((s) => s.participantMutes);
+  const participantEqs = useVoiceStore((s) => s.participantEqs);
   const streamMutes = useVoiceStore((s) => s.streamMutes);
   const watchingStreams = useVoiceStore((s) => s.watchingStreams);
   const streamAttenuationEnabled = useVoiceStore((s) => s.streamAttenuationEnabled);
@@ -102,7 +107,7 @@ export function GlobalAudioRenderer() {
 
         return (
           <React.Fragment key={p.identity}>
-            {/* Mic audio */}
+            {/* Mic audio — the equalizer shapes speech only */}
             {p.audioTrack && (
               <AudioTrackElement
                 track={p.audioTrack}
@@ -114,6 +119,7 @@ export function GlobalAudioRenderer() {
                 someoneIsSpeaking={false}
                 attenuationEnabled={false}
                 attenuationStrength={0}
+                eq={participantEqs.get(p.userId) ?? null}
               />
             )}
 

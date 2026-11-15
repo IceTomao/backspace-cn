@@ -1,10 +1,18 @@
 import { useRef, useEffect } from 'react';
 import { AudioManager } from '../audio/AudioManager';
+import {
+  createParticipantEqChain,
+  DEFAULT_PARTICIPANT_EQ,
+  type ParticipantEq,
+  type ParticipantEqChain,
+} from '../audio/participantEq';
 
 interface UseAudioTrackPlayerOptions {
   track: MediaStreamTrack | null;
   volume: number;  // final computed value, 0.0 – 4.0+
   muted: boolean;  // deafen, stream mute, etc.
+  /** Per-participant equalizer for this track; omitted means a flat chain. */
+  eq?: ParticipantEq | null;
 }
 
 /**
@@ -17,7 +25,8 @@ interface UseAudioTrackPlayerOptions {
  *      always muted (volume=0, muted=true) — it never produces audible output.
  *
  *   2. A Web Audio pipeline handles ALL actual audio output:
- *      MediaStreamTrack -> MediaStream -> MediaStreamAudioSourceNode -> GainNode -> ctx.destination
+ *      MediaStreamTrack -> MediaStream -> MediaStreamAudioSourceNode
+ *        -> equalizer chain -> GainNode -> ctx.destination
  *
  * This gives us:
  *   - Chrome compatibility (muted <audio> keep-alive)
@@ -25,22 +34,26 @@ interface UseAudioTrackPlayerOptions {
  *   - Clean mixing (single ctx.destination for all tracks)
  *   - Full volume range (0.0 – 4.0+) via GainNode
  *   - Smooth transitions via setTargetAtTime (no clicks/pops)
+ *   - Per-participant tone shaping before the volume gain
  */
 export function useAudioTrackPlayer(
   opts: UseAudioTrackPlayerOptions,
 ): React.RefObject<HTMLAudioElement> {
-  const { track, volume, muted } = opts;
+  const { track, volume, muted, eq } = opts;
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const eqChainRef = useRef<ParticipantEqChain | null>(null);
   const gainRef = useRef<GainNode | null>(null);
 
-  // Keep current volume/muted in refs so Effect 1 can read them
+  // Keep current volume/muted/eq in refs so Effect 1 can read them
   // for the initial ramp without depending on them
   const volumeRef = useRef(volume);
   const mutedRef = useRef(muted);
+  const eqRef = useRef(eq);
   volumeRef.current = volume;
   mutedRef.current = muted;
+  eqRef.current = eq;
 
   // Effect 1: Track attachment (keep-alive) + Web Audio pipeline build
   useEffect(() => {
@@ -50,6 +63,10 @@ export function useAudioTrackPlayer(
     if (sourceRef.current) {
       sourceRef.current.disconnect();
       sourceRef.current = null;
+    }
+    if (eqChainRef.current) {
+      eqChainRef.current.dispose();
+      eqChainRef.current = null;
     }
     if (gainRef.current) {
       gainRef.current.disconnect();
@@ -76,6 +93,7 @@ export function useAudioTrackPlayer(
 
     const stream = new MediaStream([track]);
     const source = ctx.createMediaStreamSource(stream);
+    const eqChain = createParticipantEqChain(ctx, (eqRef.current ?? DEFAULT_PARTICIPANT_EQ).gains);
     const gain = ctx.createGain();
 
     // Start gain at 0 to prevent pop, then ramp to target
@@ -83,16 +101,20 @@ export function useAudioTrackPlayer(
     const targetGain = mutedRef.current ? 0 : volumeRef.current;
     gain.gain.setTargetAtTime(targetGain, ctx.currentTime, 0.015);
 
-    source.connect(gain);
+    source.connect(eqChain.input);
+    eqChain.output.connect(gain);
     gain.connect(AudioManager.getInstance().getMasterOutput());
 
     sourceRef.current = source;
+    eqChainRef.current = eqChain;
     gainRef.current = gain;
 
     return () => {
       source.disconnect();
+      eqChain.dispose();
       gain.disconnect();
       sourceRef.current = null;
+      eqChainRef.current = null;
       gainRef.current = null;
     };
   }, [track]);
@@ -105,6 +127,12 @@ export function useAudioTrackPlayer(
     const targetGain = muted ? 0 : volume;
     gainRef.current.gain.setTargetAtTime(targetGain, ctx.currentTime, 0.015);
   }, [volume, muted]);
+
+  // Effect 3: Ramp the equalizer when the participant's settings change
+  useEffect(() => {
+    if (!eqChainRef.current) return;
+    eqChainRef.current.setGains((eq ?? DEFAULT_PARTICIPANT_EQ).gains);
+  }, [eq]);
 
   return audioRef;
 }

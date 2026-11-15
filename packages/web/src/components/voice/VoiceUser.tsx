@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 import { useVoiceStore } from '../../stores/voiceStore';
 import { useContextMenuStore, type ContextMenuItem } from '../../stores/contextMenuStore';
-import { buildVoiceModMenuItems, VolumeSliderItem } from './voiceMenuItems';
+import { buildParticipantAudioMenuItems, buildVoiceModMenuItems } from './voiceMenuItems';
 import { useSpaceStore } from '../../stores/spaceStore';
 import { useVoiceParticipantMeta } from '../../hooks/useVoiceParticipantMeta';
 import { getActiveRoom, setCameraSubscription } from '../../hooks/useLiveKit';
@@ -129,12 +129,8 @@ export function VoiceUser({ tile, large }: VoiceUserProps) {
 
       items.push({ key: 'vol-sep', type: 'separator' });
 
-      // Volume slider (custom, needs store subscription via wrapper component)
-      items.push({
-        key: 'volume',
-        type: 'custom',
-        render: () => React.createElement(VolumeSliderItem, { userId: targetUserId }),
-      });
+      // Volume + per-participant sound shaping (custom, store-subscribed items)
+      items.push(...buildParticipantAudioMenuItems(targetUserId));
 
       openContextMenu({ x: e.clientX, y: e.clientY }, items);
     },
