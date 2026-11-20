@@ -42,6 +42,13 @@ describe('voice fullscreen chrome preferences', () => {
     }
   });
 
+  it('accepts fillViewport only as a real boolean', () => {
+    expect(sanitizeVoiceFullscreenChrome({ fillViewport: true }).fillViewport).toBe(true);
+    expect(sanitizeVoiceFullscreenChrome({ fillViewport: false }).fillViewport).toBe(false);
+    expect(sanitizeVoiceFullscreenChrome({ fillViewport: 'true' }).fillViewport).toBe(false);
+    expect(sanitizeVoiceFullscreenChrome({}).fillViewport).toBe(false);
+  });
+
   it('returns a new object so callers cannot mutate the shared defaults', () => {
     const sanitized = sanitizeVoiceFullscreenChrome(undefined);
     sanitized.hideHeader = true;

@@ -3,6 +3,7 @@ import {
   clampJoinSoundVolume,
   DEFAULT_JOIN_SOUND_PRESET,
   DEFAULT_JOIN_SOUND_VOLUME,
+  JOIN_CUE_DIRECTIONS,
   JOIN_SOUND_PRESETS,
   JOIN_SOUND_VOLUME_MAX,
   JOIN_SOUND_VOLUME_MIN,
@@ -57,6 +58,65 @@ describe('join cue presets', () => {
     const notes = joinCueNotes('soft');
     notes[0].peak = 99;
     expect(joinCueNotes('soft')[0].peak).not.toBe(99);
+  });
+});
+
+describe('join vs leave cue directions', () => {
+  it('supports exactly the join and leave directions', () => {
+    expect(JOIN_CUE_DIRECTIONS).toEqual(['join', 'leave']);
+  });
+
+  it('keeps a single-argument call on the join direction', () => {
+    for (const preset of JOIN_SOUND_PRESETS) {
+      expect(joinCueNotes(preset)).toEqual(joinCueNotes(preset, 'join'));
+      expect(joinCueDurationMs(preset)).toBe(joinCueDurationMs(preset, 'join'));
+    }
+  });
+
+  it('gives every synthesised preset its own sane leave cue', () => {
+    for (const preset of JOIN_SOUND_PRESETS) {
+      if (!isSynthJoinSoundPreset(preset)) continue;
+      const joinNotes = joinCueNotes(preset, 'join');
+      const leaveNotes = joinCueNotes(preset, 'leave');
+      expect(leaveNotes.length).toBeGreaterThan(0);
+      expect(leaveNotes).not.toEqual(joinNotes);
+      for (const note of leaveNotes) {
+        expect(note.frequency).toBeGreaterThan(0);
+        expect(note.startMs).toBeGreaterThanOrEqual(0);
+        expect(note.durationMs).toBeGreaterThan(0);
+        expect(note.peak).toBeGreaterThan(0);
+        expect(note.peak).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('makes the leave cue shorter and lower than its join counterpart', () => {
+    for (const preset of JOIN_SOUND_PRESETS) {
+      if (!isSynthJoinSoundPreset(preset)) continue;
+      const joinNotes = joinCueNotes(preset, 'join');
+      const leaveNotes = joinCueNotes(preset, 'leave');
+      // A departure must not ring longer than an arrival.
+      expect(joinCueDurationMs(preset, 'leave')).toBeLessThan(
+        joinCueDurationMs(preset, 'join'),
+      );
+      // …and it must land lower: either the single note drops, or a multi-note
+      // phrase descends where the join phrase ascended.
+      expect(leaveNotes[leaveNotes.length - 1].frequency).toBeLessThan(
+        joinNotes[joinNotes.length - 1].frequency,
+      );
+      if (leaveNotes.length > 1) {
+        expect(leaveNotes[leaveNotes.length - 1].frequency).toBeLessThan(
+          leaveNotes[0].frequency,
+        );
+      }
+    }
+  });
+
+  it('leaves the sample-backed presets without synthesised notes in either direction', () => {
+    expect(joinCueNotes('classic', 'leave')).toEqual([]);
+    expect(joinCueNotes('none', 'leave')).toEqual([]);
+    expect(joinCueDurationMs('classic', 'leave')).toBe(0);
+    expect(joinCueDurationMs('none', 'leave')).toBe(0);
   });
 });
 

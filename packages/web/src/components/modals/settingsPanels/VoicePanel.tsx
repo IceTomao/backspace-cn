@@ -9,7 +9,7 @@ import { isAndroid } from '../../../platform/android';
 import { AndroidAudioSettings } from '../../android/AndroidAudioSettings';
 import { useUIStore } from '../../../stores/uiStore';
 import { AudioManager } from '../../../audio/AudioManager';
-import { JOIN_SOUND_PRESETS, JOIN_SOUND_VOLUME_MAX } from '../../../audio/joinCues';
+import { JOIN_SOUND_PRESETS, JOIN_SOUND_VOLUME_MAX, type JoinCueDirection } from '../../../audio/joinCues';
 import { getJoinSoundVolume } from '../../../utils/sfx';
 
 export function VoicePanel() {
@@ -33,6 +33,13 @@ export function VoicePanel() {
   const setPipEnabled = useVoiceStore((s) => s.setPipEnabled);
   const isMobile = useUIStore((s) => s.isMobile);
   if (isAndroid()) return <AndroidAudioSettings />; // i18n-check: allow-literal (code between JSX branches)
+
+  // One preset drives both directions, so each direction gets its own preview.
+  const previewJoinCue = (direction: JoinCueDirection) => {
+    void AudioManager.getInstance().playJoinSound(direction, joinSoundPreset, {
+      volume: getJoinSoundVolume(),
+    });
+  };
 
   return (
     <div className="space-y-5">
@@ -83,18 +90,24 @@ export function VoicePanel() {
           <div className="py-1">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm text-txt-primary">{t('settings:voice.joinSound.presetLabel')}</div>
-              <button
-                type="button"
-                onClick={() => {
-                  void AudioManager.getInstance().playJoinSound(joinSoundPreset, {
-                    volume: getJoinSoundVolume(),
-                  });
-                }}
-                disabled={joinSoundPreset === 'none'}
-                className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors disabled:opacity-40 disabled:hover:text-txt-tertiary"
-              >
-                {t('settings:voice.joinSound.preview')}
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => previewJoinCue('join')}
+                  disabled={joinSoundPreset === 'none'}
+                  className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors disabled:opacity-40 disabled:hover:text-txt-tertiary"
+                >
+                  {t('settings:voice.joinSound.previewJoin')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => previewJoinCue('leave')}
+                  disabled={joinSoundPreset === 'none'}
+                  className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors disabled:opacity-40 disabled:hover:text-txt-tertiary"
+                >
+                  {t('settings:voice.joinSound.previewLeave')}
+                </button>
+              </div>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {JOIN_SOUND_PRESETS.map((preset) => (

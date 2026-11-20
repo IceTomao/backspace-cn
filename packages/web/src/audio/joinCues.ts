@@ -1,15 +1,24 @@
 /**
- * Presets for the "someone joined the call" cue.
+ * Presets for the participant cues: one preset now drives both the "someone
+ * joined the call" and the "someone left the call" sound.
  *
- * `classic` is the bundled sample every previous build played; the remaining
- * presets are synthesized from the note tables below, so choosing a different
- * cue costs no download and stays deterministic in tests. `none` disables the
- * cue without muting the rest of the interface sounds.
+ * `classic` is the bundled sample pair every previous build shipped (`user_join`
+ * / `user_leave`); the remaining presets are synthesized from the note tables
+ * below, so choosing a different cue pair costs no download and stays
+ * deterministic in tests. Leave cues mirror their join cue downwards — lower
+ * pitches and a shorter tail — so the two directions stay distinguishable when
+ * a channel is busy. `none` disables both cues without muting the rest of the
+ * interface sounds.
  */
 export type JoinSoundPresetId = 'classic' | 'soft' | 'chime' | 'marimba' | 'pop' | 'none';
 
 /** Synth presets — everything except the bundled sample and the off switch. */
 export type SynthJoinSoundPresetId = Exclude<JoinSoundPresetId, 'classic' | 'none'>;
+
+/** Direction of a participant cue. */
+export type JoinCueDirection = 'join' | 'leave';
+
+export const JOIN_CUE_DIRECTIONS: readonly JoinCueDirection[] = ['join', 'leave'];
 
 export const JOIN_SOUND_PRESETS: readonly JoinSoundPresetId[] = [
   'classic',
@@ -48,24 +57,51 @@ export interface JoinCueNote {
 /**
  * Short, deliberately quiet cues: two or three notes, each under 600 ms, so a
  * busy channel does not turn the join sound into a melody.
+ *
+ * Leave cues descend and end sooner than their join counterparts: an arrival is
+ * an invitation to look up, a departure should recede. Keeping both tables side
+ * by side makes that relationship obvious and testable.
  */
-const SYNTH_JOIN_CUES: Record<SynthJoinSoundPresetId, readonly JoinCueNote[]> = {
-  soft: [
-    { frequency: 523.25, startMs: 0, durationMs: 260, peak: 0.3, type: 'sine' },
-  ],
-  chime: [
-    { frequency: 880, startMs: 0, durationMs: 460, peak: 0.24, type: 'sine' },
-    { frequency: 1174.66, startMs: 110, durationMs: 420, peak: 0.2, type: 'sine' },
-  ],
-  marimba: [
-    { frequency: 523.25, startMs: 0, durationMs: 260, peak: 0.32, type: 'triangle' },
-    { frequency: 659.25, startMs: 90, durationMs: 280, peak: 0.26, type: 'triangle' },
-    { frequency: 783.99, startMs: 180, durationMs: 320, peak: 0.22, type: 'triangle' },
-  ],
-  pop: [
-    { frequency: 740, startMs: 0, durationMs: 80, peak: 0.34, type: 'sine' },
-    { frequency: 1108.73, startMs: 80, durationMs: 70, peak: 0.24, type: 'sine' },
-  ],
+const SYNTH_JOIN_CUES: Record<
+  SynthJoinSoundPresetId,
+  Record<JoinCueDirection, readonly JoinCueNote[]>
+> = {
+  soft: {
+    join: [{ frequency: 523.25, startMs: 0, durationMs: 260, peak: 0.3, type: 'sine' }],
+    leave: [{ frequency: 392, startMs: 0, durationMs: 200, peak: 0.26, type: 'sine' }],
+  },
+  chime: {
+    join: [
+      { frequency: 880, startMs: 0, durationMs: 460, peak: 0.24, type: 'sine' },
+      { frequency: 1174.66, startMs: 110, durationMs: 420, peak: 0.2, type: 'sine' },
+    ],
+    leave: [
+      { frequency: 880, startMs: 0, durationMs: 360, peak: 0.22, type: 'sine' },
+      { frequency: 587.33, startMs: 90, durationMs: 320, peak: 0.18, type: 'sine' },
+    ],
+  },
+  marimba: {
+    join: [
+      { frequency: 523.25, startMs: 0, durationMs: 260, peak: 0.32, type: 'triangle' },
+      { frequency: 659.25, startMs: 90, durationMs: 280, peak: 0.26, type: 'triangle' },
+      { frequency: 783.99, startMs: 180, durationMs: 320, peak: 0.22, type: 'triangle' },
+    ],
+    leave: [
+      { frequency: 783.99, startMs: 0, durationMs: 200, peak: 0.24, type: 'triangle' },
+      { frequency: 659.25, startMs: 70, durationMs: 220, peak: 0.26, type: 'triangle' },
+      { frequency: 523.25, startMs: 140, durationMs: 280, peak: 0.32, type: 'triangle' },
+    ],
+  },
+  pop: {
+    join: [
+      { frequency: 740, startMs: 0, durationMs: 80, peak: 0.34, type: 'sine' },
+      { frequency: 1108.73, startMs: 80, durationMs: 70, peak: 0.24, type: 'sine' },
+    ],
+    leave: [
+      { frequency: 1108.73, startMs: 0, durationMs: 70, peak: 0.26, type: 'sine' },
+      { frequency: 740, startMs: 60, durationMs: 70, peak: 0.3, type: 'sine' },
+    ],
+  },
 };
 
 const SYNTH_PRESET_IDS: readonly SynthJoinSoundPresetId[] = ['soft', 'chime', 'marimba', 'pop'];
@@ -80,18 +116,26 @@ export function isSynthJoinSoundPreset(preset: JoinSoundPresetId): preset is Syn
 }
 
 /**
- * Notes for a synthesized preset; the sample-backed presets have none.
+ * Notes for a synthesized preset in the requested direction; the sample-backed
+ * presets (`classic`) and `none` have none.
+ *
  * Returns copies: callers schedule these as audio graph nodes and a shared
  * table must not become editable state.
  */
-export function joinCueNotes(preset: JoinSoundPresetId): readonly JoinCueNote[] {
+export function joinCueNotes(
+  preset: JoinSoundPresetId,
+  direction: JoinCueDirection = 'join',
+): readonly JoinCueNote[] {
   if (!isSynthJoinSoundPreset(preset)) return [];
-  return SYNTH_JOIN_CUES[preset].map((note) => ({ ...note }));
+  return SYNTH_JOIN_CUES[preset][direction].map((note) => ({ ...note }));
 }
 
 /** Total length of a synthesized cue, used for tests and for fade scheduling. */
-export function joinCueDurationMs(preset: JoinSoundPresetId): number {
-  return joinCueNotes(preset).reduce(
+export function joinCueDurationMs(
+  preset: JoinSoundPresetId,
+  direction: JoinCueDirection = 'join',
+): number {
+  return joinCueNotes(preset, direction).reduce(
     (longest, note) => Math.max(longest, note.startMs + note.durationMs),
     0,
   );

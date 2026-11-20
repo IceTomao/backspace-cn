@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { VoiceGrid } from './VoiceGrid';
 import { useVoiceStore } from '../../stores/voiceStore';
+import { useUIStore } from '../../stores/uiStore';
 
 vi.mock('../../audio/AudioManager', () => ({
   AudioManager: { getInstance: () => ({}) },
@@ -53,6 +54,11 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  useUIStore.setState({ voiceFullscreen: false });
+  useVoiceStore.getState().resetFullscreenChrome();
+});
+
 describe('VoiceGrid participant strip', () => {
   it('labels HDR per broadcaster and shows a recheck prompt without playing video', () => {
     const hdr = { ...participant('alice', false), isScreenSharing: true, dynamicRange: 'hdr' };
@@ -87,5 +93,29 @@ describe('VoiceGrid participant strip', () => {
 
     expect(setStreamSubscription).toHaveBeenCalledWith(null, 'ada', true);
     expect(useVoiceStore.getState().watchingStreams.has('ada')).toBe(true);
+  });
+});
+
+describe('VoiceGrid fullscreen fill', () => {
+  it('removes the focus-mode chrome instead of only hiding it', () => {
+    useUIStore.setState({ voiceFullscreen: true });
+    useVoiceStore.getState().setFullscreenChrome({ fillViewport: true });
+
+    render(<VoiceGrid participants={[participant('ada', true), participant('bob', false)]} />);
+
+    // The members row and the top-right Grid button are gone, and because they
+    // are not rendered the strip no longer reserves the 120px it would need.
+    expect(screen.queryByText(/hide members/i)).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Back to grid view')).not.toBeInTheDocument();
+  });
+
+  it('keeps the focus-mode chrome when the call is not fullscreen', () => {
+    useUIStore.setState({ voiceFullscreen: false });
+    useVoiceStore.getState().setFullscreenChrome({ fillViewport: true });
+
+    render(<VoiceGrid participants={[participant('ada', true), participant('bob', false)]} />);
+
+    expect(screen.getByText(/hide members/i)).toBeInTheDocument();
+    expect(screen.getByTitle('Back to grid view')).toBeInTheDocument();
   });
 });

@@ -131,9 +131,10 @@
       }
     },
     "joinSound": {
-      "sectionTitle": "连接提示音",
-      "presetLabel": "有人加入频道时的提示音",
-      "preview": "试听",
+      "sectionTitle": "加入与退出提示音",
+      "presetLabel": "有人加入或退出频道时的提示音",
+      "previewJoin": "试听加入",
+      "previewLeave": "试听退出",
       "volumeLabel": "提示音音量",
       "presets": {
         "classic": "经典",

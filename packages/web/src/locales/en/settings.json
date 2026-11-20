@@ -131,9 +131,10 @@
       }
     },
     "joinSound": {
-      "sectionTitle": "Join Sound",
-      "presetLabel": "Sound when someone joins the call",
-      "preview": "Preview",
+      "sectionTitle": "Join & Leave Sound",
+      "presetLabel": "Sound when someone joins or leaves",
+      "previewJoin": "Preview join",
+      "previewLeave": "Preview leave",
       "volumeLabel": "Notification volume",
       "presets": {
         "classic": "Classic",

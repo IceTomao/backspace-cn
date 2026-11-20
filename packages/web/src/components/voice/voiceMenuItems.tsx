@@ -119,13 +119,24 @@ export function buildVoiceModMenuItems(targetUserId: string, channelId: string):
  * The volume and sound-shaping controls every participant menu offers, in the
  * order they appear. Shared so the voice grid, the channel member list and the
  * mobile member list cannot drift apart.
+ *
+ * `includeStreamAudio` is for the screen-share tile, where the same person's
+ * picture and their screen-share audio are what the menu is about: one slider
+ * drives both gains instead of stacking a second "stream volume" slider that
+ * would compete with this one for the same mental model.
  */
-export function buildParticipantAudioMenuItems(targetUserId: string): ContextMenuItem[] {
+export function buildParticipantAudioMenuItems(
+  targetUserId: string,
+  options: { includeStreamAudio?: boolean } = {},
+): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
     {
       key: 'volume',
       type: 'custom',
-      render: () => React.createElement(VolumeSliderItem, { userId: targetUserId }),
+      render: () => React.createElement(VolumeSliderItem, {
+        userId: targetUserId,
+        includeStreamAudio: options.includeStreamAudio,
+      }),
     },
   ];
 
@@ -146,45 +157,78 @@ export function buildParticipantAudioMenuItems(targetUserId: string): ContextMen
 /**
  * Volume slider for a voice participant, used as a `custom` context menu item.
  * Must be a component (not a plain function) because it subscribes to store state.
+ *
+ * With `includeStreamAudio` the control writes the participant volume and the
+ * screen-share volume together: on a stream tile both tracks come from the same
+ * person, so a slider that only moved the microphone would look broken while
+ * they are sharing.
  */
-export function VolumeSliderItem({ userId }: { userId: string }) {
+export function VolumeSliderItem({ userId, includeStreamAudio = false }: { userId: string; includeStreamAudio?: boolean }) {
   const { t } = useTranslation(['voice', 'common']);
   const f = useFormatters();
   const volume = useVoiceStore((s) => s.participantVolumes.get(userId) ?? 100);
   const setParticipantVolume = useVoiceStore((s) => s.setParticipantVolume);
   const resetParticipantVolume = useVoiceStore((s) => s.resetParticipantVolume);
+  const setStreamVolume = useVoiceStore((s) => s.setStreamVolume);
+  const clearStreamVolume = useVoiceStore((s) => s.clearStreamVolume);
+
+  // The stream-tile menu exposes one slider for the participant and moves the
+  // screen-share gain with it only while the user is actually dragging. Merely
+  // opening the menu must not overwrite a stream gain the user tuned earlier,
+  // so there is deliberately no reconciling effect here.
+
+  const applyVolume = (next: number) => {
+    setParticipantVolume(userId, next);
+    if (includeStreamAudio) setStreamVolume(userId, next);
+  };
+
+  const resetVolume = () => {
+    resetParticipantVolume(userId);
+    if (includeStreamAudio) clearStreamVolume(userId);
+  };
 
   return (
-    <div className="p-3 w-[240px]">
+    <div className="p-3 w-[280px]">
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="text-xs text-txt-tertiary font-medium uppercase tracking-wider">
           {t('voice:participantMenu.userVolume')}
         </div>
         <button
           type="button"
-          onClick={() => resetParticipantVolume(userId)}
+          onClick={resetVolume}
           disabled={volume === 100}
           className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors disabled:opacity-40 disabled:hover:text-txt-tertiary"
         >
           {t('voice:participantMenu.volumeReset')}
         </button>
       </div>
+      {/* Same geometry as the equalizer rows below (label / slider / value on
+          one line, w-14 + flex-1 + w-12) so both sliders share left and right
+          edges instead of the volume bar starting at a different x. */}
       <div className="flex items-center gap-2">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-txt-tertiary flex-shrink-0">
-          <path d="M3 9v6h4l5 5V4L7 9H3z" />
-        </svg>
+        <span
+          className="w-14 shrink-0 truncate text-[11px] text-txt-tertiary"
+          title={t('voice:participantMenu.volumeRow')}
+        >
+          {t('voice:participantMenu.volumeRow')}
+        </span>
         <input
           type="range"
           min="0"
           max="200"
           value={volume}
-          onChange={(e) => setParticipantVolume(userId, parseInt(e.target.value))}
-          className="flex-1 min-w-0 accent-accent-primary h-1"
+          onChange={(e) => applyVolume(parseInt(e.target.value))}
+          className="h-1 min-w-0 flex-1 accent-accent-primary"
         />
-        <span className="text-xs text-txt-secondary min-w-[32px] flex-shrink-0 text-right">
+        <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-txt-secondary">
           {f.formatPercent(volume)}
         </span>
       </div>
+      {includeStreamAudio && (
+        <p className="mt-2 text-[11px] leading-tight text-txt-tertiary">
+          {t('voice:participantMenu.userVolumeHint')}
+        </p>
+      )}
     </div>
   );
 }

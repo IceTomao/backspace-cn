@@ -65,12 +65,20 @@ class BackspaceRuntime internal constructor(
         val updateHttp = http.newBuilder().callTimeout(25, TimeUnit.SECONDS).build()
         AndroidAppUpdates(installed.first, installed.second, context.packageName == "me.kevz.backspace",
             context.getSharedPreferences("appUpdates", Context.MODE_PRIVATE), scope, {
-                updateHttp.newCall(Request.Builder().url(AndroidAppUpdates.RELEASES_URL)
-                    .header("Accept", "application/vnd.github+json")
-                    .header("X-GitHub-Api-Version", "2022-11-28")
-                    .header("User-Agent", "Backspace-Android/${installed.first}").build()).execute().use { response ->
-                    check(response.isSuccessful) { "Update check failed" }
-                    JSONArray(response.body?.string() ?: error("Empty release response"))
+                val userAgent = "Backspace-Android/${installed.first}"
+                try {
+                    updateHttp.newCall(Request.Builder().url(AndroidAppUpdates.RELEASES_URL)
+                        .header("Accept", "application/vnd.github+json")
+                        .header("X-GitHub-Api-Version", "2022-11-28")
+                        .header("User-Agent", userAgent).build()).execute().use { response ->
+                        check(response.isSuccessful) { "Update check failed" }
+                        JSONArray(response.body?.string() ?: error("Empty release response"))
+                    }
+                } catch (error: Exception) {
+                    // api.github.com is rate limited and filtered on some
+                    // networks; the repository feed on github.com usually is
+                    // not, and it carries the same android-v* tags.
+                    AndroidReleaseFallback.load(updateHttp, userAgent)
                 }
             }, { emitWeb("appUpdate", it) })
     }

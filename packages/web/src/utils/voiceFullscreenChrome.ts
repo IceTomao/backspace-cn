@@ -6,11 +6,20 @@
  * removes one overlay independently instead of offering a single "clean mode",
  * because the useful combination differs (a streamer hiding the badges still
  * wants the participant bar, someone watching a movie wants nothing at all).
+ * `fillViewport` is the one flag that is not a visibility toggle: it removes
+ * the layout reservation around the focused tile so the stream itself reaches
+ * the viewport edges.
  *
  * The flags only apply in fullscreen — the docked layout is a normal panel and
  * its chrome is the only way to tell what the panel is.
  */
 export interface VoiceFullscreenChrome {
+  /**
+   * Let the focused stream own the whole viewport: the filmstrip under it and
+   * the Grid / show-members controls around it are removed instead of merely
+   * hidden, so the picture is not pushed up by their reserved height.
+   */
+  fillViewport: boolean;
   /** The channel header strip at the top of the call (also hides its buttons). */
   hideHeader: boolean;
   /** The red "LIVE" badge in the corner of a screen-share tile. */
@@ -24,6 +33,7 @@ export interface VoiceFullscreenChrome {
 }
 
 export const VOICE_FULLSCREEN_CHROME_KEYS = [
+  'fillViewport',
   'hideHeader',
   'hideLiveBadge',
   'hideQualityBadge',
@@ -32,6 +42,7 @@ export const VOICE_FULLSCREEN_CHROME_KEYS = [
 ] as const;
 
 export const DEFAULT_VOICE_FULLSCREEN_CHROME: VoiceFullscreenChrome = Object.freeze({
+  fillViewport: false,
   hideHeader: false,
   hideLiveBadge: false,
   hideQualityBadge: false,

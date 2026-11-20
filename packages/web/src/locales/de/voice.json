@@ -31,6 +31,8 @@
     "stopWatchingCamera": "Kamera nicht mehr ansehen",
     "muteUser": "Nutzer stummschalten",
     "userVolume": "Nutzerlautstärke",
+    "userVolumeHint": "Regelt Stimme und Bildschirmfreigabe-Ton dieses Nutzers",
+    "volumeRow": "Lautstärke",
     "volumeReset": "Auf 100 % zurücksetzen",
     "eq": {
       "title": "Klang",
@@ -53,6 +55,8 @@
     "title": "Vollbildanzeige",
     "hint": "Überlagerungen ausblenden, die du nicht brauchst",
     "reset": "Alle anzeigen",
+    "fillViewport": "Bildschirm ausfüllen",
+    "fillViewportHint": "Blendet Mitgliederleiste, Raster-Schaltfläche und Mitgliederliste aus",
     "hideHeader": "Kanal-Kopfzeile",
     "hideLiveBadge": "LIVE-Markierung",
     "hideQualityBadge": "Qualitäts- und Statusanzeige",
@@ -243,7 +247,6 @@
   "stream": {
     "quality": "Stream-Qualität",
     "qualityValue": "{{height}}p {{fps}} fps",
-    "volume": "Stream-Lautstärke",
     "attenuation": "Stream-Dämpfung",
     "attenuationStrength": "Stärke der Dämpfung",
     "stop": "Streaming beenden",

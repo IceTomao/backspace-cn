@@ -131,9 +131,10 @@
       }
     },
     "joinSound": {
-      "sectionTitle": "Beitrittston",
-      "presetLabel": "Ton, wenn jemand dem Kanal beitritt",
-      "preview": "Anhören",
+      "sectionTitle": "Beitritts- und Verlassenston",
+      "presetLabel": "Ton, wenn jemand den Kanal betritt oder verlässt",
+      "previewJoin": "Beitritt anhören",
+      "previewLeave": "Verlassen anhören",
       "volumeLabel": "Lautstärke der Hinweistöne",
       "presets": {
         "classic": "Klassisch",

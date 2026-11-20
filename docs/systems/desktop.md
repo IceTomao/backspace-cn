@@ -75,7 +75,7 @@ The window close button is configurable. The preference lives in
 
 | Value | Behavior |
 |-------|----------|
-| `ask` (default) | `dialog.showMessageBox` with **Minimize to tray / Quit / Cancel**, `defaultId` = Minimize and `cancelId` = Cancel, plus a "Remember my choice" checkbox that persists the picked action. |
+| `ask` (default) | Opens `resources/close-dialog.html` in a frameless modal `BrowserWindow` with **Minimize to tray / Quit / Cancel**, plus a "Remember my choice" checkbox that persists the picked action. |
 | `tray` | Intercept `close` and hide the window; the app keeps running in the tray. |
 | `quit` | Intercept `close` and call `requestQuit()` so `before-quit` cleanup (activity detection, keybinds, window state) still runs. |
 
@@ -89,6 +89,21 @@ via:
 - Settings → Desktop → When closing the window → Quit
 - `app.quit()` (Cmd+Q on macOS)
 - `before-quit` lifecycle event
+
+The `ask` prompt is an in-app surface rather than a native message box: a
+440x372 frameless, modal `BrowserWindow` (`parent` = main window,
+`useContentSize`, `resizable: false`, `skipTaskbar`, `sandbox: true`) loads
+`resources/close-dialog.html` with `?lang=<resolved language>&theme=<dark|light>`.
+The page paints itself with the same CSS-variable palette as the recovery page
+and flips to the light set through `html[data-theme='light']`, so the prompt
+matches whichever theme the app is using (`themeManager.isDark()` with
+`nativeTheme.shouldUseDarkColors` as the fallback). The chosen action travels
+back through `webContents.executeJavaScript` installing
+`window.__backspaceCloseChoice` as a `Promise` resolver; the dialog resolves that
+promise, the process destroys the window in a `finally` block, and a rejected or
+dismissed dialog keeps the app running. The renderer keeps `contextIsolation`,
+`sandbox` and `nodeIntegration: false`, so the page cannot reach the main
+process except through that single injected callback.
 
 In Flatpak builds `get-close-behavior` returns `ask` and `set-close-behavior`
 refuses writes, mirroring auto-launch's `isSandboxed()` early return; the

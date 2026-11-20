@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en" data-backspace-page="close-dialog" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <title>Backspace</title>
+  <style>
+    :root {
+      --bg: #0f0f16;
+      --card: #17171f;
+      --text: #e6e6ea;
+      --muted: #8b8b96;
+      --border: rgba(255, 255, 255, 0.08);
+      --option: rgba(255, 255, 255, 0.04);
+      --option-hover: rgba(255, 255, 255, 0.07);
+      --option-border: rgba(255, 255, 255, 0.06);
+      --accent: #7c6cf6;
+      --accent-contrast: #ffffff;
+      --danger: #f47195;
+      --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    }
+
+    html[data-theme='light'] {
+      --bg: #f4f4f7;
+      --card: #ffffff;
+      --text: #1c1c22;
+      --muted: #6b6b76;
+      --border: rgba(17, 17, 23, 0.09);
+      --option: rgba(17, 17, 23, 0.03);
+      --option-hover: rgba(17, 17, 23, 0.06);
+      --option-border: rgba(17, 17, 23, 0.07);
+      --accent: #6b5bf0;
+      --accent-contrast: #ffffff;
+      --danger: #d63c63;
+      --shadow: 0 18px 40px rgba(17, 17, 23, 0.16);
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'DM Sans', sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .dragbar {
+      height: 10px;
+      flex: 0 0 auto;
+      -webkit-app-region: drag;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 6px 22px 20px;
+      -webkit-app-region: no-drag;
+    }
+
+    h1 {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .message {
+      color: var(--muted);
+      font-size: 12.5px;
+      margin-top: -8px;
+    }
+
+    .options {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .option {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 11px 14px;
+      border: 1px solid var(--option-border);
+      border-radius: 10px;
+      background: var(--option);
+      color: var(--text);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+
+    .option:hover {
+      background: var(--option-hover);
+    }
+
+    .option:active {
+      transform: scale(0.995);
+    }
+
+    .option:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .option[data-tone='primary'] {
+      border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+
+    .option[data-tone='primary']:hover {
+      background: color-mix(in srgb, var(--accent) 24%, transparent);
+    }
+
+    .option[data-tone='danger'] .glyph {
+      color: var(--danger);
+      border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+    }
+
+    .glyph {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 auto;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      color: var(--accent);
+      background: color-mix(in srgb, currentColor 10%, transparent);
+    }
+
+    .glyph svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .option-body {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .option-label {
+      font-size: 13.5px;
+      font-weight: 550;
+    }
+
+    .option-hint {
+      font-size: 11.5px;
+      color: var(--muted);
+    }
+
+    .remember {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      padding-left: 2px;
+    }
+
+    .remember input {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: auto;
+    }
+
+    .cancel {
+      padding: 7px 18px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 12.5px;
+      cursor: pointer;
+      transition: color 120ms ease, background 120ms ease;
+    }
+
+    .cancel:hover {
+      color: var(--text);
+      background: var(--option-hover);
+    }
+
+    .cancel:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="dragbar"></div>
+  <main role="dialog" aria-modal="true" aria-labelledby="title" aria-describedby="message">
+    <h1 id="title"></h1>
+    <p class="message" id="message"></p>
+    <div class="options">
+      <button type="button" class="option" id="option-tray" data-tone="primary">
+        <span class="glyph" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 14h16v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+            <path d="M12 4v8" />
+            <path d="M8.5 8.5 12 12l3.5-3.5" />
+          </svg>
+        </span>
+        <span class="option-body">
+          <span class="option-label" id="tray-label"></span>
+          <span class="option-hint" id="tray-hint"></span>
+        </span>
+      </button>
+      <button type="button" class="option" id="option-quit" data-tone="danger">
+        <span class="glyph" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v9" />
+            <path d="M6.6 6.2a7.5 7.5 0 1 0 10.8 0" />
+          </svg>
+        </span>
+        <span class="option-body">
+          <span class="option-label" id="quit-label"></span>
+          <span class="option-hint" id="quit-hint"></span>
+        </span>
+      </button>
+    </div>
+    <label class="remember" for="remember">
+      <input type="checkbox" id="remember">
+      <span id="remember-label"></span>
+    </label>
+    <div class="actions">
+      <button type="button" class="cancel" id="cancel"></button>
+    </div>
+  </main>
+  <script>
+    const STRINGS = {
+      en: {
+        title: 'Close Backspace',
+        message: 'Choose what the close button does. You can change this later in Settings → Desktop.',
+        minimize: 'Minimize to tray',
+        minimizeHint: 'Backspace keeps running in the background',
+        quit: 'Quit Backspace',
+        quitHint: 'Ends calls and disconnects from the server',
+        remember: 'Remember my choice',
+        cancel: 'Cancel',
+      },
+      ru: {
+        title: 'Закрыть Backspace',
+        message: 'Выберите, что делает кнопка закрытия. Это можно изменить позже в разделе «Настройки → Приложение».',
+        minimize: 'Свернуть в трей',
+        minimizeHint: 'Backspace продолжит работать в фоне',
+        quit: 'Выйти из Backspace',
+        quitHint: 'Завершает звонки и отключается от сервера',
+        remember: 'Запомнить мой выбор',
+        cancel: 'Отмена',
+      },
+      de: {
+        title: 'Backspace schließen',
+        message: 'Lege fest, was die Schließen-Schaltfläche tut. Du kannst das später unter Einstellungen → Desktop ändern.',
+        minimize: 'In den Infobereich minimieren',
+        minimizeHint: 'Backspace läuft im Hintergrund weiter',
+        quit: 'Backspace beenden',
+        quitHint: 'Beendet Anrufe und trennt die Serververbindung',
+        remember: 'Meine Wahl merken',
+        cancel: 'Abbrechen',
+      },
+      zh: {
+        title: '关闭 Backspace',
+        message: '选择点击关闭按钮后的行为，之后可在“设置 → 桌面”中更改。',
+        minimize: '最小化到托盘',
+        minimizeHint: 'Backspace 继续在后台运行',
+        quit: '退出 Backspace',
+        quitHint: '结束通话并断开与服务器的连接',
+        remember: '记住我的选择',
+        cancel: '取消',
+      },
+    };
+
+    const params = new URLSearchParams(window.location.search);
+    const LANG = params.get('lang') || 'en';
+    const strings = STRINGS[LANG] || STRINGS.en;
+
+    if (params.get('theme') === 'light' || params.get('theme') === 'dark') {
+      document.documentElement.dataset.theme = params.get('theme');
+    }
+
+    const t = (key) => strings[key] || STRINGS.en[key] || key;
+
+    document.title = t('title');
+    document.getElementById('title').textContent = t('title');
+    document.getElementById('message').textContent = t('message');
+    document.getElementById('tray-label').textContent = t('minimize');
+    document.getElementById('tray-hint').textContent = t('minimizeHint');
+    document.getElementById('quit-label').textContent = t('quit');
+    document.getElementById('quit-hint').textContent = t('quitHint');
+    document.getElementById('remember-label').textContent = t('remember');
+    document.getElementById('cancel').textContent = t('cancel');
+
+    let settled = false;
+
+    function finish(action) {
+      if (settled) return;
+      settled = true;
+      const remember = document.getElementById('remember').checked;
+      const resolve = window.__backspaceCloseChoice;
+      if (typeof resolve === 'function') {
+        resolve(action ? { action, remember } : null);
+      }
+    }
+
+    document.getElementById('option-tray').addEventListener('click', () => finish('tray'));
+    document.getElementById('option-quit').addEventListener('click', () => finish('quit'));
+    document.getElementById('cancel').addEventListener('click', () => finish(null));
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(null);
+      }
+    });
+
+    document.getElementById('option-tray').focus();
+  </script>
+</body>
+</html>

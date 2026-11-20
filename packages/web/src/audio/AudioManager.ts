@@ -1,7 +1,11 @@
 import rnnoiseWorkletPath from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url';
 import rnnoiseWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url';
 import rnnoiseWasmSimdPath from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url';
-import { joinCueNotes, type JoinSoundPresetId } from './joinCues';
+import {
+  joinCueNotes,
+  type JoinCueDirection,
+  type JoinSoundPresetId,
+} from './joinCues';
 
 export class AudioManager {
   private static instance: AudioManager | null = null;
@@ -225,14 +229,17 @@ export class AudioManager {
   }
 
   /**
-   * Plays the "somebody joined the call" cue for the selected preset.
+   * Plays a participant cue ("somebody joined" / "somebody left") for the
+   * selected preset.
    *
-   * `classic` reuses the bundled `user_join` sample; the other presets are
-   * synthesized from {@link joinCueNotes} so no additional asset has to ship.
-   * Both paths run through `masterBoost`, so the output device selection and
-   * the master limiter apply exactly as they do to every other cue.
+   * `classic` reuses the bundled `user_join` / `user_leave` samples; the other
+   * presets are synthesized from {@link joinCueNotes} so no additional asset has
+   * to ship. Both paths run through `masterBoost`, so the output device
+   * selection and the master limiter apply exactly as they do to every other
+   * cue.
    */
   async playJoinSound(
+    direction: JoinCueDirection,
     preset: JoinSoundPresetId,
     options: { volume?: number } = {},
   ): Promise<void> {
@@ -241,11 +248,11 @@ export class AudioManager {
     if (!(volume > 0)) return;
 
     if (preset === 'classic') {
-      await this.playSound('user_join', { volume });
+      await this.playSound(direction === 'join' ? 'user_join' : 'user_leave', { volume });
       return;
     }
 
-    const notes = joinCueNotes(preset);
+    const notes = joinCueNotes(preset, direction);
     if (notes.length === 0) return;
 
     await this.resumeContext();

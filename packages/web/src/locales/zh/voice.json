@@ -31,6 +31,8 @@
     "stopWatchingCamera": "停止监视摄像头",
     "muteUser": "将用户静音",
     "userVolume": "用户音量",
+    "userVolumeHint": "同时调节该用户的语音和屏幕共享声音",
+    "volumeRow": "音量",
     "volumeReset": "重置为 100%",
     "eq": {
       "title": "音效",
@@ -53,6 +55,8 @@
     "title": "全屏显示",
     "hint": "隐藏全屏时不需要的浮层",
     "reset": "全部显示",
+    "fillViewport": "画面铺满视口",
+    "fillViewportHint": "隐藏底部成员条、网格按钮和成员列表开关",
     "hideHeader": "顶部栏",
     "hideLiveBadge": "直播中角标",
     "hideQualityBadge": "画质与状态角标",
@@ -243,7 +247,6 @@
   "stream": {
     "quality": "流媒体质量",
     "qualityValue": "{{height}} p {{fps}} fps",
-    "volume": "流音量",
     "attenuation": "流衰减",
     "attenuationStrength": "衰减强度",
     "stop": "停止流媒体",

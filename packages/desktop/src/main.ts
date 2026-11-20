@@ -503,46 +503,80 @@ function loadTrayIcon(): Electron.NativeImage {
 
 let closePromptOpen = false;
 
+interface CloseDialogChoice {
+  action: 'tray' | 'quit';
+  remember: boolean;
+}
+
 /**
- * Asks what the close button should do on this occasion. The dialog is modelled
- * on a question with three explicit buttons rather than a checkbox-only flow so
- * "cancel" remains a distinct, safe default. `closePromptOpen` prevents a
- * second close event from stacking another dialog while this one is showing.
+ * Asks what the close button should do on this occasion, in a themed modal
+ * window (`resources/close-dialog.html`) rather than a native message box: the
+ * native dialog ignores the app theme and renders in the OS style, which broke
+ * the visual language of the rest of the client. `closePromptOpen` prevents a
+ * second close event from stacking another prompt while this one is showing.
+ *
+ * The choice is delivered by the page resolving the promise returned from
+ * `executeJavaScript`, so the dialog needs no preload bridge and cannot outlive
+ * its own window: `closed` races the promise and resolves to "cancel".
  */
-function promptCloseBehavior(): void {
-  const window = mainWindow;
-  if (!window || window.isDestroyed() || closePromptOpen) return;
+async function promptCloseBehavior(): Promise<void> {
+  const parent = mainWindow;
+  if (!parent || parent.isDestroyed() || closePromptOpen) return;
   closePromptOpen = true;
   const language = getDesktopLanguage();
-  void dialog.showMessageBox(window, {
-    type: 'question',
+  const dark = themeManager?.isDark() ?? nativeTheme.shouldUseDarkColors;
+  const colors = getWindowThemeColors();
+  const dialogWindow = new BrowserWindow({
+    parent,
+    modal: true,
+    width: 440,
+    height: 372,
+    useContentSize: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    frame: false,
+    show: false,
+    skipTaskbar: true,
+    backgroundColor: colors.color,
     title: translateDesktop(language, 'close.title'),
-    message: translateDesktop(language, 'close.message'),
-    detail: translateDesktop(language, 'close.detail'),
-    buttons: [
-      translateDesktop(language, 'close.minimize'),
-      translateDesktop(language, 'close.quit'),
-      translateDesktop(language, 'close.cancel'),
-    ],
-    defaultId: 0,
-    cancelId: 2,
-    checkboxLabel: translateDesktop(language, 'close.remember'),
-    noLink: true,
-  }).then(({ response, checkboxChecked }) => {
-    closePromptOpen = false;
-    if (window.isDestroyed()) return;
-    if (response === 1) {
-      if (checkboxChecked) saveCloseBehavior(app.getPath('userData'), 'quit');
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      devTools: false,
+    },
+  });
+  const closed = new Promise<null>((resolve) => dialogWindow.once('closed', () => resolve(null)));
+  try {
+    await dialogWindow.loadFile(path.join(__dirname, '..', 'resources', 'close-dialog.html'), {
+      query: { lang: language, theme: dark ? 'dark' : 'light' },
+    });
+    if (dialogWindow.isDestroyed()) return;
+    dialogWindow.show();
+    const choice = await Promise.race([
+      dialogWindow.webContents.executeJavaScript(
+        'new Promise((resolve) => { window.__backspaceCloseChoice = resolve; });',
+        true,
+      ) as Promise<CloseDialogChoice | null>,
+      closed,
+    ]);
+    if (!choice) return;
+    if (choice.remember) saveCloseBehavior(app.getPath('userData'), choice.action);
+    if (choice.action === 'quit') {
       requestQuit();
       return;
     }
-    if (response === 0) {
-      if (checkboxChecked) saveCloseBehavior(app.getPath('userData'), 'tray');
-      window.hide();
-    }
-  }).catch(() => {
+    if (!parent.isDestroyed()) parent.hide();
+  } catch (error) {
+    // The window can disappear mid-prompt (user closed it, app is quitting).
+    // Treat that as "cancel" instead of surfacing a main-process error.
+    console.warn('[Main] Close prompt cancelled:', error instanceof Error ? error.message : error);
+  } finally {
     closePromptOpen = false;
-  });
+    if (!dialogWindow.isDestroyed()) dialogWindow.destroy();
+  }
 }
 
 function createWindow(): void {
@@ -658,7 +692,7 @@ function createWindow(): void {
       mainWindow?.hide();
       return;
     }
-    promptCloseBehavior();
+    void promptCloseBehavior();
   });
 
   mainWindow.on('closed', () => {

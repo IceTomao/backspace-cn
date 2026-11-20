@@ -31,6 +31,8 @@
     "stopWatchingCamera": "Stop Watching Camera",
     "muteUser": "Mute User",
     "userVolume": "User Volume",
+    "userVolumeHint": "Controls this user's voice and screen-share audio",
+    "volumeRow": "Volume",
     "volumeReset": "Reset to 100%",
     "eq": {
       "title": "Sound effect",
@@ -53,6 +55,8 @@
     "title": "Fullscreen display",
     "hint": "Hide the overlays you do not need",
     "reset": "Show all",
+    "fillViewport": "Fill the viewport",
+    "fillViewportHint": "Hides the member strip, Grid button and member-list toggle",
     "hideHeader": "Channel header",
     "hideLiveBadge": "LIVE badge",
     "hideQualityBadge": "Quality and status badge",
@@ -243,7 +247,6 @@
   "stream": {
     "quality": "Stream Quality",
     "qualityValue": "{{height}}p {{fps}}fps",
-    "volume": "Stream Volume",
     "attenuation": "Stream Attenuation",
     "attenuationStrength": "Attenuation Strength",
     "stop": "Stop Streaming",

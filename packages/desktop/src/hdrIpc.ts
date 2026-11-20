@@ -12,12 +12,42 @@ export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow |
   };
   const generations = { publisher: 0, viewer: 0 };
   const leases = new Map<'publisher' | 'viewer', { identity: string; requestId: string; revoke: () => Promise<void> }>();
-  const revoke = (kind: 'publisher' | 'viewer') => { const lease = leases.get(kind); leases.delete(kind); void lease?.revoke(); };
+  const revoke = (kind: 'publisher' | 'viewer') => {
+    const lease = leases.get(kind);
+    leases.delete(kind);
+    // Revocation talks to the server through the page's session. During quit
+    // that session may already be gone, and an unhandled rejection here would
+    // surface as a main-process crash dialog, so failures are only logged.
+    void lease?.revoke().catch((error: unknown) => {
+      console.warn('[HDR] lease revocation failed during teardown:', error instanceof Error ? error.message : error);
+    });
+  };
+  /**
+   * Native events can land while the window is being torn down, where
+   * `isDestroyed()` on the window is still false but its `webContents` is
+   * already unusable. Touching it threw "Object has been destroyed" out of the
+   * main process, so the send is guarded and contained.
+   */
+  const sendToWindow = (payload: unknown) => {
+    const window = getWindow();
+    if (!window || window.isDestroyed()) return;
+    const contents = window.webContents;
+    if (!contents) return;
+    // `webContents.isDestroyed()` is the authoritative check, but a window in
+    // the middle of teardown can expose a partially constructed object; treat a
+    // missing destructor as "still alive" and let the send throw into the
+    // caller's catch instead of silently dropping an otherwise deliverable event.
+    if (typeof contents.isDestroyed === 'function' && contents.isDestroyed()) return;
+    contents.send('hdr-native-event', payload);
+  };
   const runtime = new HdrNativeRuntime(app.isPackaged ? path.join(process.resourcesPath, 'hdr') : path.join(__dirname, '../hdr-runtime'), event => {
     const requestId = leases.get(event.kind)?.requestId;
     revoke(event.kind);
-    const window = getWindow();
-    if (window && !window.isDestroyed()) window.webContents.send('hdr-native-event', { ...event, requestId });
+    try {
+      sendToWindow({ ...event, requestId });
+    } catch (error) {
+      console.warn('[HDR] dropped native event during window teardown:', error instanceof Error ? error.message : error);
+    }
   }, !app.isPackaged && process.env.BACKSPACE_HDR_LAB === '1');
   const trusted = (event: IpcMainInvokeEvent): BrowserWindow => {
     const window = getWindow();
@@ -26,7 +56,19 @@ export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow |
         new URL(event.senderFrame.url).origin !== instanceOrigin()) throw new Error('HDR request denied');
     return window;
   };
-  const cancel = () => { generations.publisher++; generations.viewer++; runtime.dispose(); revoke('publisher'); revoke('viewer'); };
+  const cancel = () => {
+    generations.publisher++;
+    generations.viewer++;
+    try {
+      runtime.dispose();
+    } catch (error) {
+      // Disposal stops child processes and a loopback server; a teardown-time
+      // failure must not abort the rest of the quit path.
+      console.warn('[HDR] runtime disposal failed:', error instanceof Error ? error.message : error);
+    }
+    revoke('publisher');
+    revoke('viewer');
+  };
   const navigation = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => { if (mainFrame && !inPlace) cancel(); };
   const window = getWindow();
   window?.webContents.on('did-start-navigation', navigation);

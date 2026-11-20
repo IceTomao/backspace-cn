@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { VoiceUser } from './VoiceUser';
 import { StreamTile } from './StreamTile';
 import { useVoiceStore } from '../../stores/voiceStore';
+import { useUIStore } from '../../stores/uiStore';
 import { deriveGridTiles } from '../../hooks/useLiveKit';
 import { useGridLayout } from '../../hooks/useGridLayout';
 import type { ParticipantInfo, GridTile } from '../../hooks/useLiveKit';
@@ -17,6 +18,11 @@ export function VoiceGrid({ participants }: VoiceGridProps) {
   const focusedParticipantId = useVoiceStore((s) => s.focusedParticipantId);
   const setFocusedParticipant = useVoiceStore((s) => s.setFocusedParticipant);
   const watchingStreams = useVoiceStore((s) => s.watchingStreams);
+  const voiceFullscreen = useUIStore((s) => s.voiceFullscreen);
+  const fullscreenChrome = useVoiceStore((s) => s.fullscreenChrome);
+  // The setting lives in the fullscreen chrome panel, so it must not reshape
+  // the docked panel when the same persisted state is still set.
+  const fillViewport = voiceFullscreen && fullscreenChrome.fillViewport;
   const [stripHidden, setStripHidden] = useState(false);
 
   const tiles = useMemo(() => deriveGridTiles(participants), [participants]);
@@ -95,34 +101,36 @@ export function VoiceGrid({ participants }: VoiceGridProps) {
       <div className="flex-1 flex flex-col overflow-hidden relative">
         {/* Main focused view */}
         <div
-          className="flex-1 p-2 min-h-0 cursor-pointer relative"
+          className={`flex-1 min-h-0 cursor-pointer relative ${fillViewport ? '' : 'p-2'}`}
           onClick={() => setFocusedParticipant(null)}
           title={t('voice:grid.returnToGridHint')}
         >
           {renderTile(focusedTile, true)}
           {/* Grid button — top-right */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setFocusedParticipant(null);
-            }}
-            className="absolute top-4 right-4 z-10 h-7 px-3 bg-black/60 hover:bg-black/80 rounded-lg flex items-center gap-2 text-white/70 hover:text-white transition-colors"
-            title={t('voice:grid.backToGrid')}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="currentColor"
+          {!fillViewport && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setFocusedParticipant(null);
+              }}
+              className="absolute top-4 right-4 z-10 h-7 px-3 bg-black/60 hover:bg-black/80 rounded-lg flex items-center gap-2 text-white/70 hover:text-white transition-colors"
+              title={t('voice:grid.backToGrid')}
             >
-              <path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v8h-8V3zm0 10h8v8h-8v-8z" />
-            </svg>
-            <span className="text-xs font-medium">{t('voice:grid.gridButton')}</span>
-          </button>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v8h-8V3zm0 10h8v8h-8v-8z" />
+              </svg>
+              <span className="text-xs font-medium">{t('voice:grid.gridButton')}</span>
+            </button>
+          )}
         </div>
 
         {/* Centered Hide/Show Members button — divider between focused tile and strip */}
-        {otherTiles.length > 0 && (
+        {!fillViewport && otherTiles.length > 0 && (
           <div className="flex justify-center flex-shrink-0 py-1">
             <button
               onClick={(e) => {
@@ -147,7 +155,7 @@ export function VoiceGrid({ participants }: VoiceGridProps) {
         )}
 
         {/* Bottom strip of other tiles */}
-        {!stripHidden && otherTiles.length > 0 && (
+        {!fillViewport && !stripHidden && otherTiles.length > 0 && (
           <div className="h-[120px] max-h-[calc(20*var(--app-vh))] min-h-[80px] flex-shrink-0 flex items-center justify-center gap-2 p-2 bg-surface-base/50 overflow-x-auto no-scrollbar">
             {otherTiles.map((t) => (
               <div

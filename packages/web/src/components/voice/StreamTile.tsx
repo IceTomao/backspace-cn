@@ -14,6 +14,7 @@ import { useNativeHdrStore } from '../../stores/nativeHdrStore';
 import { AudioManager } from '../../audio/AudioManager';
 import { getSfxVolume } from '../../utils/sfx';
 import { ScreenShareSettingsPopover } from './ScreenShareSettingsPopover';
+import { buildParticipantAudioMenuItems } from './voiceMenuItems';
 import { useVoiceParticipantMeta } from '../../hooks/useVoiceParticipantMeta';
 import type { StreamTile as StreamTileType } from '../../hooks/useLiveKit';
 import type { TrackStatsSnapshot } from '../../hooks/useTrackStats';
@@ -75,38 +76,6 @@ function StreamQualityItem() {
             anchorRef={btnRef}
           />
         )}
-      </div>
-    </div>
-  );
-}
-
-/** Wrapper component for stream volume slider — needs store subscription. */
-function StreamVolumeItem({ userId }: { userId: string }) {
-  const { t } = useTranslation(['voice', 'common']);
-  const f = useFormatters();
-  const streamVolume = useVoiceStore((s) => s.streamVolumes.get(userId) ?? 100);
-  const setStreamVolume = useVoiceStore((s) => s.setStreamVolume);
-
-  return (
-    <div className="p-3">
-      <div className="text-xs text-txt-tertiary mb-2 font-medium uppercase tracking-wider">
-        {t('voice:stream.volume')}
-      </div>
-      <div className="flex items-center gap-2">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-txt-tertiary flex-shrink-0">
-          <path d="M3 9v6h4l5 5V4L7 9H3z" />
-        </svg>
-        <input
-          type="range"
-          min="0"
-          max="200"
-          value={streamVolume}
-          onChange={(e) => setStreamVolume(userId, parseInt(e.target.value))}
-          className="flex-1 min-w-0 accent-accent-primary h-1"
-        />
-        <span className="text-xs text-txt-secondary min-w-[32px] flex-shrink-0 text-right">
-          {f.formatPercent(streamVolume)}
-        </span>
       </div>
     </div>
   );
@@ -458,12 +427,10 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
 
         items.push({ key: 'vol-sep', type: 'separator' });
 
-        // Stream volume slider
-        items.push({
-          key: 'stream-volume',
-          type: 'custom',
-          render: () => React.createElement(StreamVolumeItem, { userId }),
-        });
+        // User volume + sound shaping. The shared menu builder is used with
+        // `includeStreamAudio` so the single slider also moves this user's
+        // screen-share gain; two competing volume sliders would be a bug.
+        items.push(...buildParticipantAudioMenuItems(userId, { includeStreamAudio: true }));
 
         items.push({ key: 'attenuation-sep', type: 'separator' });
 
@@ -600,6 +567,13 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
             >
               <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H8v2h8v-2h-2v-2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z" />
             </svg>
+            <Avatar
+              src={avatar}
+              name={displayName}
+              size={large ? 24 : 20}
+              userId={avatarUserId}
+              user={user ?? undefined}
+            />
             <span
               className={`font-semibold text-white truncate ${large ? 'text-base' : 'text-[13px]'}`}
             >

@@ -8,6 +8,84 @@ import { shouldPlayMessageSound } from '../../utils/notificationFilters';
 import { selectVoiceStateSound } from '../../utils/voiceSoundTransitions';
 import { getJoinSoundPreset, getJoinSoundVolume, getSfxVolume } from '../../utils/sfx';
 import { useChannelNotificationStore } from '../../stores/channelNotificationStore';
+import type { JoinCueDirection } from '../../audio/joinCues';
+import type { ParticipantInfo } from '../../hooks/useLiveKit';
+
+/**
+ * Grace period after the local user connects before roster changes are treated
+ * as real.
+ *
+ * `useLiveKit` flips `isLiveKitConnected` and only then calls
+ * `updateParticipants()`, so the connect tick always observes an empty or stale
+ * participant list and the roster arrives in the immediately following store
+ * notification. Without a settle window that second tick reports every
+ * pre-existing member as a fresh arrival — the "double join sound" bug. The
+ * window is wall-clock rather than tick-counted so a slow hydration path still
+ * gets absorbed, and it is short enough that a genuine arrival right after
+ * joining is the only deliberate casualty.
+ */
+const PARTICIPANT_BASELINE_SETTLE_MS = 1500;
+
+/**
+ * A second cue for the same participant and direction inside this window is
+ * treated as the same event. Guards reconnect replays and the identity churn
+ * that federated calls produce when `userId` resolves from one alias to another
+ * (that case collapses to one identity via {@link ParticipantCueGate.selfIds},
+ * but a remote peer can flap too).
+ */
+const PARTICIPANT_CUE_DEDUPE_MS = 1500;
+
+/**
+ * Mutable state for participant cue decisions. Kept outside React state on
+ * purpose: every field is a transition baseline, not render output, and the
+ * store subscriber must be able to update it synchronously.
+ */
+interface ParticipantCueGate {
+  /**
+   * Every id known to belong to the local user. Seeded from the auth store and
+   * grown from `ParticipantInfo.isLocal`, which is authoritative even when a
+   * federated call remaps `userId` to another local alias. Never shrinks: an id
+   * learned as self must stay self so the departure tick cannot fire a leave
+   * cue for it.
+   */
+  selfIds: Set<string>;
+  /** `${direction}:${userId}` → timestamp of the last emitted cue. */
+  recentCues: Map<string, number>;
+  /** Wall-clock deadline until which roster diffs are baseline hydration. */
+  baselineSettlesUntil: number;
+}
+
+function rememberSelfParticipants(
+  gate: ParticipantCueGate,
+  participants: readonly ParticipantInfo[],
+): void {
+  for (const participant of participants) {
+    if (!participant.isLocal) continue;
+    if (participant.userId) gate.selfIds.add(participant.userId);
+    if (participant.homeUserId) gate.selfIds.add(participant.homeUserId);
+  }
+}
+
+/**
+ * Records a cue of `direction` for `userId` and reports whether it may play.
+ * Expired entries are pruned on the way through so the map stays proportional
+ * to the number of participants that changed inside one window.
+ */
+function shouldPlayParticipantCue(
+  gate: ParticipantCueGate,
+  direction: JoinCueDirection,
+  userId: string,
+  now: number,
+): boolean {
+  for (const [key, playedAt] of gate.recentCues) {
+    if (now - playedAt >= PARTICIPANT_CUE_DEDUPE_MS) gate.recentCues.delete(key);
+  }
+  const key = `${direction}:${userId}`;
+  const lastPlayed = gate.recentCues.get(key);
+  if (lastPlayed !== undefined && now - lastPlayed < PARTICIPANT_CUE_DEDUPE_MS) return false;
+  gate.recentCues.set(key, now);
+  return true;
+}
 
 /**
  * Replicates the `useLiveKit` effective-mute formula on demand. Returns whether
@@ -38,11 +116,20 @@ export function SoundController() {
   // Federation-aware self-check: in federated calls, the participant userId
   // can flip between localSnowflake (when activeDmCall resolves identity) and
   // homeUserId (when activeDmCall is cleared during disconnect). We must
-  // recognize BOTH as "self" to prevent phantom join/leave sounds.
+  // recognize BOTH as "self" to prevent phantom join/leave sounds, and the gate
+  // below also learns every id LiveKit flagged as local.
   const myIds = new Set<string>();
   if (currentUser?.id) myIds.add(currentUser.id);
   if (currentUser?.homeUserId) myIds.add(currentUser.homeUserId);
-  const isSelf = (id: string) => myIds.has(id);
+
+  // Participant cue bookkeeping lives outside React state: it is a transition
+  // baseline, not render output.
+  const cueGate = useRef<ParticipantCueGate>({
+    selfIds: new Set(myIds),
+    recentCues: new Map<string, number>(),
+    baselineSettlesUntil: 0,
+  });
+  const isSelf = (id: string) => cueGate.current.selfIds.has(id);
 
   const isInitialMount = useRef(true);
   const initialState = useVoiceStore.getState();
@@ -67,6 +154,10 @@ export function SoundController() {
   const outgoingCallLoading = useRef(false);
 
   useEffect(() => {
+    // The effect re-runs when the signed-in identity changes; keep every alias
+    // learned so far and add the current ones.
+    myIds.forEach((id) => cueGate.current.selfIds.add(id));
+
     const timer = setTimeout(() => {
       isInitialMount.current = false;
     }, 1000);
@@ -79,6 +170,11 @@ export function SoundController() {
       // (or silenced) without touching every other interface sound.
       const joinOpts = { volume: getJoinSoundVolume() };
       const joinPreset = getJoinSoundPreset();
+      const now = Date.now();
+      // Learn every alias of the local user before any diff runs: the departure
+      // tick no longer contains the local participant, so a self id discovered
+      // here is the only way to stay silent for it.
+      rememberSelfParticipants(cueGate.current, state.participants);
 
       // -------- Effective mute / deafen --------
       // Only play on transitions where BOTH prev and current samples were taken
@@ -112,7 +208,10 @@ export function SoundController() {
         audioManager.playSound('disconnect', sfxOpts);
       }
       if (justConnected) {
-        void audioManager.playJoinSound(joinPreset, joinOpts);
+        void audioManager.playJoinSound('join', joinPreset, joinOpts);
+        // Treat the roster that LiveKit publishes right after this tick as the
+        // baseline instead of a batch of arrivals.
+        cueGate.current.baselineSettlesUntil = now + PARTICIPANT_BASELINE_SETTLE_MS;
       }
       prev.current.isLiveKitConnected = state.isLiveKitConnected;
 
@@ -133,23 +232,32 @@ export function SoundController() {
         !currentScreenShareUserIds.has(myStreamerId) &&
         prev.current.screenShareUserIds.has(myStreamerId);
 
-      // Suppress join/leave + stream sounds on the connect tick. On
-      // justConnected, prev.participantIds is the empty/initial set, so the
-      // naive diff would fire user_join (and possibly stream_started) once per
-      // pre-existing remote participant. Snapshot baseline only; sounds come
-      // from real future transitions.
-      if (state.isLiveKitConnected && !justDisconnected && !justConnected) {
+      // Suppress join/leave + stream sounds on the connect tick and for the
+      // baseline settle window that follows it. `useLiveKit` marks itself
+      // connected before it publishes the roster, so the first populated
+      // participant list is hydration, not a wave of arrivals: snapshot it as
+      // the new baseline and let sounds come from real future transitions.
+      const baselineSettling = now < cueGate.current.baselineSettlesUntil;
+      if (
+        state.isLiveKitConnected &&
+        !justDisconnected &&
+        !justConnected &&
+        !baselineSettling
+      ) {
         // user_join (others)
         state.participants.forEach((p) => {
-          if (!prev.current.participantIds.has(p.userId) && !isSelf(p.userId)) {
-            void audioManager.playJoinSound(joinPreset, joinOpts);
-          }
+          if (p.isLocal || isSelf(p.userId)) return;
+          if (prev.current.participantIds.has(p.userId)) return;
+          if (!shouldPlayParticipantCue(cueGate.current, 'join', p.userId, now)) return;
+          void audioManager.playJoinSound('join', joinPreset, joinOpts);
         });
-        // user_leave (others)
+        // user_leave (others) — the same preset's leave direction, never the
+        // bundled sample directly, so every preset distinguishes the two.
         prev.current.participantIds.forEach((userId) => {
-          if (!currentParticipantIds.has(userId) && !isSelf(userId)) {
-            audioManager.playSound('user_leave', sfxOpts);
-          }
+          if (currentParticipantIds.has(userId)) return;
+          if (isSelf(userId)) return;
+          if (!shouldPlayParticipantCue(cueGate.current, 'leave', userId, now)) return;
+          void audioManager.playJoinSound('leave', joinPreset, joinOpts);
         });
         // stream_started — ANY participant (incl. self), audible to all
         state.participants.forEach((p) => {

@@ -90,6 +90,9 @@ export function MainContent() {
   // container the whole viewport, so hover is true wherever the pointer is
   // and the chrome would never leave. See usePointerReveal.
   const chromeRevealed = usePointerReveal(voiceContainerRef, voiceFullscreen);
+  // `fillViewport` removes the controls that frame the stream (Grid, members
+  // strip, member-list toggle) so the picture, not the chrome, owns the screen.
+  const fillViewport = voiceFullscreen && fullscreenChrome.fillViewport;
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [jumpToMessageId, setJumpToMessageId] = useState<string | null>(null);
@@ -278,9 +281,9 @@ export function MainContent() {
                 <span className="text-xs text-status-idle font-medium ml-2">{t('spaces:main.voice.connecting')}</span>
               )}
             </div>
-            <div className={`flex items-center gap-1 flex-shrink-0 ${voiceFullscreen ? 'pointer-events-auto mr-24' : ''}`}>
+            <div className={`flex items-center gap-1 flex-shrink-0 ${voiceFullscreen ? `pointer-events-auto ${fillViewport ? '' : 'mr-24'}` : ''}`}>
               <TransferIndicator />
-              <MemberListToggleButton />
+              {!fillViewport && <MemberListToggleButton />}
             </div>
           </div>
 
@@ -517,9 +520,9 @@ export function MainContent() {
               <span className="text-xs text-status-idle font-medium ml-2">{t('spaces:main.voice.connecting')}</span>
             )}
           </div>
-          <div className={`flex items-center gap-1 flex-shrink-0 ${voiceFullscreen ? 'pointer-events-auto mr-24' : ''}`}>
+          <div className={`flex items-center gap-1 flex-shrink-0 ${voiceFullscreen ? `pointer-events-auto ${fillViewport ? '' : 'mr-24'}` : ''}`}>
             <TransferIndicator />
-            <MemberListToggleButton />
+            {!fillViewport && <MemberListToggleButton />}
           </div>
         </div>
 

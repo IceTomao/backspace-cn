@@ -19,6 +19,11 @@ interface ChromeRow {
  * exactly which piece of chrome is in the way.
  */
 const CHROME_ROWS = [
+  {
+    key: 'fillViewport',
+    labelKey: 'voice:fullscreenChrome.fillViewport',
+    descriptionKey: 'voice:fullscreenChrome.fillViewportHint',
+  },
   { key: 'hideHeader', labelKey: 'voice:fullscreenChrome.hideHeader' },
   { key: 'hideLiveBadge', labelKey: 'voice:fullscreenChrome.hideLiveBadge' },
   { key: 'hideQualityBadge', labelKey: 'voice:fullscreenChrome.hideQualityBadge' },
