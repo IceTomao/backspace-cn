@@ -135,6 +135,94 @@
       opacity: 0.5;
     }
 
+    /* ── Remembered instances ── */
+    .history {
+      margin-bottom: 1.25rem;
+    }
+
+    .history-title {
+      font-size: 0.6875rem;
+      font-weight: 700;
+      color: #a0a0aa;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      margin-bottom: 0.5rem;
+    }
+
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
+    }
+
+    .history-row {
+      display: flex;
+      align-items: stretch;
+      gap: 0.25rem;
+    }
+
+    .history-connect {
+      flex: 1;
+      min-width: 0;
+      padding: 0.5rem 0.75rem;
+      background: #111118;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 4px;
+      color: inherit;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .history-connect:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(124, 108, 246, 0.3);
+    }
+
+    .history-name {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #efefef;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .history-url {
+      display: block;
+      margin-top: 0.125rem;
+      font-size: 0.75rem;
+      color: #5c5c68;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .history-remove {
+      flex: 0 0 34px;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 4px;
+      color: #5c5c68;
+      font-family: inherit;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .history-remove:hover:not(:disabled) {
+      background: rgba(253, 164, 175, 0.1);
+      color: #fca5a5;
+    }
+
+    .history-connect:disabled,
+    .history-remove:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     /* ── Button — accent-primary with white text (matches login) ── */
     .cancel-btn {
       width: 100%;
@@ -274,6 +362,11 @@
           <p data-i18n="welcomeSubtitle">Connect to your instance</p>
         </div>
 
+        <div id="history-section" class="history" style="display: none;">
+          <div class="history-title" data-i18n="historyTitle">Previously connected</div>
+          <div id="history-list" class="history-list"></div>
+        </div>
+
         <form id="picker-form">
           <div class="field">
             <label for="url-input" data-i18n="urlLabel">Instance URL</label>
@@ -312,6 +405,8 @@
         welcomeSubtitle: 'Connect to your instance',
         switchTitle: 'Switch instance',
         switchSubtitle: 'Connect to a different Backspace instance, or cancel to stay.',
+        historyTitle: 'Previously connected',
+        remove: 'Remove',
         urlLabel: 'Instance URL',
         connect: 'Connect',
         cancel: 'Cancel',
@@ -328,6 +423,8 @@
         welcomeSubtitle: 'Подключитесь к своему серверу',
         switchTitle: 'Сменить сервер',
         switchSubtitle: 'Подключитесь к другому серверу Backspace или отмените, чтобы остаться.',
+        historyTitle: 'Ранее подключённые',
+        remove: 'Удалить',
         urlLabel: 'Адрес сервера',
         connect: 'Подключиться',
         cancel: 'Отмена',
@@ -344,6 +441,8 @@
         welcomeSubtitle: '连接你的服务器',
         switchTitle: '切换服务器',
         switchSubtitle: '连接其他 Backspace 服务器，或取消以返回当前服务器。',
+        historyTitle: '之前连接过的服务器',
+        remove: '移除',
         urlLabel: '服务器地址',
         connect: '连接',
         cancel: '取消',
@@ -360,6 +459,8 @@
         welcomeSubtitle: 'Verbinde dich mit deiner Instanz',
         switchTitle: 'Instanz wechseln',
         switchSubtitle: 'Verbinde dich mit einer anderen Backspace-Instanz oder brich ab, um zu bleiben.',
+        historyTitle: 'Zuvor verbunden',
+        remove: 'Entfernen',
         urlLabel: 'Instanz-URL',
         connect: 'Verbinden',
         cancel: 'Abbrechen',
@@ -393,7 +494,60 @@
     const nameEl = document.getElementById('instance-name');
     const versionEl = document.getElementById('instance-version');
     const cancelBtn = document.getElementById('cancel-btn');
+    const historySection = document.getElementById('history-section');
+    const historyList = document.getElementById('history-list');
     let savedUrl = null;
+    let remembered = [];
+
+    function renderHistory() {
+      historyList.textContent = '';
+      if (!remembered.length) {
+        historySection.style.display = 'none';
+        return;
+      }
+      historySection.style.display = 'block';
+      for (const entry of remembered) {
+        const row = document.createElement('div');
+        row.className = 'history-row';
+
+        const connectBtn = document.createElement('button');
+        connectBtn.type = 'button';
+        connectBtn.className = 'history-connect';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'history-name';
+        nameEl.textContent = entry.name || entry.url;
+        const urlEl = document.createElement('span');
+        urlEl.className = 'history-url';
+        urlEl.textContent = entry.url;
+        connectBtn.append(nameEl, urlEl);
+        connectBtn.addEventListener('click', () => {
+          if (input.disabled) return;
+          input.value = entry.url;
+          form.requestSubmit();
+        });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'history-remove';
+        removeBtn.textContent = '\u00d7';
+        removeBtn.setAttribute('aria-label', t('remove') + ': ' + (entry.name || entry.url));
+        removeBtn.addEventListener('click', async () => {
+          removeBtn.disabled = true;
+          remembered = remembered.filter((item) => item.url !== entry.url);
+          renderHistory();
+          if (window.backspace && window.backspace.removeInstanceHistory) {
+            try {
+              await window.backspace.removeInstanceHistory(entry.url);
+            } catch {
+              // The local row is already gone; the next launch reloads the file.
+            }
+          }
+        });
+
+        row.append(connectBtn, removeBtn);
+        historyList.append(row);
+      }
+    }
 
     function normalizeUrl(raw) {
       let url = raw.trim();
@@ -421,6 +575,9 @@
       input.disabled = loading;
       btn.disabled = loading;
       cancelBtn.disabled = loading;
+      historyList.querySelectorAll('button').forEach((button) => {
+        button.disabled = loading;
+      });
       loadingEl.style.display = loading ? 'block' : 'none';
       if (loading) {
         hideError();
@@ -428,6 +585,14 @@
     }
 
     async function init() {
+      if (window.backspace && window.backspace.getInstanceHistory) {
+        try {
+          remembered = await window.backspace.getInstanceHistory();
+        } catch {
+          remembered = [];
+        }
+      }
+      renderHistory();
       if (window.backspace && window.backspace.getInstanceUrl) {
         try {
           savedUrl = await window.backspace.getInstanceUrl();
@@ -488,9 +653,9 @@
         infoEl.style.display = 'block';
         loadingEl.style.display = 'none';
 
-        // Save and navigate
+        // Save and navigate, remembering the server name for the picker list.
         if (window.backspace && window.backspace.setInstanceUrl) {
-          await window.backspace.setInstanceUrl(url);
+          await window.backspace.setInstanceUrl(url, data.name);
         }
       } catch (err) {
         setLoading(false);

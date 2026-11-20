@@ -45,6 +45,13 @@ const en = {
   'update.download': 'Download the Update…',
   'update.managedTitle': 'Backspace CN updates',
   'update.managedBody': 'Automatic updates are disabled for this Chinese edition. Contact the maintainer for a new installer.',
+  'close.title': 'Close Backspace',
+  'close.message': 'What should happen when you close the window?',
+  'close.detail': 'You can change this later in Settings → Desktop.',
+  'close.minimize': 'Minimize to tray',
+  'close.quit': 'Quit',
+  'close.cancel': 'Cancel',
+  'close.remember': 'Remember my choice',
 } as const;
 
 export type DesktopStringKey = keyof typeof en;
@@ -75,6 +82,13 @@ const ru: Catalog = {
   'update.download': 'Скачать обновление…',
   'update.managedTitle': 'Обновления Backspace CN',
   'update.managedBody': 'Автоматические обновления отключены. Новый установщик предоставляет сопровождающий этой сборки.',
+  'close.title': 'Закрыть Backspace',
+  'close.message': 'Что сделать при закрытии окна?',
+  'close.detail': 'Это можно изменить позже в разделе «Настройки → Приложение».',
+  'close.minimize': 'Свернуть в трей',
+  'close.quit': 'Выйти',
+  'close.cancel': 'Отмена',
+  'close.remember': 'Запомнить мой выбор',
 };
 
 const de: Catalog = {
@@ -101,6 +115,13 @@ const de: Catalog = {
   'update.download': 'Update herunterladen…',
   'update.managedTitle': 'Backspace CN Updates',
   'update.managedBody': 'Automatische Updates sind deaktiviert. Neue Installationspakete erhalten Sie vom Betreuer dieser Ausgabe.',
+  'close.title': 'Backspace schließen',
+  'close.message': 'Was soll beim Schließen des Fensters passieren?',
+  'close.detail': 'Du kannst das später unter Einstellungen → Desktop ändern.',
+  'close.minimize': 'In den Infobereich minimieren',
+  'close.quit': 'Beenden',
+  'close.cancel': 'Abbrechen',
+  'close.remember': 'Meine Wahl merken',
 };
 
 const zh: Catalog = {
@@ -127,6 +148,13 @@ const zh: Catalog = {
   'update.download': '下载更新…',
   'update.managedTitle': 'Backspace 中文版更新',
   'update.managedBody': '此中文版已关闭自动更新。需要升级时，请向维护者获取新版安装包。',
+  'close.title': '关闭 Backspace',
+  'close.message': '关闭窗口时应该怎么做？',
+  'close.detail': '之后可在“设置 → 桌面”中更改。',
+  'close.minimize': '最小化到托盘',
+  'close.quit': '退出',
+  'close.cancel': '取消',
+  'close.remember': '记住我的选择',
 };
 
 export const DESKTOP_CATALOGS: Record<DesktopLanguage, Catalog> = { en, ru, de, zh };

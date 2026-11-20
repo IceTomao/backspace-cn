@@ -5,6 +5,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useSpaceStore, getChannelOrigin, getMyUserIdForOrigin } from '../../stores/spaceStore';
 import { ScreenShareSettingsPopover } from './ScreenShareSettingsPopover';
+import { VoiceChromeMenu } from './VoiceChromeMenu';
 import { hasPermissionBit, PermissionBits } from '../../utils/permissions';
 import { handleMuteAction, handleDeafenAction, handleCameraAction, handleScreenShareAction, handleDisconnectAction } from '../../utils/voiceActions';
 import { VOICE_CHROME_ATTR } from '../../hooks/usePointerReveal';
@@ -19,8 +20,16 @@ const btnGreen = `${btnBase} bg-surface-channel text-status-online hover:bg-surf
  * `revealed` is the fullscreen idle state, owned by MainContent because it
  * watches the voice container the pointer actually moves over. It is ignored
  * while docked, where plain hover on the voice panel is the right model.
+ *
+ * `hideUntilPointerNearBottom` is the user's "hide the call controls in
+ * fullscreen" preference: the bar then ignores movement in the middle of the
+ * screen and only appears when the pointer reaches the bottom edge, so someone
+ * watching a stream does not summon it by moving the mouse across the video.
  */
-export function VoiceControlBar({ revealed = false }: { revealed?: boolean }) {
+export function VoiceControlBar({ revealed = false, hideUntilPointerNearBottom = false }: {
+  revealed?: boolean;
+  hideUntilPointerNearBottom?: boolean;
+}) {
   const { t } = useTranslation(['voice', 'common']);
   const isMuted = useVoiceStore((s) => s.isMuted);
   const isDeafened = useVoiceStore((s) => s.isDeafened);
@@ -48,12 +57,35 @@ export function VoiceControlBar({ revealed = false }: { revealed?: boolean }) {
   // popover (quality controls + the red stop action).
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const shareBtnRef = useRef<HTMLButtonElement>(null);
+  const [chromeMenuOpen, setChromeMenuOpen] = useState(false);
+  const chromeBtnRef = useRef<HTMLButtonElement>(null);
+  const [pointerNearBottom, setPointerNearBottom] = useState(false);
 
-  // An open share menu pins the bar: the popover hangs off it, so letting the
-  // idle timer pull it away would take the menu with it.
-  const fullscreenVisibility = revealed || shareMenuOpen
-    ? 'opacity-100'
-    : 'opacity-0 focus-within:opacity-100 [@media(hover:none)]:opacity-100 [@media(any-pointer:coarse)]:opacity-100';
+  // Summoning the bar by touching the bottom edge is the whole point of the
+  // preference, so only the last 96px of the viewport counts as "reaching for
+  // the controls".
+  useEffect(() => {
+    if (!hideUntilPointerNearBottom) {
+      setPointerNearBottom(false);
+      return;
+    }
+    const handlePointerMove = (event: PointerEvent) => {
+      const nearBottom = event.clientY >= window.innerHeight - 96;
+      setPointerNearBottom((previous) => (previous === nearBottom ? previous : nearBottom));
+    };
+    window.addEventListener('pointermove', handlePointerMove);
+    return () => window.removeEventListener('pointermove', handlePointerMove);
+  }, [hideUntilPointerNearBottom]);
+
+  // A menu hanging off the bar pins it: letting the idle timer pull the bar
+  // (and its menu) away would make the settings unusable.
+  const fullscreenVisibility = hideUntilPointerNearBottom
+    ? (pointerNearBottom || shareMenuOpen || chromeMenuOpen
+      ? 'opacity-100'
+      : 'opacity-0 focus-within:opacity-100 [@media(any-pointer:coarse)]:opacity-100')
+    : (revealed || shareMenuOpen || chromeMenuOpen
+      ? 'opacity-100'
+      : 'opacity-0 focus-within:opacity-100 [@media(hover:none)]:opacity-100 [@media(any-pointer:coarse)]:opacity-100');
   const containerClassName = voiceFullscreen
     ? `pointer-events-none absolute inset-x-0 bottom-0 z-20 h-24 flex items-end justify-center pb-6 transition-opacity duration-300 ease-out ${fullscreenVisibility}`
     : 'absolute bottom-6 left-1/2 -translate-x-1/2 z-20 opacity-0 translate-y-4 group-hover/voice:opacity-100 group-hover/voice:translate-y-0 transition-all duration-300 ease-out';
@@ -86,6 +118,12 @@ export function VoiceControlBar({ revealed = false }: { revealed?: boolean }) {
   useEffect(() => {
     if (!isScreenSharing) setShareMenuOpen(false);
   }, [isScreenSharing]);
+
+  // Leaving fullscreen unmounts the layout the menu belongs to; keeping the
+  // flag would leak an open panel into the docked bar.
+  useEffect(() => {
+    if (!voiceFullscreen) setChromeMenuOpen(false);
+  }, [voiceFullscreen]);
 
   const handleDisconnect = () => handleDisconnectAction();
 
@@ -233,6 +271,30 @@ export function VoiceControlBar({ revealed = false }: { revealed?: boolean }) {
 
         {/* Separator */}
         <div className="w-[1px] h-6 bg-white/10 mx-0.5" />
+
+        {/* Fullscreen chrome settings — sits next to disconnect, where the eye
+            already rests when leaving the call. */}
+        {voiceFullscreen && (
+          <>
+            <button
+              ref={chromeBtnRef}
+              onClick={() => setChromeMenuOpen((open) => !open)}
+              aria-haspopup="dialog"
+              aria-expanded={chromeMenuOpen}
+              className={chromeMenuOpen ? `${btnBase} bg-surface-channel text-txt-primary` : btnDefault}
+              title={t('voice:fullscreenChrome.title')}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+              </svg>
+            </button>
+            <VoiceChromeMenu
+              open={chromeMenuOpen}
+              onClose={() => setChromeMenuOpen(false)}
+              anchorRef={chromeBtnRef}
+            />
+          </>
+        )}
 
         {/* Disconnect */}
         <button

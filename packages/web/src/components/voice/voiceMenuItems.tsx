@@ -152,11 +152,22 @@ export function VolumeSliderItem({ userId }: { userId: string }) {
   const f = useFormatters();
   const volume = useVoiceStore((s) => s.participantVolumes.get(userId) ?? 100);
   const setParticipantVolume = useVoiceStore((s) => s.setParticipantVolume);
+  const resetParticipantVolume = useVoiceStore((s) => s.resetParticipantVolume);
 
   return (
-    <div className="p-3">
-      <div className="text-xs text-txt-tertiary mb-2 font-medium uppercase tracking-wider">
-        {t('voice:participantMenu.userVolume')}
+    <div className="p-3 w-[240px]">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="text-xs text-txt-tertiary font-medium uppercase tracking-wider">
+          {t('voice:participantMenu.userVolume')}
+        </div>
+        <button
+          type="button"
+          onClick={() => resetParticipantVolume(userId)}
+          disabled={volume === 100}
+          className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors disabled:opacity-40 disabled:hover:text-txt-tertiary"
+        >
+          {t('voice:participantMenu.volumeReset')}
+        </button>
       </div>
       <div className="flex items-center gap-2">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-txt-tertiary flex-shrink-0">

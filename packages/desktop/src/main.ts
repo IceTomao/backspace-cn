@@ -26,11 +26,14 @@ import type { DesktopActivity } from './activityTypes';
 import { KeybindManager } from './keybindManager';
 import { deriveStartMinimizedFromArgs, parseExecPathFromDesktopFile, shouldReapplyAppImage } from './autoLaunch';
 import {
-  saveInstanceUrl,
+  recordInstance,
   clearInstanceUrl,
+  getInstanceHistory,
+  removeInstanceFromHistory,
   getPickerPath,
   getResolvedInstanceUrl,
 } from './instanceUrl';
+import { loadCloseBehavior, saveCloseBehavior } from './closeBehavior';
 import { getUpdateCapability, isSandboxed } from './updateCapability';
 import { loadDismissedVersion, setDismissedVersion } from './updateDismissal';
 import { purgeUpdaterCache } from './updaterCache';
@@ -496,6 +499,52 @@ function loadTrayIcon(): Electron.NativeImage {
 
 // ─── Window & Tray Creation ─────────────────────────────────────────────────
 
+// ─── Close behavior ─────────────────────────────────────────────────────────
+
+let closePromptOpen = false;
+
+/**
+ * Asks what the close button should do on this occasion. The dialog is modelled
+ * on a question with three explicit buttons rather than a checkbox-only flow so
+ * "cancel" remains a distinct, safe default. `closePromptOpen` prevents a
+ * second close event from stacking another dialog while this one is showing.
+ */
+function promptCloseBehavior(): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed() || closePromptOpen) return;
+  closePromptOpen = true;
+  const language = getDesktopLanguage();
+  void dialog.showMessageBox(window, {
+    type: 'question',
+    title: translateDesktop(language, 'close.title'),
+    message: translateDesktop(language, 'close.message'),
+    detail: translateDesktop(language, 'close.detail'),
+    buttons: [
+      translateDesktop(language, 'close.minimize'),
+      translateDesktop(language, 'close.quit'),
+      translateDesktop(language, 'close.cancel'),
+    ],
+    defaultId: 0,
+    cancelId: 2,
+    checkboxLabel: translateDesktop(language, 'close.remember'),
+    noLink: true,
+  }).then(({ response, checkboxChecked }) => {
+    closePromptOpen = false;
+    if (window.isDestroyed()) return;
+    if (response === 1) {
+      if (checkboxChecked) saveCloseBehavior(app.getPath('userData'), 'quit');
+      requestQuit();
+      return;
+    }
+    if (response === 0) {
+      if (checkboxChecked) saveCloseBehavior(app.getPath('userData'), 'tray');
+      window.hide();
+    }
+  }).catch(() => {
+    closePromptOpen = false;
+  });
+}
+
 function createWindow(): void {
   const savedState = validateWindowBounds(loadWindowState());
   const themeColors = getWindowThemeColors();
@@ -546,8 +595,13 @@ function createWindow(): void {
   // URL resolution priority:
   // 1. BACKSPACE_URL env var (managed deployments)
   // 2. Saved instance URL from picker
-  // 3. Public default for this distribution
-  mainWindow.loadURL(getResolvedInstanceUrl());
+  // 3. No URL configured: show the picker instead of loading an invalid URL.
+  const startupInstanceUrl = getResolvedInstanceUrl();
+  if (startupInstanceUrl) {
+    mainWindow.loadURL(startupInstanceUrl);
+  } else {
+    mainWindow.loadFile(getPickerPath(), { query: { lang: getDesktopLanguage() } });
+  }
 
   mainWindow.once('ready-to-show', () => {
     // Hidden-launch detection. We pass `args: ['--hidden']` on all three platforms
@@ -589,10 +643,22 @@ function createWindow(): void {
       saveWindowState(mainWindow);
     }
 
-    if (!isQuitting) {
-      event.preventDefault();
-      mainWindow?.hide();
+    // `requestQuit()` flips this before calling app.quit(), which re-fires
+    // `close`; letting that second event through is what actually destroys the
+    // window. Never preventDefault while quitting.
+    if (isQuitting) return;
+
+    const behavior = loadCloseBehavior(app.getPath('userData'));
+    event.preventDefault();
+    if (behavior === 'quit') {
+      requestQuit();
+      return;
     }
+    if (behavior === 'tray') {
+      mainWindow?.hide();
+      return;
+    }
+    promptCloseBehavior();
   });
 
   mainWindow.on('closed', () => {
@@ -936,10 +1002,12 @@ function registerIpcHandlers(): void {
   // Instance URL management
   ipcMain.handle('get-instance-url', () => getResolvedInstanceUrl());
 
-  ipcMain.handle('set-instance-url', (_event, url: string) => {
-    saveInstanceUrl(url);
+  ipcMain.handle('set-instance-url', (_event, url: string, serverName?: unknown) => {
+    const nextUrl = typeof url === 'string' ? url.trim() : '';
+    if (!nextUrl) return;
+    recordInstance(nextUrl, typeof serverName === 'string' ? serverName : null);
     if (mainWindow) {
-      mainWindow.loadURL(url);
+      mainWindow.loadURL(nextUrl);
       // Force Electron to re-evaluate drag regions after navigation
       mainWindow.webContents.once('did-finish-load', () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -949,6 +1017,12 @@ function registerIpcHandlers(): void {
         }
       });
     }
+  });
+
+  ipcMain.handle('get-instance-history', () => getInstanceHistory());
+
+  ipcMain.handle('remove-instance-history', (_event, url: unknown) => {
+    if (typeof url === 'string') removeInstanceFromHistory(url);
   });
 
   ipcMain.handle('clear-instance-url', () => {
@@ -964,6 +1038,17 @@ function registerIpcHandlers(): void {
         }
       });
     }
+  });
+
+  // Close behavior — the window close handler reads this synchronously.
+  ipcMain.handle('get-close-behavior', () => {
+    if (isSandboxed()) return 'ask';
+    return loadCloseBehavior(app.getPath('userData'));
+  });
+
+  ipcMain.handle('set-close-behavior', (_event, behavior: unknown) => {
+    if (isSandboxed()) return 'ask';
+    return saveCloseBehavior(app.getPath('userData'), behavior);
   });
 
   // Auto-update IPC

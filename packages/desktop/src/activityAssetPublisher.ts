@@ -119,7 +119,7 @@ export function registerActivityAssetSession(
   ipc: IpcMain,
   publisher: ActivityAssetPublisher,
   getWindow: () => BrowserWindow | null,
-  getInstance: () => string,
+  getInstance: () => string | null,
 ): () => void {
   const channel = 'set-activity-asset-session';
   const validateSender = (event: IpcMainInvokeEvent): string => {
@@ -127,7 +127,9 @@ export function registerActivityAssetSession(
     if (!win || win.isDestroyed() || event.sender !== win.webContents
       || !event.senderFrame || event.senderFrame !== win.webContents.mainFrame) throw new Error('Activity session rejected');
     const source = new URL(event.senderFrame.url);
-    const configured = new URL(getInstance());
+    const configuredUrl = getInstance();
+    if (!configuredUrl) throw new Error('Activity session origin rejected');
+    const configured = new URL(configuredUrl);
     if (!['https:', 'http:'].includes(source.protocol) || source.origin !== configured.origin) {
       throw new Error('Activity session origin rejected');
     }

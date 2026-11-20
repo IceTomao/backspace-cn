@@ -614,11 +614,13 @@ describe('load-failure handling in attachRecoveryHandlers', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     resetRecoveryState();
+    vi.stubEnv('BACKSPACE_URL', 'https://chat.example.test/');
   });
 
   afterEach(() => {
     resetRecoveryState();
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it('absorbs one transient failure silently, then escalates to recovery', async () => {

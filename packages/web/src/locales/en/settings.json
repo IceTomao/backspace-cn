@@ -130,6 +130,20 @@
         "description": "Off (default): only DMs and messages that mention you. On: every channel."
       }
     },
+    "joinSound": {
+      "sectionTitle": "Join Sound",
+      "presetLabel": "Sound when someone joins the call",
+      "preview": "Preview",
+      "volumeLabel": "Notification volume",
+      "presets": {
+        "classic": "Classic",
+        "soft": "Soft",
+        "chime": "Chime",
+        "marimba": "Marimba",
+        "pop": "Pop",
+        "none": "Off"
+      }
+    },
     "pip": {
       "sectionTitle": "Floating Window",
       "showOnSwitch": {
@@ -419,6 +433,13 @@
         "label": "Start minimized",
         "description": "Start hidden in the system tray instead of showing the window"
       }
+    },
+    "closeBehavior": {
+      "label": "When closing the window",
+      "description": "Choose what the close button does. You can change this at any time.",
+      "ask": "Ask every time",
+      "tray": "Minimize to tray",
+      "quit": "Quit"
     },
     "updates": {
       "appName": "Backspace Desktop",

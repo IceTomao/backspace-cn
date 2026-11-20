@@ -127,15 +127,13 @@ export type GridTile = UserTile | StreamTile;
 export function deriveGridTiles(participants: ParticipantInfo[]): GridTile[] {
   const tiles: GridTile[] = [];
   for (const p of participants) {
-    const hasLiveVideo = p.isCameraOn && p.videoTrack?.readyState === 'live';
-    tiles.push({
-      kind: 'user',
-      key: p.identity,
-      participant: p,
-      videoTrack: hasLiveVideo ? p.videoTrack : null,
-      audioTrack: p.audioTrack,
-      lkVideoTrack: hasLiveVideo ? p.lkVideoTrack : null,
-    });
+    // One tile per participant. A sharing participant's tile is the stream
+    // tile: showing a second "stream" card next to their user card doubles the
+    // footprint for one person and forces the viewer to hunt for the one that
+    // has the picture. The stream tile already renders their avatar, name and
+    // a watch action while nothing is subscribed, so nothing is lost by
+    // dropping the plain user tile — including for a participant who is both
+    // on camera and sharing, where the share is what people came to see.
     if (p.isScreenSharing) {
       tiles.push({
         kind: 'stream',
@@ -145,7 +143,17 @@ export function deriveGridTiles(participants: ParticipantInfo[]): GridTile[] {
         screenAudioTrack: p.screenAudioTrack,
         lkScreenTrack: p.lkScreenTrack,
       });
+      continue;
     }
+    const hasLiveVideo = p.isCameraOn && p.videoTrack?.readyState === 'live';
+    tiles.push({
+      kind: 'user',
+      key: p.identity,
+      participant: p,
+      videoTrack: hasLiveVideo ? p.videoTrack : null,
+      audioTrack: p.audioTrack,
+      lkVideoTrack: hasLiveVideo ? p.lkVideoTrack : null,
+    });
   }
   return tiles;
 }

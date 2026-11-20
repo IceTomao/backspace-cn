@@ -1,6 +1,7 @@
 import rnnoiseWorkletPath from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url';
 import rnnoiseWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url';
 import rnnoiseWasmSimdPath from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url';
+import { joinCueNotes, type JoinSoundPresetId } from './joinCues';
 
 export class AudioManager {
   private static instance: AudioManager | null = null;
@@ -221,6 +222,64 @@ export class AudioManager {
 
     source.start(now);
     return source;
+  }
+
+  /**
+   * Plays the "somebody joined the call" cue for the selected preset.
+   *
+   * `classic` reuses the bundled `user_join` sample; the other presets are
+   * synthesized from {@link joinCueNotes} so no additional asset has to ship.
+   * Both paths run through `masterBoost`, so the output device selection and
+   * the master limiter apply exactly as they do to every other cue.
+   */
+  async playJoinSound(
+    preset: JoinSoundPresetId,
+    options: { volume?: number } = {},
+  ): Promise<void> {
+    if (preset === 'none') return;
+    const volume = options.volume ?? 0.7;
+    if (!(volume > 0)) return;
+
+    if (preset === 'classic') {
+      await this.playSound('user_join', { volume });
+      return;
+    }
+
+    const notes = joinCueNotes(preset);
+    if (notes.length === 0) return;
+
+    await this.resumeContext();
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    const start = ctx.currentTime;
+    for (const note of notes) {
+      const noteStart = start + note.startMs / 1000;
+      const noteEnd = noteStart + note.durationMs / 1000;
+      const peak = Math.min(1, Math.max(0, note.peak * volume));
+      if (peak <= 0) continue;
+
+      const oscillator = ctx.createOscillator();
+      oscillator.type = note.type;
+      oscillator.frequency.setValueAtTime(note.frequency, noteStart);
+
+      const envelope = ctx.createGain();
+      // 8 ms attack keeps the sine start free of the click a hard onset makes;
+      // the exponential tail mimics a struck/plucked decay rather than a gate.
+      const attack = Math.min(0.008, note.durationMs / 4000);
+      envelope.gain.setValueAtTime(0, noteStart);
+      envelope.gain.linearRampToValueAtTime(peak, noteStart + attack);
+      envelope.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+
+      oscillator.connect(envelope);
+      envelope.connect(this.masterBoost!);
+      oscillator.start(noteStart);
+      oscillator.stop(noteEnd + 0.02);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        envelope.disconnect();
+      };
+    }
   }
 
   /**

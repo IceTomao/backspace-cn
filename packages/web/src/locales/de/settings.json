@@ -130,6 +130,20 @@
         "description": "Aus (Standard): nur Direktnachrichten und Nachrichten, die dich erwähnen. An: jeder Kanal."
       }
     },
+    "joinSound": {
+      "sectionTitle": "Beitrittston",
+      "presetLabel": "Ton, wenn jemand dem Kanal beitritt",
+      "preview": "Anhören",
+      "volumeLabel": "Lautstärke der Hinweistöne",
+      "presets": {
+        "classic": "Klassisch",
+        "soft": "Sanft",
+        "chime": "Glocke",
+        "marimba": "Marimbaklang",
+        "pop": "Plop",
+        "none": "Aus"
+      }
+    },
     "pip": {
       "sectionTitle": "Schwebefenster",
       "showOnSwitch": {
@@ -419,6 +433,13 @@
         "label": "Minimiert starten",
         "description": "Versteckt im Infobereich starten, statt das Fenster zu zeigen"
       }
+    },
+    "closeBehavior": {
+      "label": "Beim Schließen des Fensters",
+      "description": "Wähle, was die Schließen-Schaltfläche tun soll. Du kannst das jederzeit ändern.",
+      "ask": "Jedes Mal fragen",
+      "tray": "In den Infobereich",
+      "quit": "Beenden"
     },
     "updates": {
       "appName": "Backspace Desktop",

@@ -31,6 +31,7 @@
     "stopWatchingCamera": "停止监视摄像头",
     "muteUser": "将用户静音",
     "userVolume": "用户音量",
+    "volumeReset": "重置为 100%",
     "eq": {
       "title": "音效",
       "reset": "重置",
@@ -48,7 +49,17 @@
       }
     }
   },
-  "incomingCall": {
+  "fullscreenChrome": {
+    "title": "全屏显示",
+    "hint": "隐藏全屏时不需要的浮层",
+    "reset": "全部显示",
+    "hideHeader": "顶部栏",
+    "hideLiveBadge": "直播中角标",
+    "hideQualityBadge": "画质与状态角标",
+    "hideCaption": "直播名称条",
+    "hideControlBar": "通话控制栏",
+    "hideControlBarHint": "鼠标移到屏幕底部时才会显示"
+  },  "incomingCall": {
     "status": "传入语音呼叫..."
   },
   "grid": {

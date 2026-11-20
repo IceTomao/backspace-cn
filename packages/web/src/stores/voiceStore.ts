@@ -26,6 +26,18 @@ import {
   type EqPresetId,
   type ParticipantEq,
 } from '../audio/participantEq';
+import {
+  clampJoinSoundVolume,
+  DEFAULT_JOIN_SOUND_PRESET,
+  DEFAULT_JOIN_SOUND_VOLUME,
+  isJoinSoundPreset,
+  type JoinSoundPresetId,
+} from '../audio/joinCues';
+import {
+  DEFAULT_VOICE_FULLSCREEN_CHROME,
+  sanitizeVoiceFullscreenChrome,
+  type VoiceFullscreenChrome,
+} from '../utils/voiceFullscreenChrome';
 
 export type ScreenShareDegradationPreference =
   | 'maintain-resolution'
@@ -108,6 +120,8 @@ interface VoiceState {
   participantVolumes: Map<string, number>;
   setParticipantVolume: (userId: string, volume: number) => void;
   getParticipantVolume: (userId: string) => number;
+  /** Drops the override so the participant returns to the default 100 %. */
+  resetParticipantVolume: (userId: string) => void;
   // Per-participant local mute (userId → muted?)
   participantMutes: Map<string, boolean>;
   setParticipantMute: (userId: string, muted: boolean) => void;
@@ -135,6 +149,16 @@ interface VoiceState {
   setSoundEffectVolume: (volume: number) => void;
   messageSoundAllChannels: boolean;          // false (default) = DM + mention only; true = every channel
   setMessageSoundAllChannels: (allChannels: boolean) => void;
+  /** Cue played when somebody joins the call. */
+  joinSoundPreset: JoinSoundPresetId;
+  setJoinSoundPreset: (preset: JoinSoundPresetId) => void;
+  /** Dedicated 0-200 volume for the join cue, independent of the SFX slider. */
+  joinSoundVolume: number;
+  setJoinSoundVolume: (volume: number) => void;
+  /** Which overlays stay visible while the call is fullscreen. */
+  fullscreenChrome: VoiceFullscreenChrome;
+  setFullscreenChrome: (patch: Partial<VoiceFullscreenChrome>) => void;
+  resetFullscreenChrome: () => void;
   pipEnabled: boolean;
   setPipEnabled: (enabled: boolean) => void;
   lowLatencyStreamViewing: boolean;
@@ -288,6 +312,14 @@ export const useVoiceStore = create<VoiceState>()(
         });
       },
       getParticipantVolume: (userId) => get().participantVolumes.get(userId) ?? 100,
+      resetParticipantVolume: (userId) => {
+        set((state) => {
+          if (!state.participantVolumes.has(userId)) return state;
+          const newMap = new Map(state.participantVolumes);
+          newMap.delete(userId);
+          return { participantVolumes: newMap };
+        });
+      },
 
       participantEqs: new Map(),
       setParticipantEq: (userId, eq) => {
@@ -337,6 +369,15 @@ export const useVoiceStore = create<VoiceState>()(
       setSoundEffectVolume: (volume) => set({ soundEffectVolume: volume }),
       messageSoundAllChannels: false,
       setMessageSoundAllChannels: (allChannels) => set({ messageSoundAllChannels: allChannels }),
+      joinSoundPreset: DEFAULT_JOIN_SOUND_PRESET,
+      setJoinSoundPreset: (preset) => set({ joinSoundPreset: preset }),
+      joinSoundVolume: DEFAULT_JOIN_SOUND_VOLUME,
+      setJoinSoundVolume: (volume) => set({ joinSoundVolume: clampJoinSoundVolume(volume) }),
+      fullscreenChrome: { ...DEFAULT_VOICE_FULLSCREEN_CHROME },
+      setFullscreenChrome: (patch) => set((state) => ({
+        fullscreenChrome: sanitizeVoiceFullscreenChrome({ ...state.fullscreenChrome, ...patch }),
+      })),
+      resetFullscreenChrome: () => set({ fullscreenChrome: { ...DEFAULT_VOICE_FULLSCREEN_CHROME } }),
       pipEnabled: true,
       setPipEnabled: (enabled) => set({ pipEnabled: enabled }),
       lowLatencyStreamViewing: false,
@@ -1029,6 +1070,9 @@ export const useVoiceStore = create<VoiceState>()(
         rnnoiseEnabled: state.rnnoiseEnabled,
         soundEffectVolume: state.soundEffectVolume,
         messageSoundAllChannels: state.messageSoundAllChannels,
+        joinSoundPreset: state.joinSoundPreset,
+        joinSoundVolume: state.joinSoundVolume,
+        fullscreenChrome: state.fullscreenChrome,
         pipEnabled: state.pipEnabled,
         lowLatencyStreamViewing: state.lowLatencyStreamViewing,
         streamAttenuationEnabled: state.streamAttenuationEnabled,
@@ -1092,6 +1136,17 @@ export const useVoiceStore = create<VoiceState>()(
         merged.streamMutes = currentState.streamMutes;
         merged.watchingStreams = currentState.watchingStreams;
         merged.unwatchedCameras = currentState.unwatchedCameras;
+        // The join cue is user-facing audio, so an unknown preset or a corrupt
+        // volume must fall back to the shipped defaults instead of throwing.
+        merged.joinSoundPreset = isJoinSoundPreset(persistedState?.joinSoundPreset)
+          ? persistedState.joinSoundPreset
+          : DEFAULT_JOIN_SOUND_PRESET;
+        merged.joinSoundVolume = typeof persistedState?.joinSoundVolume === 'number'
+          ? clampJoinSoundVolume(persistedState.joinSoundVolume)
+          : DEFAULT_JOIN_SOUND_VOLUME;
+        // Persisted chrome flags are presentation-only, so a stale or partial
+        // record just means "show the overlay" rather than a broken layout.
+        merged.fullscreenChrome = sanitizeVoiceFullscreenChrome(persistedState?.fullscreenChrome);
         return merged;
       },
     }

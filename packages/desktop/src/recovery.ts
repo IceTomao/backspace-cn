@@ -650,7 +650,10 @@ export function enterRecoveryMode(reason: { code: RecoveryReasonCode; detail: st
   // Network-shaped failures are frequently momentary (DNS not ready, VPN still
   // connecting, instance restarting). Keep probing in the background and return
   // to the app by itself instead of waiting for the user to click Reload.
-  if (reason.code === 'load-failed') startAutoRetry(getResolvedInstanceUrl());
+  if (reason.code === 'load-failed') {
+    const instanceUrl = getResolvedInstanceUrl();
+    if (instanceUrl) startAutoRetry(instanceUrl);
+  }
 }
 
 // Wire the boot-stall callback at module load time. The setter pattern from

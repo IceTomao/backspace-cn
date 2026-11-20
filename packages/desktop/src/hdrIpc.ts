@@ -4,7 +4,12 @@ import { HdrNativeRuntime, type HdrVideoConfig } from './hdrNative';
 import { validateHdrColor } from './hdrColor';
 
 /** The webpage can select sources, never executables, shell arguments or paths. */
-export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow | null, getInstance: () => string): () => void {
+export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow | null, getInstance: () => string | null): () => void {
+  const instanceOrigin = (): string => {
+    const configured = getInstance();
+    if (!configured) throw new Error('HDR request denied');
+    return new URL(configured).origin;
+  };
   const generations = { publisher: 0, viewer: 0 };
   const leases = new Map<'publisher' | 'viewer', { identity: string; requestId: string; revoke: () => Promise<void> }>();
   const revoke = (kind: 'publisher' | 'viewer') => { const lease = leases.get(kind); leases.delete(kind); void lease?.revoke(); };
@@ -18,7 +23,7 @@ export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow |
     const window = getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame ||
         !event.senderFrame || !['https:', 'http:'].includes(new URL(event.senderFrame.url).protocol) ||
-        new URL(event.senderFrame.url).origin !== new URL(getInstance()).origin) throw new Error('HDR request denied');
+        new URL(event.senderFrame.url).origin !== instanceOrigin()) throw new Error('HDR request denied');
     return window;
   };
   const cancel = () => { generations.publisher++; generations.viewer++; runtime.dispose(); revoke('publisher'); revoke('viewer'); };
@@ -59,7 +64,7 @@ export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow |
     const revision = ++generations[kind];
     runtime.stop(kind); revoke(kind);
     const role = request.action === 'publish' ? 'publish' : 'receive';
-    const origin = new URL(getInstance()).origin;
+    const origin = instanceOrigin();
     const response = await owner.webContents.session.fetch(`${origin}/api/livekit/token`, {
       method: 'POST', redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${request.authToken}`, 'Content-Type': 'application/json' },

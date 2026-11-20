@@ -42,8 +42,12 @@ import { useChannelNotificationStore } from '../../stores/channelNotificationSto
  * fullscreen and would hold hover forever. `focus-within` keeps it reachable
  * by keyboard, and pointers that cannot hover keep it up permanently.
  */
-function voiceHeaderClassName(fullscreen: boolean, revealed: boolean): string {
+function voiceHeaderClassName(fullscreen: boolean, revealed: boolean, hidden: boolean): string {
   const base = 'h-14 px-5 flex items-center justify-between bg-surface-base transition-opacity duration-300';
+  // The caller opts the header out entirely in fullscreen; `hidden` (rather
+  // than unmounting) keeps the element addressable for the reveal logic and
+  // for the tests that assert on it.
+  if (hidden) return 'hidden';
   if (!fullscreen) {
     return `${base} border-b border-border-hard flex-shrink-0`;
   }
@@ -65,6 +69,7 @@ export function MainContent() {
   const voiceFullscreen = useUIStore((s) => s.voiceFullscreen);
   const setVoiceFullscreen = useUIStore((s) => s.setVoiceFullscreen);
   const participants = useVoiceStore((s) => s.participants);
+  const fullscreenChrome = useVoiceStore((s) => s.fullscreenChrome);
   const currentVoiceChannelId = useVoiceStore((s) => s.currentVoiceChannelId);
   const isLiveKitConnected = useVoiceStore((s) => s.isLiveKitConnected);
   const connectionError = useVoiceStore((s) => s.connectionError);
@@ -254,7 +259,7 @@ export function MainContent() {
         >
           <div
             data-testid="voice-header-overlay"
-            className={voiceHeaderClassName(voiceFullscreen, chromeRevealed)}
+            className={voiceHeaderClassName(voiceFullscreen, chromeRevealed, voiceFullscreen && fullscreenChrome.hideHeader)}
             {...(voiceFullscreen ? { [VOICE_CHROME_ATTR]: '' } : {})}
           >
             <div className="flex items-center gap-[10px]">
@@ -282,7 +287,7 @@ export function MainContent() {
           <div className="flex-1 flex overflow-hidden min-h-0">
             <div className={`flex-1 min-w-0 flex relative ${voiceFullscreen ? '' : 'pb-20'}`}>
               <VoiceGrid participants={participants} />
-              <VoiceControlBar revealed={chromeRevealed} />
+              <VoiceControlBar revealed={chromeRevealed} hideUntilPointerNearBottom={voiceFullscreen && fullscreenChrome.hideControlBar} />
             </div>
             {voiceChatOpen && !voiceFullscreen && (
               <VoiceChatPanel channelId={currentChannelId} channelName={`@${dmName}`} />
@@ -493,7 +498,7 @@ export function MainContent() {
       >
         <div
           data-testid="voice-header-overlay"
-          className={voiceHeaderClassName(voiceFullscreen, chromeRevealed)}
+          className={voiceHeaderClassName(voiceFullscreen, chromeRevealed, voiceFullscreen && fullscreenChrome.hideHeader)}
           {...(voiceFullscreen ? { [VOICE_CHROME_ATTR]: '' } : {})}
         >
           <div className="flex items-center gap-[10px]">
@@ -521,7 +526,7 @@ export function MainContent() {
         <div className="flex-1 flex overflow-hidden min-h-0">
           <div className={`flex-1 min-w-0 flex relative ${voiceFullscreen ? '' : 'pb-20'}`}>
             <VoiceGrid participants={participants} />
-            <VoiceControlBar revealed={chromeRevealed} />
+            <VoiceControlBar revealed={chromeRevealed} hideUntilPointerNearBottom={voiceFullscreen && fullscreenChrome.hideControlBar} />
           </div>
           {voiceChatOpen && !voiceFullscreen && (
             <VoiceChatPanel channelId={currentChannelId} channelName={channel.name} />

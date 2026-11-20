@@ -270,7 +270,7 @@ export function UserSettingsModal() {
                 {tab === 'privacy' && <PrivacyPanel />}
                 {tab === 'connections' && <ConnectionsPanel />}
                 {tab === 'keybinds' && <KeybindsPanel />}
-                {tab === 'desktop' && (isElectron() ? <DesktopPanel /> : <DesktopDownloadPanel version={instanceInfo?.version ?? null} />)}
+                {tab === 'desktop' && (isElectron() ? <DesktopPanel instanceInfo={instanceInfo} /> : <DesktopDownloadPanel version={instanceInfo?.version ?? null} />)}
                 {tab === 'instance' && isAdmin && <InstancePanel />}
               </SettingsPanelSuspense>
             </div>

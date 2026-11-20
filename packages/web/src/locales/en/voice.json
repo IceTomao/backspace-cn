@@ -31,6 +31,7 @@
     "stopWatchingCamera": "Stop Watching Camera",
     "muteUser": "Mute User",
     "userVolume": "User Volume",
+    "volumeReset": "Reset to 100%",
     "eq": {
       "title": "Sound effect",
       "reset": "Reset",
@@ -48,7 +49,17 @@
       }
     }
   },
-  "incomingCall": {
+  "fullscreenChrome": {
+    "title": "Fullscreen display",
+    "hint": "Hide the overlays you do not need",
+    "reset": "Show all",
+    "hideHeader": "Channel header",
+    "hideLiveBadge": "LIVE badge",
+    "hideQualityBadge": "Quality and status badge",
+    "hideCaption": "Stream name bar",
+    "hideControlBar": "Call controls",
+    "hideControlBarHint": "Appears when the pointer reaches the bottom edge"
+  },  "incomingCall": {
     "status": "Incoming Voice Call..."
   },
   "grid": {

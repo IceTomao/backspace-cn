@@ -311,6 +311,7 @@ Additionally, `voiceStore` persists `lowLatencyStreamViewing: boolean` (default 
 - Sender parameters set the chosen bitrate ceiling, framerate, `degradationPreference`, and high network/DSCP priority, retrying at bounded intervals (`0, 250, 750, 2000, 5000 ms`) and re-asserting after reconnects or track restarts.
 
 ### Viewer Playout & Adaptive-Stream Isolation (`StreamTile`, `receiverJitterBuffer.ts`)
+- **One tile per participant.** `deriveGridTiles()` in `hooks/useLiveKit.ts` emits a single tile per participant: while `isScreenSharing` is true the participant's tile *is* the `StreamTile` (`key = \`${identity}:stream\``), otherwise it is the `UserTile`. Pushing a second "stream" card next to the user card doubled the footprint for one person and forced viewers to find the tile that actually carries the picture. Nothing is lost by dropping the user tile — the stream tile renders the same avatar, display name and `voice:stream.watch` action while nothing is subscribed, which is also why a share never auto-plays: `autoSubscribe: false` plus `autoSubscribe` gating on non-screen sources means the picture appears only after the viewer asks for it.
 - `StreamTile` binds watched screen-share tracks directly via `videoEl.srcObject = new MediaStream([liveScreenTrack])` rather than `liveLkScreenTrack.attach(videoEl)`, decoupling screen shares from `Room({ adaptiveStream: true })`'s `ResizeObserver` / `IntersectionObserver` so grid tiles and occluded windows never trigger SFU layer drops or pauses. `setStreamSubscription` explicitly requests `VideoQuality.HIGH` and `setEnabled(true)`.
 - `applyStreamReceiverJitterBuffer()` sets a `120 ms` playout buffer (`jitterBufferTarget = 120`, `playoutDelayHint = 0.12`) strictly on remote `ScreenShare` and `ScreenShareAudio` `RTCRtpReceiver`s — **never** touching `Microphone` or `Camera` receivers — so voice chat stays ultra-low latency while screen-share video/audio absorbs cross-ISP micro-bursts smoothly. Viewers can opt into 0 ms buffering via the "Ultra-Low Latency" context-menu toggle on remote stream tiles.
 
@@ -423,6 +424,15 @@ An overlay carrying `data-voice-chrome` (the `VOICE_CHROME_ATTR` export) holds t
 
 The docked (non-fullscreen) layout keeps plain `group-hover/voice` and ignores `revealed`. There hover is the right model: the voice surface is a panel with sidebars beside it, so leaving it is something the pointer can actually do. Devices without hover or with any coarse pointer (including hybrid touch laptops) keep both overlays visible in either layout, and `focus-within` keeps them reachable by keyboard.
 
+### User-configurable chrome (`voiceStore.fullscreenChrome`)
+Not everyone wants the same chrome over a fullscreen call, so `fullscreenChrome` in `voiceStore` carries five independent booleans — `hideHeader`, `hideLiveBadge`, `hideQualityBadge`, `hideCaption`, `hideControlBar` — all defaulting to `false`, i.e. everything visible exactly as before. The gear button in `VoiceControlBar` sits immediately before Disconnect and opens `VoiceChromeMenu` (a `usePortalContainer()` portal pinned while open, like the share menu). The flags only apply while `voiceFullscreen` is true: the docked panel's header and tile overlays are what identify the panel and the tiles, so hiding them there would be a bug rather than a preference.
+
+- `hideHeader` returns `hidden` from `voiceHeaderClassName()` — the header element stays mounted (tests and the reveal logic address it) but occupies no space.
+- `hideLiveBadge`, `hideQualityBadge`, `hideCaption` gate the three `StreamTile` overlays (the LIVE badge, the health/quality status cluster, the bottom name strip).
+- `hideControlBar` changes the reveal model instead of removing the bar: `VoiceControlBar` gains `hideUntilPointerNearBottom`, listens for `pointermove` and only reveals itself once `event.clientY` reaches the last 96 px of the viewport. Movement across the middle of the video no longer summons the controls, which is exactly what someone watching a stream complains about; reaching for the bottom edge still brings them back, so the bar is never unreachable.
+
+The record is persisted and sanitised twice — `sanitizeVoiceFullscreenChrome()` accepts only real booleans and fills missing keys from `DEFAULT_VOICE_FULLSCREEN_CHROME`, so a stale or partial persisted record degrades to "show the overlay" instead of leaking `undefined` into a className check.
+
 **Cross-browser API fallback.** iOS Safari (and iPadOS pre-16.4) does not implement the standard `Element.requestFullscreen()` on generic elements, so the enter-fullscreen effect probes for the API in this order:
 
 1. `el.requestFullscreen()` — standard
@@ -530,6 +540,23 @@ publisher from outbound stats; viewers receive the publisher's LiveKit
 connection-quality signal but cannot infer a remote encoder's CPU limitation.
 
 **Camera preset:** 1280x720, 2Mbps, 30fps, H.264
+
+### Join cues — `audio/joinCues.ts`
+The "somebody joined" cue used to be the single `user_join.ogg` sample, played through the shared SFX volume, which several people reported as too loud for a channel they sit in all day. `audio/joinCues.ts` now owns a preset table and stays free of store imports, so `utils/sfx.ts` can read the persisted choice without creating an `AudioManager → sfx → store → AudioManager` cycle:
+
+| Preset | Source | Notes |
+|--------|--------|-------|
+| `classic` | `public/sounds/user_join.ogg` | Shipped sample, kept as the default |
+| `soft` | synthesized | One 523 Hz sine, 260 ms |
+| `chime` | synthesized | 880 Hz + 1175 Hz overlap |
+| `marimba` | synthesized | Three triangle notes, 523/659/784 Hz |
+| `pop` | synthesized | Two short blips, 740/1109 Hz |
+| `none` | — | Silent |
+
+`AudioManager.playJoinSound(preset, { volume })` routes `classic` through the existing `playSound()` sample path and schedules the synthesized presets as `OscillatorNode` + `GainNode` pairs on the master bus with an 8 ms attack and an exponential tail, disconnecting both nodes in `onended`. Volume is independent of the SFX slider: `voiceStore.joinSoundVolume` (0–200, default **45**) drives `getJoinSoundVolume()` = `0.7 * volume / 100`, so the default is quieter than the old fixed 0.8 × SFX level. Both fields persist and are sanitised on rehydrate (`isJoinSoundPreset`, `clampJoinSoundVolume`), and the settings UI (`VoicePanel` → "Join Sound") offers the preset chips, a "Preview" button that plays the current choice at the current volume, and the dedicated slider.
+
+**Participant volume reset.** `voiceStore.resetParticipantVolume(userId)` deletes the entry instead of writing `100`, so a reset participant is indistinguishable from one nobody ever adjusted — both fall back to `participantVolumes.get(userId) ?? 100`. `VolumeSliderItem` exposes it as a "Reset to 100%" button beside the label, disabled while the value already is 100.
+
 
 ### Capture lifecycle on leave — `AudioManager.releaseInputStream()`
 

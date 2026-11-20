@@ -31,6 +31,7 @@
     "stopWatchingCamera": "Не смотреть камеру",
     "muteUser": "Заглушить пользователя",
     "userVolume": "Громкость пользователя",
+    "volumeReset": "Сбросить до 100 %",
     "eq": {
       "title": "Звук",
       "reset": "Сбросить",
@@ -48,7 +49,17 @@
       }
     }
   },
-  "incomingCall": {
+  "fullscreenChrome": {
+    "title": "Полноэкранный режим",
+    "hint": "Скройте ненужные наложения",
+    "reset": "Показать все",
+    "hideHeader": "Заголовок канала",
+    "hideLiveBadge": "Метка LIVE",
+    "hideQualityBadge": "Значок качества и состояния",
+    "hideCaption": "Строка с названием трансляции",
+    "hideControlBar": "Управление звонком",
+    "hideControlBarHint": "Появляется, когда курсор достигает нижнего края"
+  },  "incomingCall": {
     "status": "Входящий голосовой звонок…"
   },
   "grid": {

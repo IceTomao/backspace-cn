@@ -70,7 +70,8 @@ for (const file of [`sharp-win32-x64-${sharpManifest.version}.node`, 'libvips-42
     readFileSync(path.join(sharpRoot, 'lib', file))), `Sharp runtime file differs: ${file}`);
 }
 const config = asar.extractFile(archive, 'dist/buildConfig.js').toString();
-assert(config.includes("defaultInstanceUrl: 'https://chat.kevz.me:2096'"));
+assert(config.includes("defaultInstanceUrl: ''"), 'Client must not bake in a default operator instance');
+assert(!config.includes('chat.kevz.me'), 'Legacy operator URL must not be shipped');
 assert(config.includes("defaultLanguage: 'zh'"));
 assert(config.includes('updatesEnabled: true'));
 const nativePath = 'node_modules/uiohook-napi/prebuilds/win32-x64/uiohook-napi.node';

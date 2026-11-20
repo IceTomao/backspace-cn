@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useFormatters } from '../../i18n/formatters';
 import { Avatar } from '../ui/Avatar';
 import { useVoiceStore } from '../../stores/voiceStore';
+import { useUIStore } from '../../stores/uiStore';
 import { useContextMenuStore, type ContextMenuItem } from '../../stores/contextMenuStore';
 import { getActiveRoom, setStreamSubscription } from '../../hooks/useLiveKit';
 import { stopScreenShare, changeScreenShare } from '../../utils/screenShare';
@@ -206,6 +207,13 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const watchingStreams = useVoiceStore((s) => s.watchingStreams);
+  const voiceFullscreen = useUIStore((s) => s.voiceFullscreen);
+  const chrome = useVoiceStore((s) => s.fullscreenChrome);
+  // Only fullscreen honours these: the docked grid is a panel whose overlay
+  // tells the user which tile belongs to which stream.
+  const hideLiveBadge = voiceFullscreen && chrome.hideLiveBadge;
+  const hideQualityBadge = voiceFullscreen && chrome.hideQualityBadge;
+  const hideCaption = voiceFullscreen && chrome.hideCaption;
 
   const { participant } = tile;
   const isLocal = participant.isLocal;
@@ -551,14 +559,16 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
       )}
 
       {/* LIVE badge — top left */}
-      <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-accent-rose rounded text-[11px] font-bold text-white uppercase tracking-wide">
-        {t('voice:badges.live')}
-        {dynamicRange === 'hdr' && <span className="ml-1.5">HDR</span>}
-      </div>
+      {!hideLiveBadge && (
+        <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-accent-rose rounded text-[11px] font-bold text-white uppercase tracking-wide">
+          {t('voice:badges.live')}
+          {dynamicRange === 'hdr' && <span className="ml-1.5">HDR</span>}
+        </div>
+      )}
 
       {/* Stream status — in focus mode this is the visual peer of the Grid
           action: same top edge, height, radius, and surface treatment. */}
-      {(healthWarning || (qualityBadge && hasVideo)) && (
+      {!hideQualityBadge && (healthWarning || (qualityBadge && hasVideo)) && (
         <div className={`absolute top-2 left-20 ${large ? 'right-24' : 'right-2'} flex items-start justify-end gap-1.5 pointer-events-none`}>
           {healthWarning && (
             <div className={`${large ? 'h-7 rounded-lg' : 'rounded'} min-w-0 max-w-full px-2 bg-black/75 border border-status-idle/40 flex items-center text-[10px] leading-[15px] text-white/90 truncate`}>
@@ -577,7 +587,7 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
       )}
 
       {/* Bottom overlay */}
-      {hasVideo && isWatching && <div data-testid="stream-tile-caption" className="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/70 via-black/30 to-transparent">
+      {hasVideo && isWatching && !hideCaption && <div data-testid="stream-tile-caption" className="absolute bottom-0 left-0 right-0 px-3 py-2 bg-gradient-to-t from-black/70 via-black/30 to-transparent">
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
             {/* Screen icon */}

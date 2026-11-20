@@ -6,7 +6,7 @@ import { useSpaceStore, isDmChannel, getChannelOrigin, getMyUserIdForOrigin } fr
 import { AudioManager } from '../../audio/AudioManager';
 import { shouldPlayMessageSound } from '../../utils/notificationFilters';
 import { selectVoiceStateSound } from '../../utils/voiceSoundTransitions';
-import { getSfxVolume } from '../../utils/sfx';
+import { getJoinSoundPreset, getJoinSoundVolume, getSfxVolume } from '../../utils/sfx';
 import { useChannelNotificationStore } from '../../stores/channelNotificationStore';
 
 /**
@@ -75,6 +75,10 @@ export function SoundController() {
       if (isInitialMount.current) return;
 
       const sfxOpts = { volume: getSfxVolume() };
+      // The join cue has its own preset and volume so it can be made quieter
+      // (or silenced) without touching every other interface sound.
+      const joinOpts = { volume: getJoinSoundVolume() };
+      const joinPreset = getJoinSoundPreset();
 
       // -------- Effective mute / deafen --------
       // Only play on transitions where BOTH prev and current samples were taken
@@ -108,7 +112,7 @@ export function SoundController() {
         audioManager.playSound('disconnect', sfxOpts);
       }
       if (justConnected) {
-        audioManager.playSound('user_join', sfxOpts);
+        void audioManager.playJoinSound(joinPreset, joinOpts);
       }
       prev.current.isLiveKitConnected = state.isLiveKitConnected;
 
@@ -138,7 +142,7 @@ export function SoundController() {
         // user_join (others)
         state.participants.forEach((p) => {
           if (!prev.current.participantIds.has(p.userId) && !isSelf(p.userId)) {
-            audioManager.playSound('user_join', sfxOpts);
+            void audioManager.playJoinSound(joinPreset, joinOpts);
           }
         });
         // user_leave (others)

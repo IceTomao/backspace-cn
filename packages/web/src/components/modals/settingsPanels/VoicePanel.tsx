@@ -8,6 +8,9 @@ import { AudioOutputSection } from './AudioOutputSection';
 import { isAndroid } from '../../../platform/android';
 import { AndroidAudioSettings } from '../../android/AndroidAudioSettings';
 import { useUIStore } from '../../../stores/uiStore';
+import { AudioManager } from '../../../audio/AudioManager';
+import { JOIN_SOUND_PRESETS, JOIN_SOUND_VOLUME_MAX } from '../../../audio/joinCues';
+import { getJoinSoundVolume } from '../../../utils/sfx';
 
 export function VoicePanel() {
   const { t } = useTranslation(['settings']);
@@ -22,6 +25,10 @@ export function VoicePanel() {
   const setSoundEffectVolume = useVoiceStore((s) => s.setSoundEffectVolume);
   const messageSoundAllChannels = useVoiceStore((s) => s.messageSoundAllChannels);
   const setMessageSoundAllChannels = useVoiceStore((s) => s.setMessageSoundAllChannels);
+  const joinSoundPreset = useVoiceStore((s) => s.joinSoundPreset);
+  const setJoinSoundPreset = useVoiceStore((s) => s.setJoinSoundPreset);
+  const joinSoundVolume = useVoiceStore((s) => s.joinSoundVolume);
+  const setJoinSoundVolume = useVoiceStore((s) => s.setJoinSoundVolume);
   const pipEnabled = useVoiceStore((s) => s.pipEnabled);
   const setPipEnabled = useVoiceStore((s) => s.setPipEnabled);
   const isMobile = useUIStore((s) => s.isMobile);
@@ -64,6 +71,64 @@ export function VoicePanel() {
               </div>
             </div>
             <Toggle enabled={messageSoundAllChannels} onChange={setMessageSoundAllChannels} />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[11px] font-semibold text-txt-tertiary uppercase tracking-wider mb-1.5">
+          {t('settings:voice.joinSound.sectionTitle')}
+        </div>
+        <div className="rounded-lg bg-white/[0.03] border border-white/[0.04] p-3.5">
+          <div className="py-1">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm text-txt-primary">{t('settings:voice.joinSound.presetLabel')}</div>
+              <button
+                type="button"
+                onClick={() => {
+                  void AudioManager.getInstance().playJoinSound(joinSoundPreset, {
+                    volume: getJoinSoundVolume(),
+                  });
+                }}
+                disabled={joinSoundPreset === 'none'}
+                className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors disabled:opacity-40 disabled:hover:text-txt-tertiary"
+              >
+                {t('settings:voice.joinSound.preview')}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {JOIN_SOUND_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setJoinSoundPreset(preset)}
+                  className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
+                    joinSoundPreset === preset
+                      ? 'bg-white/[0.09] text-txt-primary'
+                      : 'bg-white/[0.03] text-txt-secondary hover:bg-white/[0.06]'
+                  }`}
+                >
+                  {t(`settings:voice.joinSound.presets.${preset}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="py-1">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm text-txt-primary">{t('settings:voice.joinSound.volumeLabel')}</div>
+              <div className="text-xs text-txt-tertiary tabular-nums">{f.formatPercent(joinSoundVolume)}</div>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={JOIN_SOUND_VOLUME_MAX}
+              value={joinSoundVolume}
+              onChange={(e) => setJoinSoundVolume(Number(e.target.value))}
+              className="w-full h-1.5 rounded-full appearance-none cursor-pointer bg-surface-base [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md"
+              style={{
+                background: `linear-gradient(to right, rgb(var(--accent-primary)) 0%, rgb(var(--accent-primary)) ${joinSoundVolume / 2}%, rgb(var(--interactive-muted)) ${joinSoundVolume / 2}%, rgb(var(--interactive-muted)) 100%)`,
+              }}
+            />
           </div>
         </div>
       </div>

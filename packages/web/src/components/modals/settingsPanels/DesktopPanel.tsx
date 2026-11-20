@@ -2,9 +2,18 @@ import { serverLocation } from '../../../platform/android';
 import { useState, useEffect } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import type { InstanceInfoResponse } from '@backspace/shared';
 import { Toggle } from '../../ui/Toggle';
 import { useUpdateStore } from '../../../stores/updateStore';
 import { useFormatters, type Formatters } from '../../../i18n/formatters';
+
+type CloseBehavior = 'ask' | 'tray' | 'quit';
+
+const CLOSE_BEHAVIOR_OPTIONS = [
+  { value: 'ask', labelKey: 'desktop.closeBehavior.ask' },
+  { value: 'tray', labelKey: 'desktop.closeBehavior.tray' },
+  { value: 'quit', labelKey: 'desktop.closeBehavior.quit' },
+] as const;
 
 function AutoLaunchSettings() {
   const { t } = useTranslation('settings');
@@ -72,6 +81,82 @@ function AutoLaunchSettings() {
         <Toggle enabled={startMinimized} onChange={handleStartMinimizedChange} disabled={busy || !openAtLogin} />
       </div>
     </>
+  );
+}
+
+/**
+ * What the window close button does. Hidden when the running shell predates the
+ * preference (the methods are optional in electron.d.ts), and sandboxed builds
+ * never expose it because main returns `ask` without touching disk.
+ */
+function CloseBehaviorSettings() {
+  const { t } = useTranslation('settings');
+  const [behavior, setBehavior] = useState<CloseBehavior>('ask');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const api = window.backspace;
+    if (!api?.getCloseBehavior) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    api.getCloseBehavior().then((value) => {
+      if (cancelled) return;
+      setBehavior(value);
+      setLoading(false);
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const choose = async (next: CloseBehavior) => {
+    const api = window.backspace;
+    if (!api?.setCloseBehavior || busy || next === behavior) return;
+    setBusy(true);
+    try {
+      setBehavior(await api.setCloseBehavior(next));
+    } catch (err) {
+      console.error('[closeBehavior] setCloseBehavior failed:', err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading || !window.backspace?.getCloseBehavior) return null;
+
+  return (
+    <div className="py-1">
+      <div className="text-sm text-txt-primary">{t('desktop.closeBehavior.label')}</div>
+      <div className="text-xs text-txt-tertiary mt-0.5">
+        {t('desktop.closeBehavior.description')}
+      </div>
+      <div
+        role="radiogroup"
+        aria-label={t('desktop.closeBehavior.label')}
+        className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-white/[0.04] p-1"
+      >
+        {CLOSE_BEHAVIOR_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={behavior === option.value}
+            onClick={() => void choose(option.value)}
+            disabled={busy}
+            className={`px-2 py-1.5 text-xs font-medium rounded-md transition-colors disabled:opacity-50 ${
+              behavior === option.value
+                ? 'bg-white/[0.08] text-txt-primary'
+                : 'text-txt-tertiary hover:text-txt-secondary hover:bg-white/[0.04]'
+            }`}
+          >
+            {t(option.labelKey)}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -227,10 +312,12 @@ function UpdateSettings() {
   );
 }
 
-export function DesktopPanel() {
+export function DesktopPanel({ instanceInfo }: { instanceInfo?: InstanceInfoResponse | null }) {
   const { t } = useTranslation('settings');
   const initialize = useUpdateStore((s) => s.initialize);
   const [sandboxed, setSandboxed] = useState<boolean | null>(null);
+  const instanceUrl = serverLocation().origin;
+  const instanceName = instanceInfo?.name?.trim() || instanceUrl;
 
   useEffect(() => initialize(), [initialize]);
   useEffect(() => {
@@ -250,18 +337,19 @@ export function DesktopPanel() {
 
       <div className="rounded-lg bg-white/[0.03] border border-white/[0.04] p-3.5 space-y-3">
         {sandboxed === false && <AutoLaunchSettings />}
+        {sandboxed === false && <CloseBehaviorSettings />}
         <UpdateSettings />
 
         <div className="border-t border-white/[0.04]" />
 
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm text-txt-primary font-medium">{serverLocation().origin}</div>
-            <div className="text-xs text-txt-tertiary mt-0.5">{t('desktop.instance.current')}</div>
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm text-txt-primary font-medium truncate">{instanceName}</div>
+            <div className="text-xs text-txt-tertiary mt-0.5 truncate" title={instanceUrl}>{instanceUrl}</div>
           </div>
           <button
             onClick={() => window.backspace?.clearInstanceUrl()}
-            className="px-3 py-1.5 text-sm text-txt-secondary hover:text-txt-primary bg-white/[0.04] hover:bg-white/[0.08] rounded-lg transition-colors"
+            className="px-3 py-1.5 text-sm text-txt-secondary hover:text-txt-primary bg-white/[0.04] hover:bg-white/[0.08] rounded-lg transition-colors shrink-0"
           >
             {t('desktop.instance.change')}
           </button>

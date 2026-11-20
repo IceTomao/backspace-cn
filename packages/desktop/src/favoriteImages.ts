@@ -123,7 +123,7 @@ export class FavoriteImageStore {
 }
 
 export function registerFavoriteImages(
-  ipc: IpcMain, getWindow: () => BrowserWindow | null, getInstance: () => string, root: string,
+  ipc: IpcMain, getWindow: () => BrowserWindow | null, getInstance: () => string | null, root: string,
   assets: { script: string; styles: string },
 ): () => void {
   const store = new FavoriteImageStore(root);
@@ -141,7 +141,8 @@ export function registerFavoriteImages(
     if (!win || win.isDestroyed() || event.sender !== win.webContents ||
         !event.senderFrame || event.senderFrame !== win.webContents.mainFrame) throw new Error('收藏请求被拒绝');
     const source = new URL(event.senderFrame.url);
-    if (!['https:', 'http:'].includes(source.protocol) || source.origin !== new URL(getInstance()).origin) {
+    const configured = getInstance();
+    if (!configured || !['https:', 'http:'].includes(source.protocol) || source.origin !== new URL(configured).origin) {
       throw new Error('收藏请求来源无效');
     }
     return win;

@@ -31,6 +31,7 @@
     "stopWatchingCamera": "Kamera nicht mehr ansehen",
     "muteUser": "Nutzer stummschalten",
     "userVolume": "Nutzerlautstärke",
+    "volumeReset": "Auf 100 % zurücksetzen",
     "eq": {
       "title": "Klang",
       "reset": "Zurücksetzen",
@@ -48,7 +49,17 @@
       }
     }
   },
-  "incomingCall": {
+  "fullscreenChrome": {
+    "title": "Vollbildanzeige",
+    "hint": "Überlagerungen ausblenden, die du nicht brauchst",
+    "reset": "Alle anzeigen",
+    "hideHeader": "Kanal-Kopfzeile",
+    "hideLiveBadge": "LIVE-Markierung",
+    "hideQualityBadge": "Qualitäts- und Statusanzeige",
+    "hideCaption": "Namensleiste des Streams",
+    "hideControlBar": "Anrufsteuerung",
+    "hideControlBarHint": "Erscheint, wenn der Zeiger den unteren Rand erreicht"
+  },  "incomingCall": {
     "status": "Eingehender Sprachanruf…"
   },
   "grid": {

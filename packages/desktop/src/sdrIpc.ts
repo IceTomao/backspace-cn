@@ -11,9 +11,14 @@ import { validateHdrColor } from './hdrColor';
 export function registerSdrNative(
   ipc: IpcMain,
   getWindow: () => BrowserWindow | null,
-  getInstance: () => string,
+  getInstance: () => string | null,
   resolveCaptureTarget: (sourceId: string) => Promise<SdrCaptureTarget | null>,
 ): () => void {
+  const instanceOrigin = (): string => {
+    const configured = getInstance();
+    if (!configured) throw new Error('SDR request denied');
+    return new URL(configured).origin;
+  };
   let generation = 0;
   let activeLease: { identity: string; requestId: string; revoke: () => Promise<void> } | null = null;
 
@@ -48,7 +53,7 @@ export function registerSdrNative(
         event.senderFrame !== window.webContents.mainFrame ||
         !event.senderFrame ||
         !['https:', 'http:'].includes(new URL(event.senderFrame.url).protocol) ||
-        new URL(event.senderFrame.url).origin !== new URL(getInstance()).origin) {
+        new URL(event.senderFrame.url).origin !== instanceOrigin()) {
       throw new Error('SDR request denied');
     }
     return window;
@@ -136,7 +141,7 @@ export function registerSdrNative(
       throw new Error('Selected capture source could not be resolved');
     }
 
-    const origin = new URL(getInstance()).origin;
+    const origin = instanceOrigin();
     const session = owner.webContents.session;
     let newLease: { identity: string; requestId: string; revoke: () => Promise<void> } | null = null;
 

@@ -130,6 +130,20 @@
         "description": "关闭（默认）：仅在被提及和收到私信时播放。开启：每条频道消息都播放。"
       }
     },
+    "joinSound": {
+      "sectionTitle": "连接提示音",
+      "presetLabel": "有人加入频道时的提示音",
+      "preview": "试听",
+      "volumeLabel": "提示音音量",
+      "presets": {
+        "classic": "经典",
+        "soft": "柔和",
+        "chime": "清脆",
+        "marimba": "木琴",
+        "pop": "轻响",
+        "none": "关闭"
+      }
+    },
     "pip": {
       "sectionTitle": "悬浮窗",
       "showOnSwitch": {
@@ -419,6 +433,13 @@
         "label": "启动最小化",
         "description": "开始隐藏在系统托盘中，而不是显示窗口"
       }
+    },
+    "closeBehavior": {
+      "label": "关闭窗口时",
+      "description": "选择关闭按钮的行为，可随时更改。",
+      "ask": "每次询问",
+      "tray": "最小化到托盘",
+      "quit": "退出"
     },
     "updates": {
       "appName": "Backspace Desktop",

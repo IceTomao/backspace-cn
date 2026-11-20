@@ -1,5 +1,13 @@
 /** Type augmentation for the Electron IPC bridge exposed by preload.ts */
 
+type DesktopCloseBehavior = 'ask' | 'tray' | 'quit';
+
+interface DesktopInstanceHistoryEntry {
+  url: string;
+  name: string | null;
+  lastConnectedAt: number;
+}
+
 // Recovery mode types (Task 11)
 type RecoveryReasonCode = 'load-failed' | 'render-gone' | 'unresponsive' | 'renderer-stalled';
 // 'available-manual': an update exists but this build cannot install it in
@@ -149,8 +157,15 @@ interface BackspaceElectronAPI {
 
   // Instance URL management
   getInstanceUrl: () => Promise<string | null>;
-  setInstanceUrl: (url: string) => Promise<void>;
+  setInstanceUrl: (url: string, serverName?: string | null) => Promise<void>;
   clearInstanceUrl: () => Promise<void>;
+  getInstanceHistory?: () => Promise<DesktopInstanceHistoryEntry[]>;
+  removeInstanceHistory?: (url: string) => Promise<void>;
+
+  // Close behavior: ask / minimize to tray / quit. Optional because an older
+  // desktop shell does not expose the preference.
+  getCloseBehavior?: () => Promise<DesktopCloseBehavior>;
+  setCloseBehavior?: (behavior: DesktopCloseBehavior) => Promise<DesktopCloseBehavior>;
 
   // Language: the renderer owns the choice; main relabels its tray and menus.
   // Optional because an older desktop app does not expose it.

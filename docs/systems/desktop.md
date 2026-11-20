@@ -62,7 +62,7 @@ interface WindowState {
 | Event | Behavior |
 |-------|----------|
 | resize / move | Debounced save (300ms) via `saveWindowState()` |
-| close | Immediate save before hide |
+| close | Immediate save, then the configured close behavior (`ask` / minimize to tray / quit) |
 | maximize | Saves `isMaximized: true`; position/size stored from `getNormalBounds()` (pre-maximize geometry) |
 | restore | Validates saved bounds against current displays; strips position if window would be off-screen |
 
@@ -70,10 +70,29 @@ Bounds validation (`validateWindowBounds`): Uses `screen.getDisplayMatching()` t
 
 ### Close Behavior
 
-Close does **not** quit the app. The `close` event is intercepted; the window is hidden instead. The `isQuitting` flag gates actual destruction. True quit only happens via:
+The window close button is configurable. The preference lives in
+`{userData}/close-behavior.json` as `{ version: 1, behavior }`:
+
+| Value | Behavior |
+|-------|----------|
+| `ask` (default) | `dialog.showMessageBox` with **Minimize to tray / Quit / Cancel**, `defaultId` = Minimize and `cancelId` = Cancel, plus a "Remember my choice" checkbox that persists the picked action. |
+| `tray` | Intercept `close` and hide the window; the app keeps running in the tray. |
+| `quit` | Intercept `close` and call `requestQuit()` so `before-quit` cleanup (activity detection, keybinds, window state) still runs. |
+
+`loadCloseBehavior()` is synchronous so the `close` handler can read the
+preference without racing `event.preventDefault()`. `closePromptOpen` prevents a
+second close event from stacking another dialog. The `isQuitting` flag still
+gates actual destruction: `requestQuit()` sets it before `app.quit()` re-fires
+`close`, and that re-entrant event is allowed through. True quit only happens
+via:
 - Tray menu "Quit"
+- Settings → Desktop → When closing the window → Quit
 - `app.quit()` (Cmd+Q on macOS)
 - `before-quit` lifecycle event
+
+In Flatpak builds `get-close-behavior` returns `ask` and `set-close-behavior`
+refuses writes, mirroring auto-launch's `isSandboxed()` early return; the
+settings row is hidden.
 
 ### URL Loading Priority
 
@@ -81,7 +100,7 @@ Close does **not** quit the app. The `close` event is intercepted; the window is
 2. Saved instance URL from `{userData}/instance-url.json`
 3. No URL: loads `resources/instance-picker.html` (local HTML file)
 
-Instance URL management functions: `loadInstanceUrl()`, `saveInstanceUrl()`, `clearInstanceUrl()` — all operate on `{userData}/instance-url.json`.
+Instance URL management functions: `loadInstanceStore()`, `recordInstance()`, `clearInstanceUrl()`, `getInstanceHistory()`, `removeInstanceFromHistory()` — all operate on `{userData}/instance-url.json`. The store keeps the active URL plus up to five remembered servers (`{ url, name, lastConnectedAt }`, newest first, de-duplicated by URL). Reads also migrate the legacy `{ url }` shape.
 
 ### Interface Scale
 
@@ -117,7 +136,16 @@ Dev-mode caveat: if a developer runs Electron pointed at the Vite dev server (`h
 
 ## Instance Picker
 
-When no instance URL is configured, the app loads `resources/instance-picker.html` — a self-contained HTML page where the user enters their Backspace instance URL. The renderer communicates the chosen URL back via the `set-instance-url` IPC handler.
+When no instance URL is configured, the app loads `resources/instance-picker.html` — a self-contained HTML page where the user enters their Backspace instance URL. The renderer communicates the chosen URL back via the `set-instance-url` IPC handler, passing the server name discovered by the `/api/instance/info` probe as the optional second argument so the picker can label the row.
+
+### Remembered instances
+
+`get-instance-history` returns the remembered servers (newest first). The
+picker renders one row per server: the server name is the primary label, the
+URL is secondary, clicking a row fills the input and re-runs the probe, and a
+separate remove button calls `remove-instance-history`. Removing a row does not
+change the active URL. The section hides when the history is empty. A
+successful probe shows the server name and version before navigating.
 
 After navigation (both to an instance URL and back to the picker), the main process forces Electron to re-evaluate drag regions by momentarily resizing the window (+1px then back).
 
@@ -869,7 +897,7 @@ All handlers registered in `main.ts:registerIpcHandlers()`.
 | `set-badge-count` | R->M | `number` | Set dock/taskbar badge |
 | `minimize-window` | R->M | — | Minimize window |
 | `maximize-window` | R->M | — | Toggle maximize/unmaximize |
-| `close-window` | R->M | — | Close (hides to tray) |
+| `close-window` | R->M | — | Close (routes through the configured close behavior) |
 | `install-update` | R->M | — | `quitAndInstall()` on auto-capable builds, otherwise opens the releases page. 4s watchdog flips the status to `failed` if the app is still running |
 | `check-for-updates` | R->M | — | `autoUpdater.checkForUpdates()` |
 | `dismiss-update` | R->M | `{ version }` | Persists the dismissal and re-pushes the snapshot |
@@ -886,8 +914,12 @@ All handlers registered in `main.ts:registerIpcHandlers()`.
 | Channel | Direction | Returns | Action |
 |---------|-----------|---------|--------|
 | `get-instance-url` | R->M | `string \| null` | Load saved instance URL |
-| `set-instance-url` | R->M | `void` | Save URL, navigate window to it |
-| `clear-instance-url` | R->M | `void` | Delete saved URL, load picker |
+| `set-instance-url` | R->M | `void` | Save URL + optional server name to history, navigate window to it |
+| `clear-instance-url` | R->M | `void` | Clear the active URL (history is kept), load picker |
+| `get-instance-history` | R->M | `RememberedInstance[]` | Remembered servers, newest first |
+| `remove-instance-history` | R->M | `void` | Remove one URL from the remembered list |
+| `get-close-behavior` | R->M | `'ask' \| 'tray' \| 'quit'` | Read the close preference (`ask` when sandboxed) |
+| `set-close-behavior` | R->M | `'ask' \| 'tray' \| 'quit'` | Validate + persist the close preference (no write when sandboxed) |
 | `get-app-version` | R->M | `string` | `app.getVersion()` |
 | `get-auto-launch-settings` | R->M | `{ openAtLogin, startMinimized }` | Merge OS state with saved prefs |
 | `set-auto-launch-settings` | R->M | `{ openAtLogin, startMinimized }` | Save + apply to OS |
@@ -930,7 +962,7 @@ Detection: `typeof window.backspace !== 'undefined'` (see `platform.ts:isElectro
 | `platform` | `NodeJS.Platform` | read | `process.platform` value |
 | `minimize()` | fire | R->M | |
 | `maximize()` | fire | R->M | Toggles maximize |
-| `close()` | fire | R->M | Hides to tray |
+| `close()` | fire | R->M | Routes through the configured close behavior |
 | `showNotification(title, body)` | fire | R->M | |
 | `setBadgeCount(count)` | fire | R->M | |
 | `onUpdateAvailable(cb)` | listen | M->R | |
@@ -944,8 +976,12 @@ Detection: `typeof window.backspace !== 'undefined'` (see `platform.ts:isElectro
 | `onScreenShareSources(cb)` | listen | M->R | |
 | `selectScreenSource(id, audio?)` | fire | R->M | |
 | `getInstanceUrl()` | invoke | R->M | Returns `Promise<string \| null>` |
-| `setInstanceUrl(url)` | invoke | R->M | Returns `Promise<void>` |
+| `setInstanceUrl(url, serverName?)` | invoke | R->M | Returns `Promise<void>`; records the server name when the probe learned it |
 | `clearInstanceUrl()` | invoke | R->M | Returns `Promise<void>` |
+| `getInstanceHistory()` | invoke | R->M | Returns `Promise<RememberedInstance[]>`. Optional |
+| `removeInstanceHistory(url)` | invoke | R->M | Returns `Promise<void>`. Optional |
+| `getCloseBehavior()` | invoke | R->M | Returns `Promise<'ask' \| 'tray' \| 'quit'>`. Optional |
+| `setCloseBehavior(behavior)` | invoke | R->M | Returns the persisted behavior. Optional |
 | `getAutoLaunchSettings()` | invoke | R->M | |
 | `setAutoLaunchSettings(s)` | invoke | R->M | |
 | `onActivityDetected(cb)` | listen | M->R | Returns cleanup function `() => void` |
@@ -970,6 +1006,8 @@ The four update-snapshot methods are declared **optional** in
 `electron.d.ts`. A client served by a newer instance can be running inside an
 older desktop app that does not expose them, so every call site feature-detects.
 `updateStore.ts` falls back to the legacy per-event channels when they are absent.
+The instance-history and close-behavior methods are optional for the same
+reason; the picker and `DesktopPanel.tsx` check before calling them.
 
 Direction legend: **fire** = `ipcRenderer.send` (no response), **invoke** = `ipcRenderer.invoke` (returns Promise), **listen** = `ipcRenderer.on` (event subscription).
 
@@ -1453,7 +1491,8 @@ Earlier builds wrote to `<appData>/@backspace/desktop/`. On first launch after t
 
 | File | Content | Purpose |
 |------|---------|---------|
-| `instance-url.json` | `{ url: string }` | Saved instance URL |
+| `instance-url.json` | `{ version: 2, url: string \| null, history: RememberedInstance[] }` | Active instance + up to five remembered servers |
+| `close-behavior.json` | `{ version: 1, behavior: 'ask' \| 'tray' \| 'quit' }` | What the window close button does |
 | `window-state.json` | `WindowState` | Window position, size, maximize state |
 | `auto-launch.json` | `AutoLaunchSettings` | Open at login + start minimized prefs |
 | `update-state.json` | `{ dismissedVersion }` | The update version the user waved away. Belongs to the app, not to an instance |

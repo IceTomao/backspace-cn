@@ -17,16 +17,19 @@ vi.mock('electron', () => ({
 vi.mock('./instanceUrl', async () => {
   const { DESKTOP_BUILD } = await import('./buildConfig');
   return {
-    getResolvedInstanceUrl: () => DESKTOP_BUILD.defaultInstanceUrl,
+    getResolvedInstanceUrl: () => DESKTOP_BUILD.defaultInstanceUrl || null,
     getPickerPath: () => 'instance-picker.html',
   };
 });
 
 describe('Chinese distribution', () => {
-  it('uses environment, saved instance, then public default in that order', () => {
+  it('uses environment, saved instance, then no default in that order', () => {
     expect(resolveInstanceUrl('https://managed.example', 'https://saved.example')).toBe('https://managed.example');
     expect(resolveInstanceUrl(undefined, 'https://saved.example')).toBe('https://saved.example');
-    expect(resolveInstanceUrl(undefined, null)).toBe('https://chat.kevz.me:2096');
+    expect(resolveInstanceUrl(undefined, null)).toBeNull();
+    expect(resolveInstanceUrl('   ', '  ')).toBeNull();
+    expect(resolveInstanceUrl('  https://managed.example  ', null)).toBe('https://managed.example');
+    expect(DESKTOP_BUILD.defaultInstanceUrl).toBe('');
     expect(DESKTOP_BUILD.updatesEnabled).toBe(true);
   });
 
@@ -86,12 +89,13 @@ describe('Chinese distribution', () => {
     expect(builder).toMatch(/repo:\s*backspace-cn/);
   });
 
-  it('retries the default instance but leaves an explicit switch on the picker', () => {
+  it('shows the picker when no instance is configured and on an explicit switch', () => {
     const win = { loadURL: vi.fn(), loadFile: vi.fn(), show: vi.fn(), focus: vi.fn() };
     setMainWindow(win as never);
     handleRecoveryAction('reload');
-    expect(win.loadURL).toHaveBeenCalledWith(DESKTOP_BUILD.defaultInstanceUrl);
-    win.loadURL.mockClear();
+    expect(win.loadURL).not.toHaveBeenCalled();
+    expect(win.loadFile).toHaveBeenCalledWith('instance-picker.html', { query: { lang: 'zh' } });
+    win.loadFile.mockClear();
     handleRecoveryAction('change-instance');
     expect(win.loadURL).not.toHaveBeenCalled();
     expect(win.loadFile).toHaveBeenCalledWith('instance-picker.html', { query: { lang: 'zh' } });

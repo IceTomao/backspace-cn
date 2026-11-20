@@ -406,11 +406,19 @@ contextBridge.exposeInMainWorld('backspace', {
 
   // Instance URL management
   getInstanceUrl: () => ipcRenderer.invoke('get-instance-url'),
-  setInstanceUrl: (url: string) => ipcRenderer.invoke('set-instance-url', url),
+  setInstanceUrl: (url: string, serverName?: string | null) =>
+    ipcRenderer.invoke('set-instance-url', url, serverName),
   clearInstanceUrl: () => ipcRenderer.invoke('clear-instance-url'),
+  getInstanceHistory: () => ipcRenderer.invoke('get-instance-history'),
+  removeInstanceHistory: (url: string) => ipcRenderer.invoke('remove-instance-history', url),
 
   // Language: the renderer owns the choice; main relabels its tray and menus.
   setLanguage: (language: string) => ipcRenderer.send('set-language', language),
+
+  // Close behavior: ask / minimize to tray / quit.
+  getCloseBehavior: () => ipcRenderer.invoke('get-close-behavior'),
+  setCloseBehavior: (behavior: 'ask' | 'tray' | 'quit') =>
+    ipcRenderer.invoke('set-close-behavior', behavior),
 
   // Auto-launch settings
   getAutoLaunchSettings: () => ipcRenderer.invoke('get-auto-launch-settings'),
