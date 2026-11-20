@@ -90,9 +90,9 @@ function openMenuByContextMenu(target: HTMLElement) {
 }
 
 function getMenuLabels(): string[] {
-  // Menu items render as <button> elements inside the portal.
-  // Use the action-button class fingerprint via role lookup.
-  const buttons = document.querySelectorAll<HTMLButtonElement>('div.fixed.z-\\[200\\] button');
+  // Menu items render as <button> elements inside the portal; the panel carries
+  // a stable data attribute so this helper does not track its z-index class.
+  const buttons = document.querySelectorAll<HTMLButtonElement>('[data-context-menu-panel] button');
   return Array.from(buttons).map((b) => b.textContent?.trim() ?? '');
 }
 
@@ -112,7 +112,7 @@ describe('DmMemberRow — menu visibility', () => {
       'Remove Friend',
     ]);
     // Separator should be present between kick and remove-friend.
-    const separators = document.querySelectorAll('div.fixed.z-\\[200\\] > div.h-px');
+    const separators = document.querySelectorAll('[data-context-menu-panel] > div.h-px');
     expect(separators.length).toBe(1);
   });
 
@@ -138,7 +138,7 @@ describe('DmMemberRow — menu visibility', () => {
       'Transfer Ownership',
       'Remove from Group',
     ]);
-    const separators = document.querySelectorAll('div.fixed.z-\\[200\\] > div.h-px');
+    const separators = document.querySelectorAll('[data-context-menu-panel] > div.h-px');
     expect(separators.length).toBe(0);
   });
 
@@ -150,7 +150,7 @@ describe('DmMemberRow — menu visibility', () => {
     });
     openMenuByContextMenu(container.querySelector('[data-dm-member-row]')!);
     expect(getMenuLabels()).toEqual(['View Profile', 'Remove Friend']);
-    const separators = document.querySelectorAll('div.fixed.z-\\[200\\] > div.h-px');
+    const separators = document.querySelectorAll('[data-context-menu-panel] > div.h-px');
     expect(separators.length).toBe(0);
   });
 

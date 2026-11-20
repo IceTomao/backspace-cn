@@ -343,3 +343,43 @@ Every floating surface places itself with `computeFloatingPosition` (`hooks/useF
 | `GroupDmSettings.tsx` (modal hero + member-row previews) | varies | `modal` | Modal Overview tab |
 | `MobileGroupDmInfo.tsx` (pushed-screen hero) | 80 | `modal` | Mobile info screen hero |
 | `MobileDmsScreen.tsx` (DM list rows) | 40 | `channel` | Mobile sidebar parity with desktop `DmListItem` |
+
+## Layering
+
+Stacking order is expressed with arbitrary `z-[n]` utilities. The ladder is
+coarse on purpose — each step exists because something must paint above the
+step below it:
+
+| Range | Owners |
+|---|---|
+| `1`–`60` | In-flow furniture: badges, sticky headers, sidebar pills |
+| `100`–`150` | Fixed app chrome (sidebars), full-screen call/instance shells, sidebar flyouts |
+| `190`–`198` | Anchored overlays that must sit *under* a modal or a menu backdrop (e.g. the message-input popover) |
+| `200` | Standard modals and profile surfaces (`Modal`, `UserProfilePopout`, `UserProfileModal`, `ScreenShareSetup`) |
+| `210` | Image crop |
+| `250` | Immersive search |
+| `300`/`301` | Mobile sheets, popovers, toasts |
+| `399`/`400`/`401` | Context menu: backdrop / panel / submenu flyout |
+| `10000` | Confirmation dialogs, which must be able to cover anything, including another modal |
+
+### Context menu dismissal
+
+The context menu is the topmost transient layer, so it owns `399`–`401`: its
+backdrop sits above every panel and modal, and its panel above the backdrop.
+
+A full-screen backdrop alone is **not** a valid dismissal mechanism here.
+Profile cards, modals and the screen-share setup overlay all paint at `200`,
+so a press that lands on one of them never reaches a `199` backdrop and the
+menu would stay open — which is exactly the bug that existed before the panel
+moved to `400`. The menu therefore also listens for `pointerdown` at the
+document level (capture phase) and closes when the press misses the menu
+surface.
+
+Anything that belongs to the open menu's surface must be marked with
+`data-context-menu-surface` (`CONTEXT_MENU_SURFACE_ATTR` in
+`stores/contextMenuStore.ts`): the panel, its submenu flyouts, and any popover
+a menu item renders (`ScreenShareSettingsPopover`). Marks are opt-in, so a
+nested overlay that forgets the attribute closes the menu instead of leaking
+presses through to the app. The panel additionally carries
+`data-context-menu-panel`, which tests use instead of matching z-index classes.
+

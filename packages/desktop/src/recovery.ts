@@ -1,4 +1,4 @@
-import { app, shell } from 'electron';
+import { app, net, shell } from 'electron';
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron';
 import type { AppUpdater } from 'electron-updater';
 import path from 'path';
@@ -32,6 +32,24 @@ export type UpdateState =
   | 'downloaded'
   | 'error';
 
+/**
+ * Live state of the automatic reconnect loop that runs while the recovery
+ * surface is showing a `load-failed` reason.
+ *
+ * `null` means no loop is running (normal operation, recovery for a non-network
+ * reason, or the loop already delivered a successful load).
+ */
+export interface AutoRetryState {
+  /** 1-based number of the attempt the loop is currently waiting to perform. */
+  attempt: number;
+  /**
+   * Epoch ms of the scheduled probe, or null while a probe is in flight. The
+   * recovery page renders the attempt number; `nextAttemptAt` exists so the
+   * main process can be reasoned about (and tested) without a wall-clock guess.
+   */
+  nextAttemptAt: number | null;
+}
+
 export interface RecoveryState {
   updatesEnabled?: boolean;
   mode: 'normal' | 'recovery';
@@ -40,6 +58,7 @@ export interface RecoveryState {
   updateVersion: string | null;
   lastUpdateError: { message: string; code: string | null; at: number } | null;
   lastCheckResult: 'up-to-date' | 'failed' | null;
+  autoRetry: AutoRetryState | null;
 }
 
 const INITIAL_STATE: RecoveryState = {
@@ -50,6 +69,7 @@ const INITIAL_STATE: RecoveryState = {
   updateVersion: null,
   lastUpdateError: null,
   lastCheckResult: null,
+  autoRetry: null,
 };
 
 export class RecoveryStateStore {
@@ -394,6 +414,9 @@ let onDownloadUpdateCallback: (() => void) | null = null;
 
 export function setMainWindow(win: BrowserWindow | null): void {
   mainWindowRef = win;
+  // A closed window must not be kept alive by a reconnect timer: the loop would
+  // otherwise navigate a destroyed BrowserWindow on the next tick.
+  if (win === null) stopAutoRetry();
 }
 
 export function setAutoUpdater(au: AppUpdater | null): void {
@@ -410,6 +433,190 @@ export function setOnQuitRequested(cb: (() => void) | null): void {
 
 export function setOnDownloadUpdate(cb: (() => void) | null): void {
   onDownloadUpdateCallback = cb;
+}
+
+// ---------------------------------------------------------------------------
+// Load-failure retry & automatic reconnect
+// ---------------------------------------------------------------------------
+// A desktop boot must not dead-end on a transient network condition.
+// `did-fail-load` fires for DNS hiccups, VPN/proxy warm-up, a Wi-Fi handover, a
+// self-hosted instance that is still starting, and stale cache entries — all of
+// which clear on their own within seconds. Showing the recovery surface on the
+// first such event and leaving it there is exactly the "the web app opens fine
+// but the desktop app sometimes says it cannot reach the server" report.
+//
+// Two mechanisms fix that at the source:
+//
+// 1. A one-shot silent retry for transient error codes. At that point the
+//    window has no painted document, so retrying before entering recovery costs
+//    the user nothing and absorbs the common single-blip case completely.
+// 2. An automatic reconnect loop while recovery shows a load failure. It probes
+//    the instance URL (cheap GET, no document) and only navigates once the
+//    server actually answers, so the recovery page never flickers between
+//    blank/error/app states.
+// ---------------------------------------------------------------------------
+
+/**
+ * Chromium net error codes worth retrying.
+ *
+ * Every entry describes transport, name-resolution, proxy or cache state —
+ * conditions that resolve without any action from the user. Anything absent
+ * (certificate failures, ERR_FILE_NOT_FOUND, ERR_ACCESS_DENIED, HTTP-level
+ * failures) is deterministic: a retry cannot change the outcome, so those still
+ * surface recovery on the first failure.
+ */
+export const TRANSIENT_LOAD_ERROR_CODES: ReadonlySet<number> = new Set([
+  -2,   // ERR_FAILED — generic transport failure
+  -7,   // ERR_TIMED_OUT
+  -20,  // ERR_CACHE_MISS — stale entry mid-update
+  -21,  // ERR_NETWORK_CHANGED
+  -100, // ERR_CONNECTION_CLOSED
+  -101, // ERR_CONNECTION_RESET
+  -102, // ERR_CONNECTION_REFUSED — instance still booting
+  -103, // ERR_CONNECTION_ABORTED
+  -104, // ERR_CONNECTION_FAILED
+  -105, // ERR_NAME_NOT_RESOLVED — DNS not ready yet
+  -106, // ERR_INTERNET_DISCONNECTED
+  -109, // ERR_ADDRESS_UNREACHABLE
+  -118, // ERR_CONNECTION_TIMED_OUT
+  -130, // ERR_PROXY_CONNECTION_FAILED
+  -137, // ERR_NAME_RESOLUTION_FAILED
+  -324, // ERR_EMPTY_RESPONSE
+]);
+
+export function isTransientLoadFailure(errorCode: number): boolean {
+  return TRANSIENT_LOAD_ERROR_CODES.has(errorCode);
+}
+
+/**
+ * Only http(s) navigations are retried. file:// surfaces (the instance picker
+ * and recovery.html itself) are deterministic — retrying them would turn a
+ * packaging defect into an infinite loop.
+ */
+export function isRetryableNavigation(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
+const AUTO_RETRY_BASE_MS = 2_000;
+const AUTO_RETRY_MAX_MS = 15_000;
+const PROBE_TIMEOUT_MS = 5_000;
+
+/** Exponential backoff for attempt N (1-based), capped so a long outage stays cheap. */
+export function nextAutoRetryDelayMs(attempt: number): number {
+  const safeAttempt = Number.isFinite(attempt) && attempt >= 1 ? Math.floor(attempt) : 1;
+  return Math.min(AUTO_RETRY_MAX_MS, AUTO_RETRY_BASE_MS * 2 ** Math.min(safeAttempt - 1, 10));
+}
+
+type ReachabilityProbe = (url: string) => Promise<boolean>;
+
+let reachabilityProbe: ReachabilityProbe | null = null;
+let autoRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let autoRetryUrl: string | null = null;
+let autoRetryAttempt = 0;
+let autoRetryProbeInFlight = false;
+
+/**
+ * Override how reachability is decided. Production uses an in-process GET via
+ * Electron's `net`; tests inject a deterministic probe.
+ */
+export function setReachabilityProbe(probe: ReachabilityProbe | null): void {
+  reachabilityProbe = probe;
+}
+
+async function probeInstanceReachable(url: string): Promise<boolean> {
+  const probe = reachabilityProbe;
+  if (probe) return probe(url);
+  try {
+    // Any HTTP response proves the host is up: a 401 or 404 still means the app
+    // shell can be loaded, and the SPA owns routing from there.
+    const response = await net.fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    return response.status > 0;
+  } catch {
+    return false;
+  }
+}
+
+function clearAutoRetryTimer(): void {
+  if (autoRetryTimer) clearTimeout(autoRetryTimer);
+  autoRetryTimer = null;
+}
+
+/** True while the reconnect loop owns the recovery surface. */
+export function isAutoRetryActive(): boolean {
+  return autoRetryUrl !== null;
+}
+
+/**
+ * Stop the reconnect loop and clear its published state.
+ *
+ * Called on every path that leaves recovery, so a stale loop can never navigate
+ * a window the user has already steered somewhere else.
+ */
+export function stopAutoRetry(): void {
+  clearAutoRetryTimer();
+  const hadState = autoRetryUrl !== null || recoveryStore.get().autoRetry !== null;
+  autoRetryUrl = null;
+  autoRetryAttempt = 0;
+  autoRetryProbeInFlight = false;
+  if (hadState) recoveryStore.update({ autoRetry: null });
+}
+
+function scheduleAutoRetry(attempt: number): void {
+  clearAutoRetryTimer();
+  const url = autoRetryUrl;
+  if (!url) return;
+  autoRetryAttempt = attempt;
+  const delay = nextAutoRetryDelayMs(attempt);
+  recoveryStore.update({ autoRetry: { attempt, nextAttemptAt: Date.now() + delay } });
+  autoRetryTimer = setTimeout(() => {
+    autoRetryTimer = null;
+    void runAutoRetryProbe(url);
+  }, delay);
+}
+
+async function runAutoRetryProbe(url: string): Promise<void> {
+  if (autoRetryProbeInFlight || autoRetryUrl !== url) return;
+  autoRetryProbeInFlight = true;
+  recoveryStore.update({ autoRetry: { attempt: autoRetryAttempt, nextAttemptAt: null } });
+  let reachable = false;
+  try {
+    reachable = await probeInstanceReachable(url);
+  } catch {
+    reachable = false;
+  }
+  autoRetryProbeInFlight = false;
+  // A manual Reload / Change Instance landed while we were probing.
+  if (autoRetryUrl !== url) return;
+  if (!reachable) {
+    scheduleAutoRetry(autoRetryAttempt + 1);
+    return;
+  }
+  const win = mainWindowRef;
+  if (!win || win.isDestroyed()) {
+    stopAutoRetry();
+    return;
+  }
+  console.log('[recovery] instance reachable again — reconnecting');
+  stopAutoRetry();
+  recoveryStore.markRecoveryExited();
+  recoveryStore.update({ mode: 'normal', reason: null });
+  void win.loadURL(url).catch((err: unknown) => {
+    // did-fail-load re-enters recovery with a fresh reason; the log line keeps
+    // a flapping instance visible to the smoke-test grep.
+    console.warn('[recovery] reconnect navigation failed:', err);
+  });
+}
+
+/** Begin the reconnect loop for a load failure against `url`. Idempotent per URL. */
+export function startAutoRetry(url: string): void {
+  if (!isRetryableNavigation(url)) return;
+  autoRetryUrl = url;
+  autoRetryProbeInFlight = false;
+  scheduleAutoRetry(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -439,6 +646,11 @@ export function enterRecoveryMode(reason: { code: RecoveryReasonCode; detail: st
   // must be visible regardless of prior visibility state.
   mainWindowRef.show();
   mainWindowRef.focus();
+
+  // Network-shaped failures are frequently momentary (DNS not ready, VPN still
+  // connecting, instance restarting). Keep probing in the background and return
+  // to the app by itself instead of waiting for the user to click Reload.
+  if (reason.code === 'load-failed') startAutoRetry(getResolvedInstanceUrl());
 }
 
 // Wire the boot-stall callback at module load time. The setter pattern from
@@ -484,6 +696,9 @@ export function handleRecoveryAction(action: RecoveryAction): void {
   switch (action) {
     case 'reload': {
       const url = getResolvedInstanceUrl();
+      // The user took over: cancel the reconnect loop before navigating so a
+      // probe that resolves mid-navigation cannot yank the window elsewhere.
+      stopAutoRetry();
       // Optimistic exit — clear recovery state BEFORE loading. If the load
       // fails, did-fail-load re-enters recovery. If it stalls, boot timer fires.
       recoveryStore.markRecoveryExited();
@@ -523,6 +738,7 @@ export function handleRecoveryAction(action: RecoveryAction): void {
       // and offers Cancel — the URL is only overwritten when the user explicitly
       // Connects to a different one. (clearInstanceUrl IPC remains for explicit
       // "disconnect" operations from the web settings UI.)
+      stopAutoRetry();
       recoveryStore.markRecoveryExited();
       recoveryStore.update({ mode: 'normal', reason: null });
       console.log('[recovery] exited (change-instance)');
@@ -556,9 +772,20 @@ export function handleRecoveryAction(action: RecoveryAction): void {
 
 const UNRESPONSIVE_GRACE_MS = 10_000;
 
+/**
+ * One silent retry is enough to absorb the common single-blip failure (a DNS
+ * query that lost the race with app start, a proxy that was not listening for
+ * the first second). More than one would keep the window blank without a reason
+ * for the user, so the recovery surface takes over after that.
+ */
+const MAX_SILENT_LOAD_RETRIES = 1;
+const SILENT_LOAD_RETRY_DELAY_MS = 750;
+
 export function attachRecoveryHandlers(win: BrowserWindow): void {
   let pendingArm = false;
   let unresponsiveTimer: ReturnType<typeof setTimeout> | null = null;
+  let silentLoadRetries = 0;
+  let silentRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   // did-navigate fires only for top-level non-same-document navigation.
   // SPA in-page routing (history.pushState, hash) fires did-navigate-in-page,
@@ -571,6 +798,13 @@ export function attachRecoveryHandlers(win: BrowserWindow): void {
   });
 
   win.webContents.on('did-finish-load', () => {
+    // Only a successful *application* load clears failure state. recovery.html
+    // and the instance picker are file:// documents: treating them as a healthy
+    // navigation would cancel the reconnect loop the moment it starts.
+    if (isRetryableNavigation(win.webContents.getURL())) {
+      silentLoadRetries = 0;
+      stopAutoRetry();
+    }
     if (pendingArm) {
       pendingArm = false;
       armBootTimer(win);
@@ -581,10 +815,34 @@ export function attachRecoveryHandlers(win: BrowserWindow): void {
     (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame) return;       // ignore sub-resource failures (favicon, broken <img>)
       if (errorCode === -3) return;   // ERR_ABORTED — intentional nav interruption
-      enterRecoveryMode({
-        code: 'load-failed',
-        detail: `${errorCode} ${errorDescription} @ ${validatedURL}`,
-      });
+      const detail = `${errorCode} ${errorDescription} @ ${validatedURL}`;
+
+      // file:// surfaces are deterministic — a retry cannot change the outcome.
+      if (!isRetryableNavigation(validatedURL)) {
+        enterRecoveryMode({ code: 'load-failed', detail });
+        return;
+      }
+
+      // Absorb one transient blip before involving the user. Nothing has been
+      // painted yet, so when the retry succeeds the failure is invisible.
+      if (isTransientLoadFailure(errorCode) && silentLoadRetries < MAX_SILENT_LOAD_RETRIES) {
+        silentLoadRetries += 1;
+        console.log(
+          `[recovery] transient load failure (${detail}) — silent retry ${silentLoadRetries}/${MAX_SILENT_LOAD_RETRIES}`,
+        );
+        if (silentRetryTimer) clearTimeout(silentRetryTimer);
+        silentRetryTimer = setTimeout(() => {
+          silentRetryTimer = null;
+          if (win.isDestroyed()) return;
+          void win.loadURL(validatedURL).catch(() => {
+            // did-fail-load fires for this navigation too and, with the silent
+            // budget spent, escalates to the recovery surface there.
+          });
+        }, SILENT_LOAD_RETRY_DELAY_MS);
+        return;
+      }
+
+      enterRecoveryMode({ code: 'load-failed', detail });
     });
 
   win.webContents.on('render-process-gone', (_e, details) => {

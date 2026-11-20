@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { MenuItemConstructorOptions } from 'electron';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { BrowserWindow, MenuItemConstructorOptions } from 'electron';
 import {
   RecoveryStateStore,
   extractErrorCode,
@@ -11,11 +11,28 @@ import {
   isBootArmed,
   handleRendererReady,
   resetBootTimerStateForTest,
+  recoveryStore,
+  isTransientLoadFailure,
+  isRetryableNavigation,
+  nextAutoRetryDelayMs,
+  setReachabilityProbe,
+  isAutoRetryActive,
+  stopAutoRetry,
+  startAutoRetry,
+  attachRecoveryHandlers,
+  setMainWindow,
 } from './recovery';
 
 // Mock electron with isPackaged=true so the real arm path executes in all tests below.
+// getLocale/getPath keep the recovery.html navigation helpers usable in unit tests.
 vi.mock('electron', () => ({
-  app: { isPackaged: true },
+  app: {
+    isPackaged: true,
+    getLocale: () => 'en',
+    getPath: () => 'C:\\tmp\\backspace-recovery-test',
+  },
+  shell: { openExternal: () => Promise.resolve() },
+  net: { fetch: () => Promise.reject(new Error('network disabled in tests')) },
 }));
 
 describe('RecoveryStateStore', () => {
@@ -158,6 +175,7 @@ function defaultState(overrides?: Partial<RecoveryState>): RecoveryState {
     updateVersion: null,
     lastUpdateError: null,
     lastCheckResult: null,
+    autoRetry: null,
     ...overrides,
   };
 }
@@ -438,5 +456,232 @@ describe('confirmation-first automatic update state in the menus', () => {
       label: 'Update Available',
       enabled: false,
     });
+  });
+});
+
+// ── Load-failure classification ───────────────────────────────────────────
+
+describe('load-failure classification', () => {
+  it('classifies transport-level errors as transient', () => {
+    expect(isTransientLoadFailure(-105)).toBe(true); // ERR_NAME_NOT_RESOLVED
+    expect(isTransientLoadFailure(-102)).toBe(true); // ERR_CONNECTION_REFUSED
+    expect(isTransientLoadFailure(-7)).toBe(true);   // ERR_TIMED_OUT
+    expect(isTransientLoadFailure(-106)).toBe(true); // ERR_INTERNET_DISCONNECTED
+    expect(isTransientLoadFailure(-324)).toBe(true); // ERR_EMPTY_RESPONSE
+  });
+
+  it('treats deterministic failures as permanent', () => {
+    expect(isTransientLoadFailure(-6)).toBe(false);   // ERR_FILE_NOT_FOUND
+    expect(isTransientLoadFailure(-10)).toBe(false);  // ERR_ACCESS_DENIED
+    expect(isTransientLoadFailure(-202)).toBe(false); // ERR_CERT_AUTHORITY_INVALID
+    expect(isTransientLoadFailure(0)).toBe(false);
+  });
+
+  it('only retries http(s) navigations', () => {
+    expect(isRetryableNavigation('https://chat.example.test/')).toBe(true);
+    expect(isRetryableNavigation('http://localhost:3000')).toBe(true);
+    expect(isRetryableNavigation('file:///C:/app/resources/recovery.html')).toBe(false);
+    expect(isRetryableNavigation('about:blank')).toBe(false);
+  });
+
+  it('backs off exponentially and caps the delay', () => {
+    expect(nextAutoRetryDelayMs(1)).toBe(2_000);
+    expect(nextAutoRetryDelayMs(2)).toBe(4_000);
+    expect(nextAutoRetryDelayMs(3)).toBe(8_000);
+    expect(nextAutoRetryDelayMs(4)).toBe(15_000);
+    expect(nextAutoRetryDelayMs(99)).toBe(15_000);
+    expect(nextAutoRetryDelayMs(0)).toBe(2_000);
+    expect(nextAutoRetryDelayMs(Number.NaN)).toBe(2_000);
+  });
+});
+
+// ── Automatic reconnect ───────────────────────────────────────────────────
+
+interface RetryFakeWindow {
+  isDestroyed: () => boolean;
+  loadURL: ReturnType<typeof vi.fn>;
+  loadFile: ReturnType<typeof vi.fn>;
+  show: ReturnType<typeof vi.fn>;
+  focus: ReturnType<typeof vi.fn>;
+  webContents: {
+    on: (event: string, handler: (...args: unknown[]) => void) => void;
+    getURL: () => string;
+  };
+}
+
+function makeRetryWindow(
+  handlers: Map<string, Array<(...args: unknown[]) => void>> = new Map(),
+  currentUrl = '',
+  destroyed = false,
+): RetryFakeWindow {
+  return {
+    isDestroyed: () => destroyed,
+    loadURL: vi.fn(() => Promise.resolve()),
+    loadFile: vi.fn(() => Promise.resolve()),
+    show: vi.fn(),
+    focus: vi.fn(),
+    webContents: {
+      on: (event, handler) => {
+        const list = handlers.get(event) ?? [];
+        list.push(handler);
+        handlers.set(event, list);
+      },
+      getURL: () => currentUrl,
+    },
+  };
+}
+
+function resetRecoveryState(): void {
+  stopAutoRetry();
+  recoveryStore.markRecoveryExited();
+  recoveryStore.update({ mode: 'normal', reason: null, autoRetry: null });
+  setReachabilityProbe(null);
+  setMainWindow(null);
+}
+
+describe('automatic reconnect while recovery is showing', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetRecoveryState();
+  });
+
+  afterEach(() => {
+    resetRecoveryState();
+    vi.useRealTimers();
+  });
+
+  it('probes with backoff and reloads the app once the instance answers', async () => {
+    const win = makeRetryWindow();
+    setMainWindow(win as unknown as BrowserWindow);
+    let reachable = false;
+    setReachabilityProbe(() => Promise.resolve(reachable));
+
+    startAutoRetry('https://chat.example.test/');
+    expect(isAutoRetryActive()).toBe(true);
+    expect(recoveryStore.get().autoRetry?.attempt).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(win.loadURL).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);      // attempt 1 runs, instance still down
+    expect(recoveryStore.get().autoRetry?.attempt).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(4_000);  // attempt 2 runs, still down
+    expect(recoveryStore.get().autoRetry?.attempt).toBe(3);
+
+    reachable = true;
+    await vi.advanceTimersByTimeAsync(8_000);  // attempt 3 succeeds
+    expect(win.loadURL).toHaveBeenCalledWith('https://chat.example.test/');
+    expect(isAutoRetryActive()).toBe(false);
+    expect(recoveryStore.get().autoRetry).toBeNull();
+    expect(recoveryStore.get().mode).toBe('normal');
+  });
+
+  it('stops without navigating when the window is gone', async () => {
+    const win = makeRetryWindow(new Map(), '', true);
+    setMainWindow(win as unknown as BrowserWindow);
+    setReachabilityProbe(() => Promise.resolve(true));
+
+    startAutoRetry('https://chat.example.test/');
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(win.loadURL).not.toHaveBeenCalled();
+    expect(isAutoRetryActive()).toBe(false);
+    expect(recoveryStore.get().autoRetry).toBeNull();
+  });
+
+  it('a manual action cancels the loop', async () => {
+    const win = makeRetryWindow();
+    setMainWindow(win as unknown as BrowserWindow);
+    setReachabilityProbe(() => Promise.resolve(true));
+
+    startAutoRetry('https://chat.example.test/');
+    stopAutoRetry();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(win.loadURL).not.toHaveBeenCalled();
+    expect(isAutoRetryActive()).toBe(false);
+  });
+
+  it('refuses non-http targets so file:// surfaces cannot loop', () => {
+    startAutoRetry('file:///C:/app/resources/recovery.html');
+    expect(isAutoRetryActive()).toBe(false);
+    expect(recoveryStore.get().autoRetry).toBeNull();
+  });
+});
+
+describe('load-failure handling in attachRecoveryHandlers', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetRecoveryState();
+  });
+
+  afterEach(() => {
+    resetRecoveryState();
+    vi.useRealTimers();
+  });
+
+  it('absorbs one transient failure silently, then escalates to recovery', async () => {
+    const handlers = new Map<string, Array<(...args: unknown[]) => void>>();
+    const win = makeRetryWindow(handlers);
+    setMainWindow(win as unknown as BrowserWindow);
+    attachRecoveryHandlers(win as unknown as BrowserWindow);
+
+    const failLoad = handlers.get('did-fail-load')?.[0];
+    expect(failLoad).toBeDefined();
+
+    // First failure: still invisible to the user, a silent retry is scheduled.
+    failLoad!({}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://chat.example.test/', true);
+    expect(recoveryStore.get().mode).toBe('normal');
+    expect(win.loadFile).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(750);
+    expect(win.loadURL).toHaveBeenCalledWith('https://chat.example.test/');
+
+    // Second failure: the silent budget is spent, recovery takes over.
+    failLoad!({}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://chat.example.test/', true);
+    expect(recoveryStore.get().mode).toBe('recovery');
+    expect(recoveryStore.get().reason?.code).toBe('load-failed');
+    expect(win.loadFile).toHaveBeenCalledTimes(1);
+    // The reconnect loop for the instance URL runs behind the dialog.
+    expect(isAutoRetryActive()).toBe(true);
+  });
+
+  it('goes straight to recovery for a deterministic failure', () => {
+    const handlers = new Map<string, Array<(...args: unknown[]) => void>>();
+    const win = makeRetryWindow(handlers);
+    setMainWindow(win as unknown as BrowserWindow);
+    attachRecoveryHandlers(win as unknown as BrowserWindow);
+
+    handlers.get('did-fail-load')![0]!({}, -202, 'ERR_CERT_AUTHORITY_INVALID', 'https://chat.example.test/', true);
+    expect(recoveryStore.get().mode).toBe('recovery');
+    expect(win.loadURL).not.toHaveBeenCalled();
+  });
+
+  it('ignores sub-frame failures and intentional aborts', () => {
+    const handlers = new Map<string, Array<(...args: unknown[]) => void>>();
+    const win = makeRetryWindow(handlers);
+    setMainWindow(win as unknown as BrowserWindow);
+    attachRecoveryHandlers(win as unknown as BrowserWindow);
+    const failLoad = handlers.get('did-fail-load')![0]!;
+
+    failLoad({}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://chat.example.test/', false);
+    failLoad({}, -3, 'ERR_ABORTED', 'https://chat.example.test/', true);
+
+    expect(recoveryStore.get().mode).toBe('normal');
+  });
+
+  it('a healthy application load clears the failure state', () => {
+    const handlers = new Map<string, Array<(...args: unknown[]) => void>>();
+    const win = makeRetryWindow(handlers, 'https://chat.example.test/');
+    setMainWindow(win as unknown as BrowserWindow);
+    attachRecoveryHandlers(win as unknown as BrowserWindow);
+
+    startAutoRetry('https://chat.example.test/');
+    expect(isAutoRetryActive()).toBe(true);
+
+    handlers.get('did-finish-load')![0]!();
+    expect(isAutoRetryActive()).toBe(false);
+    expect(recoveryStore.get().autoRetry).toBeNull();
   });
 });

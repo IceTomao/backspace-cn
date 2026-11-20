@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import {
   useContextMenuStore,
   filterMenuItems,
+  CONTEXT_MENU_SURFACE_ATTR,
+  CONTEXT_MENU_PANEL_ATTR,
   type ContextMenuItem,
   type ContextMenuCheckbox,
   type ContextMenuLeafItem,
@@ -119,8 +121,9 @@ function SubmenuFlyout({ submenu, triggerRef, onMouseEnter, onMouseLeave, close 
   return createPortal(
     <div
       ref={flyoutRef}
-      className="fixed z-[210] glass rounded-md py-1.5 min-w-[160px] overflow-y-auto scrollbar-thin animate-fade-in"
+      className="fixed z-[401] glass rounded-md py-1.5 min-w-[160px] overflow-y-auto scrollbar-thin animate-fade-in"
       style={{ left: -9999, top: -9999 }}
+      {...{ [CONTEXT_MENU_SURFACE_ATTR]: '' }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       onMouseDown={(e) => e.stopPropagation()}
@@ -280,10 +283,9 @@ interface DesktopMenuProps {
   items: ContextMenuItem[];
   position: { x: number; y: number };
   close: () => void;
-  closeGuard: boolean;
 }
 
-function DesktopMenu({ items, position, close, closeGuard }: DesktopMenuProps) {
+function DesktopMenu({ items, position, close }: DesktopMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const portalContainer = usePortalContainer();
 
@@ -315,6 +317,27 @@ function DesktopMenu({ items, position, close, closeGuard }: DesktopMenuProps) {
     return () => {
       window.removeEventListener('scroll', dismiss, true);
       window.removeEventListener('resize', dismiss);
+    };
+  }, [close]);
+
+  // Dismiss on any press outside the menu surfaces. Capture phase so the menu
+  // closes even when the pressed element stops propagation, and surface markers
+  // so presses on the menu itself (or its submenu) never count as "outside".
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(`[${CONTEXT_MENU_SURFACE_ATTR}]`)) return;
+      close();
+    };
+    // Losing window focus (alt-tab, another app) leaves a floating menu behind
+    // that no longer matches the UI it belongs to.
+    const handleWindowBlur = () => close();
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('blur', handleWindowBlur);
     };
   }, [close]);
 
@@ -387,14 +410,12 @@ function DesktopMenu({ items, position, close, closeGuard }: DesktopMenuProps) {
 
   return createPortal(
     <>
-      {/* Backdrop */}
+      {/* Backdrop — occludes the app below and sits above every panel layer
+          (profile cards and modals are z-200, image crop is z-210). Menu layers
+          are z-400/401, above this. Dismissal is handled by the document-level
+          pointerdown listener, not by this element. */}
       <div
-        className="fixed inset-0 z-[199]"
-        onMouseDown={(e) => {
-          if (!closeGuard) {
-            close();
-          }
-        }}
+        className="fixed inset-0 z-[399]"
         onContextMenu={(e) => {
           // Prevent browser context menu but do NOT stopPropagation.
           // This allows right-clicks to reach underlying elements that may
@@ -406,8 +427,9 @@ function DesktopMenu({ items, position, close, closeGuard }: DesktopMenuProps) {
       <div
         ref={menuRef}
         tabIndex={-1}
-        className="fixed z-[200] min-w-[180px] py-1.5 glass rounded-md animate-fade-in max-h-[calc(calc(100*var(--app-vh))-16px)] overflow-y-auto scrollbar-thin outline-none"
+        className="fixed z-[400] min-w-[180px] py-1.5 glass rounded-md animate-fade-in max-h-[calc(calc(100*var(--app-vh))-16px)] overflow-y-auto scrollbar-thin outline-none"
         style={{ left: position.x, top: position.y }}
+        {...{ [CONTEXT_MENU_SURFACE_ATTR]: '', [CONTEXT_MENU_PANEL_ATTR]: '' }}
         onKeyDown={handleKeyDown}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -490,10 +512,10 @@ function MobileMenu({ items, close }: MobileMenuProps) {
   return createPortal(
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-[300] bg-black/50" onClick={close} />
+      <div className="fixed inset-0 z-[399] bg-black/50" onClick={close} />
       {/* Bottom sheet */}
       <div
-        className="fixed bottom-0 left-0 right-0 z-[301] rounded-t-2xl glass-bubble animate-slide-up-sheet"
+        className="fixed bottom-0 left-0 right-0 z-[400] rounded-t-2xl glass-bubble animate-slide-up-sheet"
         style={{ paddingBottom: 'var(--safe-bottom)' }}
       >
         <div className="w-10 h-1 bg-txt-tertiary/30 rounded-full mx-auto mt-2 mb-1" />
@@ -638,7 +660,6 @@ function useGlobalLongPress(isMobile: boolean) {
 export function ContextMenuRenderer() {
   const menu = useContextMenuStore((s) => s.menu);
   const close = useContextMenuStore((s) => s.close);
-  const closeGuard = useContextMenuStore((s) => s.closeGuard);
   const isMobile = useUIStore((s) => s.isMobile);
 
   // Global long-press detection — enables context menus on all touch targets
@@ -658,7 +679,6 @@ export function ContextMenuRenderer() {
       items={filteredItems}
       position={menu.position}
       close={close}
-      closeGuard={closeGuard}
     />
   );
 }

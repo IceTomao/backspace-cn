@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useFloatingPosition } from '../../hooks/useFloatingPosition';
 import { usePortalContainer } from '../../hooks/usePortalContainer';
+import { CONTEXT_MENU_SURFACE_ATTR } from '../../stores/contextMenuStore';
 import { StreamQualityControls, StreamSummary } from './StreamQualityControls';
 
 interface ScreenShareSettingsPopoverProps {
@@ -27,6 +28,9 @@ export function ScreenShareSettingsPopover({ open, onClose, anchorRef, onStopSha
     placement: 'top',
     offset: 12,
     enabled: open,
+    // Opened from a stream-tile context menu this sits on top of the menu
+    // (z-400) and its backdrop, so it must claim the next layer up.
+    zIndex: 401,
   });
 
   useEffect(() => {
@@ -51,6 +55,7 @@ export function ScreenShareSettingsPopover({ open, onClose, anchorRef, onStopSha
       ref={popoverRef}
       style={style}
       className="w-[300px] glass rounded-lg overflow-hidden flex flex-col"
+      {...{ [CONTEXT_MENU_SURFACE_ATTR]: '' }}
     >
       <div className="px-3 py-2 border-b border-border-hard flex-shrink-0">
         <span className="text-[14px] font-bold text-txt-primary">{t('voice:streamSettings.title')}</span>

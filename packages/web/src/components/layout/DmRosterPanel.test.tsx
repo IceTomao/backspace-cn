@@ -229,7 +229,8 @@ function renderPanel() {
 }
 
 function getMenuLabels(): string[] {
-  const buttons = document.querySelectorAll<HTMLButtonElement>('div.fixed.z-\\[200\\] button');
+  // The panel carries a stable data attribute; do not couple to its z-index class.
+  const buttons = document.querySelectorAll<HTMLButtonElement>('[data-context-menu-panel] button');
   return Array.from(buttons).map((b) => b.textContent?.trim() ?? '');
 }
 

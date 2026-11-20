@@ -57,36 +57,50 @@ export type ContextMenuItem =
 
 // ── Store ─────────────────────────────────────────────────────────────────
 
+/**
+ * Marks every element that belongs to an open menu's surface (the panel, its
+ * submenu flyouts, and nested popovers a menu item renders).
+ *
+ * Dismissal cannot rely on a full-screen backdrop alone: profile cards, modals
+ * and the screen-share setup overlay all paint above it, so a press that lands
+ * on one of them never reaches the backdrop and the menu stays open. The menu
+ * listens for presses at the document level instead and treats everything
+ * outside these markers as "outside".
+ */
+export const CONTEXT_MENU_SURFACE_ATTR = 'data-context-menu-surface';
+
+/**
+ * Marks the top-level menu panel itself (submenu flyouts do not carry it).
+ *
+ * Its only consumer is test code that needs a stable handle on the menu, so
+ * suites stop hard-coding the panel's z-index utility class.
+ */
+export const CONTEXT_MENU_PANEL_ATTR = 'data-context-menu-panel';
+
 interface ContextMenuState {
   menu: {
     position: { x: number; y: number };
     items: ContextMenuItem[];
   } | null;
   openSubmenuKey: string | null;
-  closeGuard: boolean;
 
   open: (position: { x: number; y: number }, items: ContextMenuItem[]) => void;
   close: () => void;
   setOpenSubmenu: (key: string | null) => void;
-  setCloseGuard: (locked: boolean) => void;
 }
 
 export const useContextMenuStore = create<ContextMenuState>((set) => ({
   menu: null,
   openSubmenuKey: null,
-  closeGuard: false,
 
   open: (position, items) =>
-    set({ menu: { position, items }, openSubmenuKey: null, closeGuard: false }),
+    set({ menu: { position, items }, openSubmenuKey: null }),
 
   close: () =>
-    set({ menu: null, openSubmenuKey: null, closeGuard: false }),
+    set({ menu: null, openSubmenuKey: null }),
 
   setOpenSubmenu: (key) =>
     set({ openSubmenuKey: key }),
-
-  setCloseGuard: (locked) =>
-    set({ closeGuard: locked }),
 }));
 
 // ── Utility: filter hidden items and collapse separators ──────────────────

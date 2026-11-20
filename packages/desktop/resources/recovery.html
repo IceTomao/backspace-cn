@@ -59,6 +59,16 @@
       line-height: 1.5;
     }
 
+    /* Background reconnect status. Sits directly under the hint so the user
+       knows the app is already trying again instead of clicking Reload. */
+    .retry-note {
+      font-size: 0.8125rem;
+      color: #7c6cf6;
+      margin: -1rem 0 1.5rem 0;
+      line-height: 1.5;
+    }
+    .retry-note[hidden] { display: none; }
+
     .check-result {
       font-size: 0.8125rem;
       margin: 0.5rem 0 0 0;
@@ -130,6 +140,7 @@
       <div class="card">
         <h1 data-i18n="title">Backspace couldn't load.</h1>
         <p class="hint" id="hint" data-i18n="loading">Loading…</p>
+        <p class="retry-note" id="retry-note" hidden></p>
 
         <div class="actions">
           <button class="action primary" id="btn-reload" data-i18n="reload">Reload</button>
@@ -185,6 +196,7 @@
         stateLoadFailed: 'Failed to load recovery state: {message}',
         hintExternal: 'Try reloading the app or changing the connected instance. Updates are managed by Flatpak.',
         hintLoadFailed: "Couldn't reach your instance. Check your connection or try a different instance.",
+        retryNote: 'Reconnecting automatically — attempt {attempt}. You can also reload manually.',
         hintCrashReady: 'Something inside the app failed. An update is ready, so click Restart to Install.',
         hintCrashAvailable: 'Something inside the app failed. A newer version is available. Download it when you are ready.',
         hintCrashManual: 'Something inside the app failed. A newer version is available, but this build cannot install it itself. Download it and replace the app.',
@@ -220,6 +232,7 @@
         stateLoadFailed: 'Не удалось загрузить состояние восстановления: {message}',
         hintExternal: 'Попробуйте перезагрузить приложение или сменить сервер. Обновлениями управляет Flatpak.',
         hintLoadFailed: 'Не удалось связаться с сервером. Проверьте подключение или попробуйте другой сервер.',
+        retryNote: 'Автоматическое переподключение — попытка {attempt}. Можно также перезагрузить вручную.',
         hintCrashReady: 'В приложении произошёл сбой. Обновление готово, нажмите «Перезапустить для установки».',
         hintCrashAvailable: 'В приложении произошёл сбой. Доступна новая версия. Скачайте её, когда будете готовы.',
         hintCrashManual: 'В приложении произошёл сбой. Доступна новая версия, но эта сборка не может установить её сама. Скачайте её и замените приложение.',
@@ -255,6 +268,7 @@
         stateLoadFailed: '无法读取恢复状态：{message}',
         hintExternal: '请尝试重新加载或切换服务器。更新由 Flatpak 管理。',
         hintLoadFailed: '无法连接服务器，请检查网络连接或尝试切换服务器。',
+        retryNote: '正在自动重连（第 {attempt} 次）……你也可以手动重新加载。',
         hintCrashReady: '应用发生错误，更新已就绪，请重启以安装。',
         hintCrashAvailable: '应用发生错误，有新版本可用，可在准备好后下载。',
         hintCrashManual: '应用发生错误，有新版本可用，请下载并重新安装。',
@@ -290,6 +304,7 @@
         stateLoadFailed: 'Wiederherstellungsstatus konnte nicht geladen werden: {message}',
         hintExternal: 'Lade die App neu oder wechsle die Instanz. Updates werden von Flatpak verwaltet.',
         hintLoadFailed: 'Deine Instanz war nicht erreichbar. Prüfe deine Verbindung oder versuche eine andere Instanz.',
+        retryNote: 'Automatischer Verbindungsversuch {attempt}. Du kannst auch manuell neu laden.',
         hintCrashReady: 'In der App ist etwas fehlgeschlagen. Ein Update ist bereit, klicke auf „Neu starten und Update installieren“.',
         hintCrashAvailable: 'In der App ist etwas fehlgeschlagen. Eine neuere Version ist verfügbar. Lade sie herunter, wenn du bereit bist.',
         hintCrashManual: 'In der App ist etwas fehlgeschlagen. Eine neuere Version ist verfügbar, aber dieser Build kann sie nicht selbst installieren. Lade sie herunter und ersetze die App.',
@@ -392,6 +407,18 @@
       const updatesEnabled = state.updatesEnabled !== false;
       $('hint').textContent = hintFor(reasonCode, state.updateState, updatesEnabled);
 
+      // Background reconnect status. The main process publishes autoRetry only
+      // while its probe loop is running, and only a load failure starts it.
+      const retry = state.autoRetry;
+      const retryNote = $('retry-note');
+      if (retry && reasonCode === 'load-failed') {
+        retryNote.hidden = false;
+        retryNote.textContent = t('retryNote', { attempt: String(retry.attempt) });
+      } else {
+        retryNote.hidden = true;
+        retryNote.textContent = '';
+      }
+
       // Check for Updates button
       $('btn-check').textContent = checkButtonLabel(state.updateState);
       $('btn-check').disabled = !checkButtonEnabled(state.updateState);
@@ -420,6 +447,10 @@
       const lines = [];
       lines.push((LANG === 'zh' ? '版本：' : 'Version: ') + cachedVersion);
       if (state.reason) lines.push((LANG === 'zh' ? '原因：' : 'Reason: ') + state.reason.code + ' (' + state.reason.detail + ')');
+      if (state.autoRetry) {
+        lines.push((LANG === 'zh' ? '自动重连：第 ' : 'Auto retry: attempt ') + state.autoRetry.attempt
+          + (LANG === 'zh' ? ' 次' : ''));
+      }
       if (state.updateVersion) lines.push((LANG === 'zh' ? '更新版本：' : 'Update version: ') + state.updateVersion);
       if (state.lastUpdateError) {
         lines.push((LANG === 'zh' ? '上次更新错误：' : 'Last update error: ') + state.lastUpdateError.message);

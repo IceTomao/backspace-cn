@@ -598,6 +598,8 @@ interface RecoveryState {
   updateVersion: string | null;
   lastUpdateError: { message: string; code: string | null; at: number } | null;
   lastCheckResult: 'up-to-date' | 'failed' | null;  // transient, 5s decay
+  // Present only while the page is reconnecting on its own after a load failure.
+  autoRetry: { attempt: number; nextAttemptAt: number | null } | null;
 }
 ```
 
@@ -607,7 +609,7 @@ Two flags not in the public state: `inRecoveryMode` (private to the store, guard
 
 | Mechanism | Catches | Notes |
 |-----------|---------|-------|
-| `did-fail-load` | Network/HTTP transport failures (DNS, refused, TLS, transport-level) | Filtered by `isMainFrame`; ignores `errorCode === -3` (ERR_ABORTED). 5xx with body does NOT fire — falls through to boot timer. |
+| `did-fail-load` | Network/HTTP transport failures (DNS, refused, TLS, transport-level) | Filtered by `isMainFrame`; ignores `errorCode === -3` (ERR_ABORTED). Transient codes retry silently before escalating — see below. 5xx with body does NOT fire — falls through to boot timer. |
 | `render-process-gone` | Renderer process termination | Filtered by reason; `clean-exit` ignored. Triggers on `crashed`, `killed`, `oom`, `launch-failed`, `integrity-failure`. |
 | `unresponsive` | Main thread blocked >10s | 10s grace period; cancelled by `responsive` event. Matches Chrome's "page not responding" pattern. |
 | Boot-completion ping | JS exceptions during boot, module-init throws, broken preload calls — failures the other events don't catch | `window.backspace.rendererReady()` from web side; main-side timer (20s, packaged builds only, http(s):// URLs only) |
@@ -620,6 +622,43 @@ The boot ping is **not a heartbeat** — it is a one-shot per-navigation signal.
 Main-side gating uses a per-navigation `pingReceivedThisNav` flag (reset on `did-navigate`, set in `handleRendererReady`). If the ping arrives BEFORE the timer is armed — the typical SPA case, because `useEffect` runs in a microtask after bundle execution + React render, which is before `window.onload` that `did-finish-load` waits on — `armBootTimer` checks the flag and short-circuits. If the ping arrives AFTER the timer is armed (less-common ordering), it clears the existing timer via `clearBootTimer`. Either path means a healthy renderer never trips false recovery. The `bootArmed` flag retains its role: it ensures a `clearBootTimer` call inside the timeout callback is a no-op if the timer was already disarmed by the ping.
 
 Navigation-aware arming: `did-navigate` (top-level non-same-document) clears any pending timer, resets `pingReceivedThisNav`, and queues a fresh arm for `did-finish-load`. `did-navigate-in-page` (SPA routing) is ignored, so React Router channel switches don't trip the timer.
+
+### Transient Load Failures & Auto-Reconnect
+
+A single failed navigation is not proof that the instance is unreachable: DNS
+may not be warm yet at login, a VPN or proxy may still be establishing, a
+self-hosted instance may be mid-restart, or a stale cache entry may abort the
+first fetch. Escalating straight to the recovery page on those conditions is
+what made "Backspace could not load" appear intermittently while the same URL
+worked in a browser.
+
+`recovery.ts` therefore classifies `did-fail-load` error codes:
+
+- `TRANSIENT_LOAD_ERROR_CODES` — DNS, connection reset/refused/aborted, proxy
+  and tunnel failures, timeouts, partially downloaded responses. After one
+  such failure the window retries the same URL silently once, 750 ms later.
+  Only a second failure escalates to recovery.
+- Everything else (certificate errors, blocked schemes, invalid URLs) is
+  deterministic, so it escalates immediately — retrying would only hide the
+  real problem.
+
+Once the recovery page is showing, the page itself reconnects:
+
+- `enterRecoveryMode` starts an auto-retry loop for `load-failed` entries. Each
+  attempt probes the resolved instance URL with a 5 s `net.fetch` GET
+  (`cache: 'no-store'`, any HTTP status counts as reachable) and only then
+  navigates — navigating blindly would flash the recovery page in and out.
+- Attempts back off `2 s → 4 s → 8 s → 15 s` (capped, `nextAutoRetryDelayMs`).
+- Any `did-finish-load` on an `http(s)` URL stops the loop, so a navigation
+  that succeeds for any reason — including the user pressing Reload — ends it.
+  (`file://` loads are the recovery page and the instance picker; they must not
+  cancel the loop.)
+- Reload and Change Instance stop the loop explicitly: the user has taken over.
+- The page shows "Reconnecting automatically — attempt N" under the hint and
+  mirrors it in the diagnostics block.
+
+`setReachabilityProbe()` swaps the probe (tests inject a fake); production uses
+Electron's `net.fetch`.
 
 ### Recovery UI
 

@@ -40,12 +40,15 @@ function finitePositiveRounded(value: number | undefined): number | null {
   return Math.round(value);
 }
 
-/** Wrapper component for stream quality settings — needs its own state + close guard. */
+/**
+ * Wrapper component for stream quality settings. The popover it toggles marks
+ * itself as part of the context-menu surface, so presses inside it keep the
+ * surrounding menu open without a separate "close guard" flag.
+ */
 function StreamQualityItem() {
   const { t } = useTranslation(['voice', 'common']);
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const setCloseGuard = useContextMenuStore((s) => s.setCloseGuard);
   const screenShareConfig = useVoiceStore((s) => s.screenShareConfig);
 
   return (
@@ -56,11 +59,7 @@ function StreamQualityItem() {
       <div className="relative">
         <button
           ref={btnRef}
-          onClick={() => {
-            const n = !open;
-            setOpen(n);
-            setCloseGuard(n);
-          }}
+          onClick={() => setOpen((prev) => !prev)}
           className="w-full flex items-center justify-between px-2 py-1.5 text-sm text-txt-secondary hover:bg-interactive-hover rounded transition-colors"
         >
           <span>{t('voice:stream.qualityValue', { height: screenShareConfig.height, fps: screenShareConfig.fps })}</span>
@@ -71,10 +70,7 @@ function StreamQualityItem() {
         {open && (
           <ScreenShareSettingsPopover
             open={open}
-            onClose={() => {
-              setOpen(false);
-              setCloseGuard(false);
-            }}
+            onClose={() => setOpen(false)}
             anchorRef={btnRef}
           />
         )}

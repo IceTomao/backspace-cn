@@ -24,6 +24,12 @@ interface UseFloatingPositionOptions {
   placement: Placement;
   offset?: number;
   enabled?: boolean;
+  /**
+   * Stacking layer for the floating surface. Surfaces opened from inside an
+   * already-floating layer (a popover inside a context menu, say) must declare a
+   * layer above their parent instead of inheriting the default 200.
+   */
+  zIndex?: number;
 }
 
 interface UseFloatingPositionResult {
@@ -135,7 +141,7 @@ export function useFloatingPosition(
   floatingRef: RefObject<HTMLElement | null>,
   options: UseFloatingPositionOptions,
 ): UseFloatingPositionResult {
-  const { placement, offset = 8, enabled = true } = options;
+  const { placement, offset = 8, enabled = true, zIndex = 200 } = options;
 
   const [result, setResult] = useState<{ top: number; left: number; actualPlacement: Placement }>({
     top: -9999,
@@ -197,7 +203,7 @@ export function useFloatingPosition(
       position: 'fixed',
       top: result.top,
       left: result.left,
-      zIndex: 200,
+      zIndex,
     },
     actualPlacement: result.actualPlacement,
   };
