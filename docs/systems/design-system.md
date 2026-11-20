@@ -382,4 +382,3 @@ a menu item renders (`ScreenShareSettingsPopover`). Marks are opt-in, so a
 nested overlay that forgets the attribute closes the menu instead of leaking
 presses through to the app. The panel additionally carries
 `data-context-menu-panel`, which tests use instead of matching z-index classes.
-
