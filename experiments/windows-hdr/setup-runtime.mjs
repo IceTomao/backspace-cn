@@ -21,6 +21,9 @@ const runtime = runtimes[name];
 if (!runtime) throw new Error('Expected encoder, capture, livekit or player');
 const { size, sha256 } = runtime;
 const asset = `https://api.github.com/repos/${runtime.repo}/releases/assets/${runtime.id}`;
+// GitHub serves release assets from two rotating CDN hosts; the range-request
+// contract below only holds for these, so anything else is rejected.
+const ASSET_HOSTS = new Set(['release-assets.githubusercontent.com', 'objects.githubusercontent.com']);
 const archive = path.join(root, runtime.file);
 function length(file) { try { return statSync(file).size; } catch { return 0; } }
 async function checksum(file) { const hash = createHash('sha256'); for await (const chunk of createReadStream(file)) hash.update(chunk); return hash.digest('hex'); }
@@ -28,7 +31,8 @@ async function main() {
   if (length(archive) !== size || await checksum(archive) !== sha256) {
     const response = await fetch(asset, { headers: { Accept: 'application/octet-stream' }, redirect: 'manual', signal: AbortSignal.timeout(30000) });
     const url = response.headers.get('location');
-    if (!url || new URL(url).hostname !== 'release-assets.githubusercontent.com') throw new Error('Unexpected release asset redirect');
+    const location = url ? new URL(url) : null;
+    if (!location || location.protocol !== 'https:' || !ASSET_HOSTS.has(location.hostname)) throw new Error(`Unexpected release asset redirect: ${url ?? response.status}`);
     const count = 32, step = Math.ceil(size / count);
     await Promise.all(Array.from({ length: count }, async (_, index) => {
       const file = path.join(root, `${name}-chunk-${index}`), start = index * step, end = Math.min(size - 1, start + step - 1);
