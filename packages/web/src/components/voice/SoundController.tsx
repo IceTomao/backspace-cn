@@ -205,7 +205,10 @@ export function SoundController() {
       const justConnected = !prev.current.isLiveKitConnected && state.isLiveKitConnected;
 
       if (justDisconnected) {
-        audioManager.playSound('disconnect', sfxOpts);
+        // Leaving a channel (or switching to another one) is part of the same
+        // "you moved between channels" cue as the join chime, so it follows the
+        // dedicated join-sound volume instead of the general SFX slider.
+        audioManager.playSound('disconnect', joinOpts);
       }
       if (justConnected) {
         void audioManager.playJoinSound('join', joinPreset, joinOpts);

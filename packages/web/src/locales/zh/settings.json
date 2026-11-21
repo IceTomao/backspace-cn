@@ -136,6 +136,7 @@
       "previewJoin": "试听加入",
       "previewLeave": "试听退出",
       "volumeLabel": "提示音音量",
+      "scopeHint": "切换频道和退出频道的提示音也使用此音量。",
       "presets": {
         "classic": "经典",
         "soft": "柔和",

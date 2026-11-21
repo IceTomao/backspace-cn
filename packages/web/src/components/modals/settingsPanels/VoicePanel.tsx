@@ -143,6 +143,9 @@ export function VoicePanel() {
               }}
             />
           </div>
+          <div className="pt-1 text-xs text-txt-tertiary">
+            {t('settings:voice.joinSound.scopeHint')}
+          </div>
         </div>
       </div>
 

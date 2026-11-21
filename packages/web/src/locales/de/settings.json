@@ -136,6 +136,7 @@
       "previewJoin": "Beitritt anhören",
       "previewLeave": "Verlassen anhören",
       "volumeLabel": "Lautstärke der Hinweistöne",
+      "scopeHint": "Gilt auch für Kanalwechsel und das Verlassen eines Kanals.",
       "presets": {
         "classic": "Klassisch",
         "soft": "Sanft",

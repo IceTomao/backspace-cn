@@ -199,7 +199,10 @@ describe('SoundController participant cues', () => {
     expect(leaveCues()).toHaveLength(2);
   });
 
-  it('plays the disconnect cue, not a leave cue, when the local user leaves', () => {
+  it('plays the disconnect cue at the join-sound volume, not the SFX volume', () => {
+    // 100 % on the join-sound slider is 0.7 gain, while the untouched SFX
+    // slider sits at 0.8 — so the two envelopes are distinguishable here.
+    useVoiceStore.setState({ joinSoundVolume: 100, soundEffectVolume: 100 });
     mountController();
     act(() => {
       useVoiceStore.setState({ isLiveKitConnected: true, participants: [SELF] });
@@ -210,9 +213,11 @@ describe('SoundController participant cues', () => {
       useVoiceStore.setState({ isLiveKitConnected: false, participants: [] });
     });
     expect(leaveCues()).toHaveLength(0);
-    expect(audioMock.playSound).toHaveBeenCalledWith(
-      'disconnect',
-      expect.objectContaining({ volume: expect.any(Number) }),
-    );
+
+    const disconnectCall = audioMock.playSound.mock.calls.find(([name]) => name === 'disconnect');
+    expect(disconnectCall).toBeDefined();
+    const options = disconnectCall?.[1] as { volume: number } | undefined;
+    expect(options?.volume).toBeCloseTo(0.7, 5);
+    expect(options?.volume).not.toBeCloseTo(0.8, 5);
   });
 });

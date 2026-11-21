@@ -136,6 +136,7 @@
       "previewJoin": "Preview join",
       "previewLeave": "Preview leave",
       "volumeLabel": "Notification volume",
+      "scopeHint": "Also applies to switching channels and leaving a channel.",
       "presets": {
         "classic": "Classic",
         "soft": "Soft",
