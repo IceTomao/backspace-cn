@@ -213,11 +213,44 @@ describe('SoundController participant cues', () => {
       useVoiceStore.setState({ isLiveKitConnected: false, participants: [] });
     });
     expect(leaveCues()).toHaveLength(0);
+    // The cue is deliberately deferred so a channel switch can cancel it.
+    expect(audioMock.playSound).not.toHaveBeenCalledWith('disconnect', expect.anything());
 
+    act(() => {
+      vi.advanceTimersByTime(1300);
+    });
     const disconnectCall = audioMock.playSound.mock.calls.find(([name]) => name === 'disconnect');
     expect(disconnectCall).toBeDefined();
     const options = disconnectCall?.[1] as { volume: number } | undefined;
     expect(options?.volume).toBeCloseTo(0.7, 5);
     expect(options?.volume).not.toBeCloseTo(0.8, 5);
+  });
+
+  it('stays silent for the local user when leaving one channel to join another', () => {
+    useVoiceStore.setState({ joinSoundVolume: 100, soundEffectVolume: 100 });
+    mountController();
+    act(() => {
+      useVoiceStore.setState({ isLiveKitConnected: true, participants: [SELF, ALICE] });
+    });
+    expect(joinCues()).toHaveLength(1);
+
+    // Switch: LiveKit tears the old room down and the new one connects well
+    // inside the grace window.
+    act(() => {
+      useVoiceStore.setState({ isLiveKitConnected: false, participants: [] });
+    });
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    act(() => {
+      useVoiceStore.setState({ isLiveKitConnected: true, participants: [SELF, BOB] });
+    });
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(audioMock.playSound.mock.calls.filter(([name]) => name === 'disconnect')).toHaveLength(0);
+    // The join chime still marks the arrival in the new channel.
+    expect(joinCues()).toHaveLength(2);
   });
 });

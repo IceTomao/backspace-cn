@@ -70,9 +70,24 @@ export function registerSdrNative(
   };
 
   const window = getWindow();
-  window?.webContents.on('did-start-navigation', navigation);
-  window?.webContents.on('render-process-gone', cancel);
-  window?.on('closed', cancel);
+  /**
+   * `window.webContents` throws "Object has been destroyed" once the window is
+   * gone, which is exactly when quit and window-recreation call the disposer
+   * below. Capture the reference while the window is alive, and keep every
+   * later detach guarded so a teardown race cannot raise the main-process crash
+   * dialog.
+   */
+  const contents = window && !window.isDestroyed() ? window.webContents : null;
+  const detach = (label: string, detachListener: () => void) => {
+    try {
+      detachListener();
+    } catch (error) {
+      console.warn(`[SDR] ${label} during teardown:`, error instanceof Error ? error.message : error);
+    }
+  };
+  detach('navigation listener attach failed', () => contents?.on('did-start-navigation', navigation));
+  detach('crash listener attach failed', () => contents?.on('render-process-gone', cancel));
+  detach('window listener attach failed', () => window?.on('closed', cancel));
 
   ipc.handle('sdr-native-request', async (event, input: unknown) => {
     const owner = trusted(event);
@@ -223,11 +238,21 @@ export function registerSdrNative(
 
   app.on('before-quit', cancel);
   return () => {
-    cancel();
+    try {
+      cancel();
+    } catch (error) {
+      console.warn('[SDR] cancellation during teardown failed:', error instanceof Error ? error.message : error);
+    }
     ipc.removeHandler('sdr-native-request');
     app.off('before-quit', cancel);
-    window?.webContents.off('did-start-navigation', navigation);
-    window?.webContents.off('render-process-gone', cancel);
-    window?.off('closed', cancel);
+    detach('navigation listener removal failed', () => {
+      if (contents && !contents.isDestroyed()) contents.off('did-start-navigation', navigation);
+    });
+    detach('crash listener removal failed', () => {
+      if (contents && !contents.isDestroyed()) contents.off('render-process-gone', cancel);
+    });
+    detach('window listener removal failed', () => {
+      if (window && !window.isDestroyed()) window.off('closed', cancel);
+    });
   };
 }

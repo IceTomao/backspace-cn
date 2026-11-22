@@ -71,9 +71,26 @@ export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow |
   };
   const navigation = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => { if (mainFrame && !inPlace) cancel(); };
   const window = getWindow();
-  window?.webContents.on('did-start-navigation', navigation);
-  window?.webContents.on('render-process-gone', cancel);
-  window?.on('closed', cancel);
+  /**
+   * Touching `window.webContents` on a destroyed `BrowserWindow` throws
+   * "Object has been destroyed" before any `isDestroyed()` check on the
+   * contents can run. Quit and window-recreation both call the disposer below,
+   * sometimes after the window is gone, so the reference is captured once while
+   * the window is certainly alive and every later detach is guarded and
+   * contained — an uncaught throw here reaches Electron's main-process crash
+   * dialog.
+   */
+  const contents = window && !window.isDestroyed() ? window.webContents : null;
+  const detach = (label: string, detachListener: () => void) => {
+    try {
+      detachListener();
+    } catch (error) {
+      console.warn(`[HDR] ${label} during teardown:`, error instanceof Error ? error.message : error);
+    }
+  };
+  detach('navigation listener attach failed', () => contents?.on('did-start-navigation', navigation));
+  detach('crash listener attach failed', () => contents?.on('render-process-gone', cancel));
+  detach('window listener attach failed', () => window?.on('closed', cancel));
   ipc.handle('hdr-native-request', async (event, input: unknown) => {
     const owner = trusted(event);
     if (!input || typeof input !== 'object' || !('action' in input)) throw new Error('Invalid HDR request');
@@ -152,9 +169,21 @@ export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow |
   });
   app.on('before-quit', cancel);
   return () => {
-    cancel(); ipc.removeHandler('hdr-native-request'); app.off('before-quit', cancel);
-    window?.webContents.off('did-start-navigation', navigation);
-    window?.webContents.off('render-process-gone', cancel);
-    window?.off('closed', cancel);
+    try {
+      cancel();
+    } catch (error) {
+      console.warn('[HDR] cancellation during teardown failed:', error instanceof Error ? error.message : error);
+    }
+    ipc.removeHandler('hdr-native-request');
+    app.off('before-quit', cancel);
+    detach('navigation listener removal failed', () => {
+      if (contents && !contents.isDestroyed()) contents.off('did-start-navigation', navigation);
+    });
+    detach('crash listener removal failed', () => {
+      if (contents && !contents.isDestroyed()) contents.off('render-process-gone', cancel);
+    });
+    detach('window listener removal failed', () => {
+      if (window && !window.isDestroyed()) window.off('closed', cancel);
+    });
   };
 }

@@ -199,11 +199,31 @@ function publishedActivities(): DesktopActivity[] {
   return filtered.map(({ assets: _assets, ...activity }) => activity);
 }
 
+/**
+ * Send to the main window without ever letting a teardown race surface as a
+ * main-process crash dialog.
+ *
+ * Windows and OS events keep firing while the app quits (blur on close, the
+ * activity detector's final publish, recovery bookkeeping), and at that point
+ * `window.webContents` can already be gone even though the window object is
+ * still reachable — touching it throws "Object has been destroyed". Callers that
+ * can observe those late events go through here instead of `?.webContents.send`.
+ */
+function sendToMainWindow(channel: string, ...args: unknown[]): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) return;
+  try {
+    window.webContents.send(channel, ...args);
+  } catch (error) {
+    console.warn(`[Main] Dropped "${channel}" during window teardown:`, error instanceof Error ? error.message : error);
+  }
+}
+
 function publishActivities(): void {
   const activities = publishedActivities();
-  mainWindow?.webContents.send('activities-detected', activities);
+  sendToMainWindow('activities-detected', activities);
   // Keep the legacy bridge functional for installed web clients during a shell-only update.
-  mainWindow?.webContents.send('activity-detected', getLegacyActivity(activities));
+  sendToMainWindow('activity-detected', getLegacyActivity(activities));
 }
 const keybindManager = new KeybindManager();
 let tray: Tray | null = null;
@@ -708,10 +728,10 @@ function createWindow(): void {
 
   // Window focus IPC for notification suppression
   mainWindow.on('focus', () => {
-    mainWindow?.webContents.send('window-focus-changed', true);
+    sendToMainWindow('window-focus-changed', true);
   });
   mainWindow.on('blur', () => {
-    mainWindow?.webContents.send('window-focus-changed', false);
+    sendToMainWindow('window-focus-changed', false);
   });
 
   // Intercept own-instance /join/* URLs so they open in-app instead of the

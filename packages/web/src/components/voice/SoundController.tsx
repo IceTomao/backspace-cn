@@ -36,6 +36,17 @@ const PARTICIPANT_BASELINE_SETTLE_MS = 1500;
 const PARTICIPANT_CUE_DEDUPE_MS = 1500;
 
 /**
+ * Delay before the local "you left the channel" cue plays.
+ *
+ * Switching channels leaves one LiveKit room and joins the next, so the self
+ * disconnect cue fired on every switch and overlapped the join chime — the local
+ * user hears two cues for one action they initiated. The cue is therefore held
+ * briefly and dropped if a reconnect lands first; a real hang-up still plays it
+ * once the grace window expires.
+ */
+const SELF_DISCONNECT_GRACE_MS = 1200;
+
+/**
  * Mutable state for participant cue decisions. Kept outside React state on
  * purpose: every field is a transition baseline, not render output, and the
  * store subscriber must be able to update it synchronously.
@@ -149,6 +160,8 @@ export function SoundController() {
   });
 
   const incomingCallLoop = useRef<AudioBufferSourceNode | null>(null);
+  /** Pending self disconnect cue; cancelled when a channel switch reconnects. */
+  const selfDisconnectCue = useRef<ReturnType<typeof setTimeout> | null>(null);
   const incomingCallLoading = useRef(false);
   const outgoingCallLoop = useRef<AudioBufferSourceNode | null>(null);
   const outgoingCallLoading = useRef(false);
@@ -207,10 +220,22 @@ export function SoundController() {
       if (justDisconnected) {
         // Leaving a channel (or switching to another one) is part of the same
         // "you moved between channels" cue as the join chime, so it follows the
-        // dedicated join-sound volume instead of the general SFX slider.
-        audioManager.playSound('disconnect', joinOpts);
+        // dedicated join-sound volume instead of the general SFX slider. The
+        // cue is deferred: a channel switch reconnects within the grace window
+        // and cancels it, so only a real hang-up is audible.
+        if (selfDisconnectCue.current !== null) clearTimeout(selfDisconnectCue.current);
+        selfDisconnectCue.current = setTimeout(() => {
+          selfDisconnectCue.current = null;
+          void audioManager.playSound('disconnect', joinOpts);
+        }, SELF_DISCONNECT_GRACE_MS);
       }
       if (justConnected) {
+        // Reconnecting inside the grace window means the user switched
+        // channels, not left the call: drop the pending leave cue.
+        if (selfDisconnectCue.current !== null) {
+          clearTimeout(selfDisconnectCue.current);
+          selfDisconnectCue.current = null;
+        }
         void audioManager.playJoinSound('join', joinPreset, joinOpts);
         // Treat the roster that LiveKit publishes right after this tick as the
         // baseline instead of a batch of arrivals.
@@ -382,6 +407,10 @@ export function SoundController() {
 
     return () => {
       clearTimeout(timer);
+      if (selfDisconnectCue.current !== null) {
+        clearTimeout(selfDisconnectCue.current);
+        selfDisconnectCue.current = null;
+      }
       unsubscribeVoice();
       unsubscribeChat();
       if (incomingCallLoop.current) incomingCallLoop.current.stop();

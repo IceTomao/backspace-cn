@@ -1541,5 +1541,12 @@ Earlier builds wrote to `<appData>/@backspace/desktop/`. On first launch after t
 ### Shutdown Sequence (`before-quit`)
 
 1. Set `isQuitting = true` (allows window close to proceed)
-2. Stop activity detection (clear interval, null callback)
-3. Stop keybind manager (release active actions, stop uIOhook)
+2. Release the streaming power blocker
+3. Dispose the theme manager and the theme style/control subscriptions, then favorite images
+4. `disposeHdrNative()` / `disposeSdrNative()` — stop the native runtimes, revoke publication leases, detach the `webContents` and `closed` listeners
+5. Dispose the activity-asset session, stop activity detection, stop the keybind manager
+
+**Teardown safety.** Every one of those steps runs while the OS keeps delivering window events (blur on close, a final activity publish, navigation callbacks), and `window.webContents` throws `Object has been destroyed` once the window is gone — an uncaught throw there becomes Electron's "A JavaScript error occurred in the main process" dialog on quit. Two rules keep that path quiet:
+
+- `hdrIpc.ts` / `sdrIpc.ts` capture `webContents` once while the window is certainly alive and route every attach/detach through a `detach(label, fn)` helper that logs `[HDR] … during teardown` / `[SDR] … during teardown` instead of throwing. Native event delivery goes through `sendToWindow`, which checks the window *and* the contents and swallows send failures.
+- `main.ts` sends through `sendToMainWindow(channel, ...args)`, used by the activity publishers and the focus/blur bridge, so a late event after the window is destroyed is dropped with a `[Main] Dropped "…" during window teardown` warning.
