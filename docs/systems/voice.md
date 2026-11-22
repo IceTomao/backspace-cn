@@ -494,6 +494,7 @@ When neither native API is available the effect returns without throwing; the `v
 | Noise Suppression | overridden | — | Managed by RNNoise state |
 | Auto Gain Control | on | yes | |
 | RNNoise (ML) | on | yes | When enabled: browser NS forced off |
+| Device audio removal | on | yes | Reference-guided echo suppression; desktop captures the full device output |
 
 **Audio constraints applied to mic track:**
 ```typescript
@@ -522,7 +523,65 @@ that behavior visibly. The functional change is the preset upgrade from
 `AudioPresets.music` (48 kbps) to `AudioPresets.musicHighQualityStereo`
 (128 kbps), approximately 80 kbps more for a screen share carrying audio.
 
-**Persistence:** `voiceStore` with Zustand localStorage. Keys: `echoCancellation`, `autoGainControl`, `rnnoiseEnabled`, `screenShareConfig`.
+**Persistence:** `voiceStore` with Zustand localStorage. Keys: `echoCancellation`, `autoGainControl`, `rnnoiseEnabled`, `systemEchoSuppression`, `screenShareConfig`.
+
+### Device-audio echo suppression — `audio/echoSuppression.ts`
+
+The browser's AEC only knows about audio this page renders. Everything else the
+machine plays — music, a game, another app's call — reaches the microphone
+through the speakers and gets transmitted back to everyone in the channel. This
+stage removes that leaked sound.
+
+```
+inputSource → [systemEchoSuppressor worklet] → (RNNoise) → inputGain → destination
+                    ↑ reference input
+```
+
+| Piece | Where | Notes |
+|-------|-------|-------|
+| Preference | `voiceStore.systemEchoSuppression` | default **on**; persisted, schema v22 |
+| Worklet | `audio/worklets/systemEchoSuppressor.js` | 1024-point STFT, 128-sample hop, 8× overlap |
+| Maths | `audio/echoSuppression.ts` | unit-tested; the worklet repeats the formulas |
+| Reference capture | `audio/systemAudioReference.ts` | desktop: loopback via `getDisplayMedia`; web: app playback tap |
+| Lifecycle | `components/voice/SystemEchoSuppressionController.tsx` | mounted next to `GlobalAudioRenderer` |
+
+**Algorithm.** Per frequency bin the suppressor compares the current microphone
+magnitude with a **peak-held reference magnitude** (240 ms hold, geometric decay).
+Peak-hold instead of delay alignment is deliberate: the acoustic path plus the
+playback buffer delays the reference by tens of milliseconds, that delay differs
+per machine, and a cross-correlation lock would mis-fire on speech. A bin that was
+recently played is treated as "possibly leaked playback" for the whole echo
+window, so no delay estimate is needed.
+
+The gain is `1 − 1.4 · reference / microphone`, clamped to a **−9 dB floor**:
+a wrong estimate costs a slightly dull bin, never a hole in the sentence.
+Two structural guards keep the speaker intact:
+
+- **Dominance gate** — when the microphone is more than twice the leak estimate,
+  the bin passes at unity, so talking over playback is never attenuated.
+- **Asymmetric smoothing** — suppression engages at 0.55 per hop and releases at
+  0.18, which avoids the pumping/flutter of a fast gate.
+
+Bins below the −62 dBFS reference gate are untouched, so a quiet device output
+leaves the microphone bit-exact.
+
+**Reference sources.** `EchoReferenceKind` records what is currently feeding the
+reference input, and the settings row shows it live:
+
+| Kind | Meaning |
+|------|---------|
+| `system` | full device output captured through the desktop shell's loopback |
+| `app` | the app's own playback bus (`masterBoost` tap) — the fallback |
+| `none` | nothing attached; the worklet stays transparent |
+
+The desktop capture reuses the screen-share preselection IPC and drops the video
+half of the stream; it deliberately omits `restrictOwnAudio`, because the app's
+own playback is part of what leaks. Any failure (denial, no sources, 8 s timeout)
+keeps the `app` fallback instead of degrading the call, and the capture is
+released on `releaseInputStream()` so leaving a call never leaves a device capture
+(or its OS sharing indicator) behind.
+
+**Persistence:** `voiceStore` with Zustand localStorage. Keys: `echoCancellation`, `autoGainControl`, `rnnoiseEnabled`, `systemEchoSuppression`, `screenShareConfig`.
 
 ### Per-participant output equalizer — `audio/participantEq.ts`
 

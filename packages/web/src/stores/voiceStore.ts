@@ -219,9 +219,17 @@ interface VoiceState {
   echoCancellation: boolean;
   autoGainControl: boolean;
   rnnoiseEnabled: boolean;
+  /**
+   * Reference-guided echo suppression: capture what the device plays and remove
+   * that sound from the outgoing microphone signal. On by default — the browser's
+   * own AEC only knows this tab, so leaked music, games and other apps otherwise
+   * reach the call.
+   */
+  systemEchoSuppression: boolean;
   setEchoCancellation: (enabled: boolean) => void;
   setAutoGainControl: (enabled: boolean) => void;
   setRnnoiseEnabled: (enabled: boolean) => void;
+  setSystemEchoSuppression: (enabled: boolean) => void;
   deafenedUserIds: Set<string>;
   setUserDeafened: (userId: string, deafened: boolean) => void;
   // WebSocket-based voice user status (visible without joining LiveKit)
@@ -676,9 +684,11 @@ export const useVoiceStore = create<VoiceState>()(
       echoCancellation: true,
       autoGainControl: true,
       rnnoiseEnabled: true,
+      systemEchoSuppression: true,
       setEchoCancellation: (enabled) => set({ echoCancellation: enabled }),
       setAutoGainControl: (enabled) => set({ autoGainControl: enabled }),
       setRnnoiseEnabled: (enabled) => set({ rnnoiseEnabled: enabled }),
+      setSystemEchoSuppression: (enabled) => set({ systemEchoSuppression: enabled }),
       deafenedUserIds: new Set(),
       setUserDeafened: (userId, deafened) => {
         set((state) => {
@@ -948,7 +958,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: 'backspace-voice-settings',
-      version: 21,
+      version: 22,
       migrate: (persistedState: any, version: number) => {
         if (version === 0) {
           persistedState.streamAttenuationEnabled = false;
@@ -1049,6 +1059,11 @@ export const useVoiceStore = create<VoiceState>()(
             persistedState.screenShareConfig.sdrExposureEv = 0;
           }
         }
+        if (version < 22) {
+          // New default-on audio processing step; existing installs opt in the
+          // same way as fresh ones so the leak is fixed without user action.
+          persistedState.systemEchoSuppression = true;
+        }
         return persistedState;
       },
       storage: createJSONStorage(() => appStorage),
@@ -1068,6 +1083,7 @@ export const useVoiceStore = create<VoiceState>()(
         echoCancellation: state.echoCancellation,
         autoGainControl: state.autoGainControl,
         rnnoiseEnabled: state.rnnoiseEnabled,
+        systemEchoSuppression: state.systemEchoSuppression,
         soundEffectVolume: state.soundEffectVolume,
         messageSoundAllChannels: state.messageSoundAllChannels,
         joinSoundPreset: state.joinSoundPreset,
@@ -1104,6 +1120,10 @@ export const useVoiceStore = create<VoiceState>()(
         merged.lowLatencyStreamViewing = typeof persistedState?.lowLatencyStreamViewing === 'boolean'
           ? persistedState.lowLatencyStreamViewing
           : currentState.lowLatencyStreamViewing;
+        // New in v22 and on by default: an older persisted blob has no value for
+        // it, and `{...currentState, ...persistedState}` would otherwise leave the
+        // default in place only by accident.
+        merged.systemEchoSuppression = persistedState?.systemEchoSuppression !== false;
         // Reconstruct non-persisted Sets/Maps to their defaults
         merged.spaceMutedUserIds = currentState.spaceMutedUserIds;
         merged.spaceDeafenedUserIds = currentState.spaceDeafenedUserIds;

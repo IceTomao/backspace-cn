@@ -163,6 +163,16 @@
         "label": "Echounterdrückung",
         "description": "Unterdrückt Echo, wenn deine Lautsprecher ins Mikrofon zurückkoppeln. In Sprachkanälen und Anrufen immer an."
       },
+      "deviceEcho": {
+        "label": "Geräteaudio entfernen",
+        "description": "Hört mit, was das Gerät wiedergibt, und entfernt diesen Anteil aus dem Mikrofon, damit Musik, Spiele und andere Programme nicht ins Gespräch durchschlagen.",
+        "status": {
+          "off": "Aus",
+          "system": "An — die gesamte Geräteausgabe dient als Referenz",
+          "app": "An — nur die Ausgabe dieser App dient als Referenz (die Desktop-App deckt alle Geräteaudio ab)",
+          "unavailable": "An — Referenzaufnahme wird vorbereitet"
+        }
+      },
       "autoGain": {
         "label": "Automatische Verstärkung",
         "description": "Passt die Mikrofonlautstärke automatisch an. Kann während Streams die Stimme leiser machen."

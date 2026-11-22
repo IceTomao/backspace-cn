@@ -1,6 +1,12 @@
 import rnnoiseWorkletPath from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url';
 import rnnoiseWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url';
 import rnnoiseWasmSimdPath from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url';
+import systemEchoSuppressorPath from './worklets/systemEchoSuppressor.js?url';
+import {
+  echoSuppressionStatus,
+  type EchoReferenceKind,
+  type EchoSuppressionStatus,
+} from './echoSuppression';
 import {
   joinCueNotes,
   type JoinCueDirection,
@@ -37,6 +43,18 @@ export class AudioManager {
   private rnnoiseEnabled = false;
   private rnnoiseReady = false;
   private keepAliveOscillator: OscillatorNode | null = null;
+
+  // Reference-guided echo suppression (settings → voice → audio processing).
+  // `echoSuppressorNode` sits between the microphone source and the rest of the
+  // input chain and has a second input carrying what the device is playing.
+  private echoSuppressorNode: AudioWorkletNode | null = null;
+  private echoSuppressorReady = false;
+  private echoSuppressorEnabled = true;
+  private echoAppReferenceTap: GainNode | null = null;
+  private echoReferenceSource: MediaStreamAudioSourceNode | null = null;
+  private echoReferenceStream: MediaStream | null = null;
+  private echoReferenceKind: EchoReferenceKind = 'none';
+  private echoStatusListeners: Set<(status: EchoSuppressionStatus) => void> = new Set();
 
   // Cached `getUserMedia` denial. After a NotAllowedError, subsequent
   // `setInputDevice` calls (e.g. `useLiveKit.syncMic` racing the user's
@@ -382,7 +400,8 @@ export class AudioManager {
           this.inputSource.disconnect();
         }
         this.inputSource = this.ctx.createMediaStreamSource(this.currentStream);
-        this.inputSource.connect(this.getInputTarget());
+        await this.ensureEchoSuppressor();
+        this.wireInputSource();
       }
 
       return this.currentStream;
@@ -443,6 +462,11 @@ export class AudioManager {
     // The missing currentStream makes the next join acquire a fresh stream.
     this.currentInputDeviceId = 'default';
     this.streamGeneration++;
+    // Drop the reference capture as well: leaving the call must not keep a
+    // device-output capture (and its OS sharing indicator) alive.
+    this.detachEchoReferenceStream();
+    this.echoReferenceKind = 'none';
+    this.notifyEchoStatus();
   }
 
   /**
@@ -495,6 +519,226 @@ export class AudioManager {
     return (this.rnnoiseEnabled && this.rnnoiseNode) ? this.rnnoiseNode : this.inputGain!;
   }
 
+  /**
+   * True when the microphone is currently routed through the echo suppressor.
+   * Requires both the user preference and a loaded worklet.
+   */
+  private isEchoSuppressorActive(): boolean {
+    return this.echoSuppressorEnabled && this.echoSuppressorReady && this.echoSuppressorNode !== null;
+  }
+
+  /**
+   * Rewires `inputSource` into the chain: microphone → (echo suppressor) →
+   * RNNoise / input gain. Every path that changes the input graph (device swap,
+   * RNNoise toggle, suppressor toggle) goes through here so the suppressor can
+   * never be silently dropped from the chain.
+   */
+  private wireInputSource(): void {
+    if (!this.inputSource) return;
+    this.inputSource.disconnect();
+    if (this.isEchoSuppressorActive()) {
+      this.inputSource.connect(this.echoSuppressorNode!);
+      this.connectEchoSuppressorOutput();
+    } else {
+      this.inputSource.connect(this.getInputTarget());
+    }
+  }
+
+  /** Points the suppressor's output at whatever currently terminates the input chain. */
+  private connectEchoSuppressorOutput(): void {
+    const node = this.echoSuppressorNode;
+    if (!node) return;
+    node.disconnect();
+    node.connect(this.getInputTarget());
+  }
+
+  private setEchoReferenceKind(kind: EchoReferenceKind): void {
+    this.echoReferenceKind = kind;
+    this.echoSuppressorNode?.port.postMessage({ type: 'reference', available: kind !== 'none' });
+    this.notifyEchoStatus();
+  }
+
+  private notifyEchoStatus(): void {
+    const status = echoSuppressionStatus(this.echoSuppressorEnabled, this.echoReferenceKind);
+    for (const cb of Array.from(this.echoStatusListeners)) {
+      try {
+        cb(status);
+      } catch (err) {
+        console.error('[AudioManager] Echo suppression status listener threw:', err);
+      }
+    }
+  }
+
+  /** Current suppressor state, for the settings panel's status line. */
+  getEchoSuppressionStatus(): EchoSuppressionStatus {
+    return echoSuppressionStatus(this.echoSuppressorEnabled, this.echoReferenceKind);
+  }
+
+  /**
+   * Subscribe to suppressor state changes (reference acquired/denied, toggled
+   * off). Returns an unsubscribe function.
+   */
+  onEchoSuppressionStatus(cb: (status: EchoSuppressionStatus) => void): () => void {
+    this.echoStatusListeners.add(cb);
+    return () => {
+      this.echoStatusListeners.delete(cb);
+    };
+  }
+
+  /**
+   * Taps the app's own playback bus (`masterBoost`) into the suppressor's second
+   * input. This is the fallback reference: it cannot hear other applications,
+   * but it does remove the loudest echo source — the call itself.
+   */
+  private connectAppEchoReference(): void {
+    if (!this.ctx || !this.masterBoost || !this.echoSuppressorNode) return;
+    if (this.echoAppReferenceTap) return;
+    this.echoAppReferenceTap = this.ctx.createGain();
+    this.echoAppReferenceTap.gain.value = 1;
+    this.masterBoost.connect(this.echoAppReferenceTap);
+    this.echoAppReferenceTap.connect(this.echoSuppressorNode, 0, 1);
+  }
+
+  private disconnectAppEchoReference(): void {
+    const tap = this.echoAppReferenceTap;
+    if (!tap) return;
+    try {
+      tap.disconnect();
+    } catch {
+      // Already detached; nothing to undo.
+    }
+    try {
+      this.masterBoost?.disconnect(tap);
+    } catch {
+      // The tap was never connected to the master bus.
+    }
+    this.echoAppReferenceTap = null;
+  }
+
+  private detachEchoReferenceStream(): void {
+    if (this.echoReferenceSource) {
+      try {
+        this.echoReferenceSource.disconnect();
+      } catch {
+        // Graph already torn down.
+      }
+      this.echoReferenceSource = null;
+    }
+    if (this.echoReferenceStream) {
+      for (const track of this.echoReferenceStream.getTracks()) {
+        track.onended = null;
+        track.stop();
+      }
+      this.echoReferenceStream = null;
+    }
+  }
+
+  /**
+   * Loads the suppressor worklet and inserts it into the input chain. Idempotent;
+   * a failure leaves the feature disabled rather than breaking microphone
+   * capture.
+   */
+  private async ensureEchoSuppressor(): Promise<void> {
+    if (!this.echoSuppressorEnabled) return;
+    if (!this.isInitialized) this.initContext();
+    if (!this.ctx) return;
+    if (this.echoSuppressorReady && this.echoSuppressorNode) return;
+    if (typeof AudioWorkletNode === 'undefined' || !this.ctx.audioWorklet) {
+      console.warn('[AudioManager] AudioWorklet unavailable — echo suppression disabled');
+      this.echoSuppressorEnabled = false;
+      this.notifyEchoStatus();
+      return;
+    }
+    try {
+      await this.ctx.audioWorklet.addModule(systemEchoSuppressorPath);
+      const node = new AudioWorkletNode(this.ctx, 'system-echo-suppressor', {
+        numberOfInputs: 2,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        channelCount: 2,
+        channelCountMode: 'explicit',
+      });
+      node.port.postMessage({ type: 'enabled', value: true });
+      this.echoSuppressorNode = node;
+      this.echoSuppressorReady = true;
+      this.connectAppEchoReference();
+      this.connectEchoSuppressorOutput();
+      if (this.inputSource) this.wireInputSource();
+      this.setEchoReferenceKind(this.echoAppReferenceTap ? 'app' : 'none');
+      console.log('[AudioManager] System echo suppressor loaded');
+    } catch (err) {
+      console.error('[AudioManager] Failed to load the echo suppressor worklet:', err);
+      this.echoSuppressorEnabled = false;
+      this.echoSuppressorReady = false;
+      this.echoSuppressorNode = null;
+      this.notifyEchoStatus();
+    }
+  }
+
+  /**
+   * Enables or disables reference-guided echo suppression. Disabling detaches the
+   * reference capture too, so the OS "screen is being shared" indicator goes away
+   * as soon as the feature is off.
+   */
+  async setEchoSuppressionEnabled(enabled: boolean): Promise<void> {
+    if (this.echoSuppressorEnabled === enabled) {
+      this.notifyEchoStatus();
+      return;
+    }
+    this.echoSuppressorEnabled = enabled;
+    if (enabled) {
+      await this.ensureEchoSuppressor();
+      if (this.echoReferenceKind === 'none' && this.echoAppReferenceTap) {
+        this.setEchoReferenceKind('app');
+      }
+      if (this.inputSource) this.wireInputSource();
+    } else {
+      this.echoSuppressorNode?.port.postMessage({ type: 'enabled', value: false });
+      this.detachEchoReferenceStream();
+      this.echoReferenceKind = 'none';
+      if (this.inputSource) this.wireInputSource();
+    }
+    this.notifyEchoStatus();
+  }
+
+  isEchoSuppressionEnabled(): boolean {
+    return this.echoSuppressorEnabled;
+  }
+
+  /**
+   * Attaches a device-output capture as the suppressor's reference. `null`
+   * detaches it and falls back to the app's own playback bus. Any failure keeps
+   * the fallback in place — the suppressor then suppresses less, but never
+   * distorts the microphone.
+   */
+  async attachEchoReferenceStream(stream: MediaStream | null): Promise<void> {
+    this.detachEchoReferenceStream();
+    if (!stream || !this.echoSuppressorEnabled) {
+      if (stream) {
+        for (const track of stream.getTracks()) track.stop();
+      }
+      this.setEchoReferenceKind(this.echoAppReferenceTap ? 'app' : 'none');
+      return;
+    }
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      for (const track of stream.getTracks()) track.stop();
+      this.setEchoReferenceKind(this.echoAppReferenceTap ? 'app' : 'none');
+      return;
+    }
+    await this.ensureEchoSuppressor();
+    if (!this.ctx || !this.echoSuppressorNode) {
+      for (const track of stream.getTracks()) track.stop();
+      return;
+    }
+    const audioOnly = new MediaStream(audioTracks);
+    this.echoReferenceStream = audioOnly;
+    this.echoReferenceSource = this.ctx.createMediaStreamSource(audioOnly);
+    this.echoReferenceSource.connect(this.echoSuppressorNode, 0, 1);
+    this.disconnectAppEchoReference();
+    this.setEchoReferenceKind('system');
+  }
+
   async setRnnoiseEnabled(enabled: boolean): Promise<void> {
     if (enabled && typeof AudioWorkletNode === 'undefined') {
       this.rnnoiseEnabled = false;
@@ -533,10 +777,7 @@ export class AudioManager {
         this.rnnoiseReady = false;
         this.rnnoiseEnabled = false;
         // Fall back to direct wiring
-        if (this.inputSource && this.inputGain) {
-          this.inputSource.disconnect();
-          this.inputSource.connect(this.inputGain);
-        }
+        this.wireInputSource();
         return;
       }
     }
@@ -545,9 +786,8 @@ export class AudioManager {
 
     // Rewire the graph
     if (this.inputSource) {
-      this.inputSource.disconnect();
-      this.inputSource.connect(this.getInputTarget());
-      console.log(`[AudioManager] RNNoise ${enabled ? 'enabled' : 'bypassed'} — inputSource → ${enabled ? 'rnnoiseNode' : 'inputGain'}`);
+      this.wireInputSource();
+      console.log(`[AudioManager] RNNoise ${enabled ? 'enabled' : 'bypassed'} — input chain retargeted at ${enabled ? 'rnnoiseNode' : 'inputGain'}`);
     }
 
     // Force track re-publish so LiveKit picks up the new pipeline

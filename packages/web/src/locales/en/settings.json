@@ -163,6 +163,16 @@
         "label": "Echo Cancellation",
         "description": "Cancels echo from your speakers feeding back into the mic. Always on for voice channels and calls."
       },
+      "deviceEcho": {
+        "label": "Remove Device Audio",
+        "description": "Listens to what the device is playing and removes that sound from your microphone, so music, games and other apps do not leak into the call.",
+        "status": {
+          "off": "Off",
+          "system": "On — the whole device output is used as the reference",
+          "app": "On — only this app's audio is used as the reference (the desktop app extends this to all device audio)",
+          "unavailable": "On — waiting for a reference capture"
+        }
+      },
       "autoGain": {
         "label": "Auto Gain Control",
         "description": "Auto-adjusts mic volume. Can cause voice ducking during streams."

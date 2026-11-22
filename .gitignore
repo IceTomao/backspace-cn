@@ -82,6 +82,9 @@ pnpm-debug.log*
 *.tsbuildinfo
 # tsc emit artifacts — Vite handles compilation, tsc is type-check only
 packages/web/src/**/*.js
+# …except AudioWorklet processors: the browser loads them by URL, so they have to
+# stay plain JavaScript and must be tracked.
+!packages/web/src/audio/worklets/*.js
 
 # Misc
 .cache/

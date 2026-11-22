@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVoiceStore } from '../../../stores/voiceStore';
 import { useFormatters } from '../../../i18n/formatters';
@@ -9,6 +10,7 @@ import { isAndroid } from '../../../platform/android';
 import { AndroidAudioSettings } from '../../android/AndroidAudioSettings';
 import { useUIStore } from '../../../stores/uiStore';
 import { AudioManager } from '../../../audio/AudioManager';
+import type { EchoSuppressionStatus } from '../../../audio/echoSuppression';
 import { JOIN_SOUND_PRESETS, JOIN_SOUND_VOLUME_MAX, type JoinCueDirection } from '../../../audio/joinCues';
 import { getJoinSoundVolume } from '../../../utils/sfx';
 
@@ -18,9 +20,11 @@ export function VoicePanel() {
   const echoCancellation = useVoiceStore((s) => s.echoCancellation);
   const autoGainControl = useVoiceStore((s) => s.autoGainControl);
   const rnnoiseEnabled = useVoiceStore((s) => s.rnnoiseEnabled);
+  const systemEchoSuppression = useVoiceStore((s) => s.systemEchoSuppression);
   const setEchoCancellation = useVoiceStore((s) => s.setEchoCancellation);
   const setAutoGainControl = useVoiceStore((s) => s.setAutoGainControl);
   const setRnnoiseEnabled = useVoiceStore((s) => s.setRnnoiseEnabled);
+  const setSystemEchoSuppression = useVoiceStore((s) => s.setSystemEchoSuppression);
   const soundEffectVolume = useVoiceStore((s) => s.soundEffectVolume);
   const setSoundEffectVolume = useVoiceStore((s) => s.setSoundEffectVolume);
   const messageSoundAllChannels = useVoiceStore((s) => s.messageSoundAllChannels);
@@ -32,6 +36,12 @@ export function VoicePanel() {
   const pipEnabled = useVoiceStore((s) => s.pipEnabled);
   const setPipEnabled = useVoiceStore((s) => s.setPipEnabled);
   const isMobile = useUIStore((s) => s.isMobile);
+  const [echoStatus, setEchoStatus] = useState<EchoSuppressionStatus>(() =>
+    AudioManager.getInstance().getEchoSuppressionStatus(),
+  );
+
+  useEffect(() => AudioManager.getInstance().onEchoSuppressionStatus(setEchoStatus), []);
+
   if (isAndroid()) return <AndroidAudioSettings />; // i18n-check: allow-literal (code between JSX branches)
 
   // One preset drives both directions, so each direction gets its own preview.
@@ -183,6 +193,17 @@ export function VoicePanel() {
               <div className="text-xs text-txt-tertiary">{t('settings:voice.processing.echoCancellation.description')}</div>
             </div>
             <Toggle enabled={echoCancellation} onChange={setEchoCancellation} />
+          </div>
+
+          <div className="flex items-center justify-between py-2">
+            <div className="min-w-0 pr-4">
+              <div className="text-sm text-txt-primary">{t('settings:voice.processing.deviceEcho.label')}</div>
+              <div className="text-xs text-txt-tertiary">{t('settings:voice.processing.deviceEcho.description')}</div>
+              <div className="mt-1 text-[11px] text-txt-tertiary" data-testid="device-echo-status">
+                {t(`settings:voice.processing.deviceEcho.status.${echoStatus}`)}
+              </div>
+            </div>
+            <Toggle enabled={systemEchoSuppression} onChange={setSystemEchoSuppression} />
           </div>
 
           <div className="flex items-center justify-between py-2">
