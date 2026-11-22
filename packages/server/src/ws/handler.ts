@@ -841,6 +841,34 @@ class ConnectionManager {
     this.voiceWs.delete(userId);
   }
 
+  /**
+   * Whether a socket that owns the voice session is still connected.
+   *
+   * A room membership without a live owning socket is only being held by the
+   * reconnect grace timer: nothing can resume it until a client re-registers
+   * through `voice_join`, so a newly connected client may claim it as stale.
+   */
+  isVoiceSessionLive(userId: string): boolean {
+    const ws = this.voiceWs.get(userId);
+    return ws !== undefined && this.getUserConnections(userId).has(ws);
+  }
+
+  /**
+   * Drop a room membership whose owning socket is gone.
+   *
+   * Returns the vacated room so the caller can broadcast the leave, or null
+   * when the session was live or the user was not in a room at all. The caller
+   * is responsible for broadcasting; this only mutates server state.
+   */
+  releaseStaleVoiceSession(userId: string): { roomId: string; room: VoiceRoom } | null {
+    if (this.isVoiceSessionLive(userId)) return null;
+    this.cancelVoiceDisconnect(userId);
+    const left = this.leaveCurrentRoom(userId);
+    this.voiceWs.delete(userId);
+    this.clearVoiceUserStatus(userId);
+    return left;
+  }
+
   setSpaceMuted(spaceId: string, userId: string, muted: boolean): void {
     const key = `${spaceId}:${userId}`;
     if (muted) this.spaceMutedUsers.add(key);

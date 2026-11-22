@@ -11,6 +11,7 @@ import type { ServerEvent, ClientEvent, ActiveCallInfo, Activity, User } from '@
 import { resolveAssetUrl, normalizeUserAssets, normalizeMessageAssets } from '../utils/assetUrls';
 import { broadcastVoiceStatus, broadcastDeafenViaLiveKit } from '../utils/voice';
 import { applySpaceVoiceState } from '../utils/voiceStateSync';
+import { shouldLeaveVoiceOnUnload, shouldMirrorStaleLeave, shouldProbeVoiceSession } from '../utils/voiceSessionValidation';
 import { sortDmChannels } from '../utils/dmSorting';
 import { registerSelfId } from '../utils/identity';
 import { getActiveRoom } from './useLiveKit';
@@ -475,6 +476,24 @@ function handleEvent(origin: string, event: ServerEvent): void {
         }
       }
 
+      // Counterpart to the check above: the server still lists us in a voice
+      // channel, but this client owns no session — it was quit, reloaded or
+      // crashed mid-call and the server is only holding the membership for the
+      // reconnect grace. Ask before trusting the snapshot; the server releases
+      // it when no live socket owns the session, which also stops other clients
+      // from rendering a participant that no longer exists.
+      {
+        const vs = useVoiceStore.getState();
+        const claimsMembership = shouldProbeVoiceSession(event.voiceStates, event.user.id, {
+          currentVoiceChannelId: vs.currentVoiceChannelId,
+          activeDmCallChannelId: vs.activeDmCall?.dmChannelId ?? null,
+          isLiveKitConnected: vs.isLiveKitConnected,
+        });
+        if (claimsMembership) {
+          wsSend({ type: 'voice_session_probe' }, origin);
+        }
+      }
+
       // Active DM calls do not use voice_join. Re-sending voice_status lets the
       // server bind the new socket while its DM participant is still in grace.
       {
@@ -689,6 +708,19 @@ function handleEvent(origin: string, event: ServerEvent): void {
     case 'voice_status_update':
       setVoiceUserStatus(event.userId, event.isMuted, event.isDeafened, event.isCameraOn, event.isScreenSharing, event.dynamicRange);
       break;
+
+    case 'voice_session_state': {
+      const myProbeId = isHome ? useAuthStore.getState().user?.id : getMyUserIdForOrigin(origin);
+      if (shouldMirrorStaleLeave(event, myProbeId ?? null) && event.channelId) {
+        // The server rejected the membership this client would otherwise paint
+        // from its `ready` snapshot, so drop the occupant locally right away.
+        // The authoritative leave broadcast follows; applying it twice is
+        // idempotent because `removeVoiceUser` filters a missing entry.
+        removeVoiceUser(event.channelId, myProbeId as string);
+        clearVoiceUserStatus(myProbeId as string);
+      }
+      break;
+    }
 
     case 'space_voice_state':
       // A space the user just joined mid-session — bootstrap its current voice
@@ -1668,6 +1700,25 @@ export function useWebSocket() {
       homeInitialized = false;
       disconnectFromOrigin(HOME_ORIGIN);
     };
+  }, []);
+
+  // Closing the window ends the call immediately instead of leaving the other
+  // participants with a ghost avatar until the server's reconnect grace runs
+  // out. `pagehide` is the reliable unload hook (it also fires when the page
+  // enters the back/forward cache); hiding the desktop window to the tray does
+  // not unload anything, so a minimized app keeps its call.
+  useEffect(() => {
+    const leaveOnUnload = () => {
+      const state = useVoiceStore.getState();
+      const inVoice = shouldLeaveVoiceOnUnload({
+        currentVoiceChannelId: state.currentVoiceChannelId,
+        activeDmCallChannelId: state.activeDmCall?.dmChannelId ?? null,
+        isLiveKitConnected: state.isLiveKitConnected,
+      });
+      if (inVoice) wsSendAll({ type: 'voice_leave' });
+    };
+    window.addEventListener('pagehide', leaveOnUnload);
+    return () => window.removeEventListener('pagehide', leaveOnUnload);
   }, []);
 
   return { send: wsSend, isConnected };

@@ -29,6 +29,44 @@ that feeds `ready`. The client applies it via `utils/voiceStateSync.applySpaceVo
 See `docs/systems/websocket.md` → "Mid-session space join" for the full rationale
 (single ordered channel, no snapshot-vs-stream race).
 
+### Session validation after a restart (`voice_session_probe`)
+
+The server keeps a participant's room seat for `VOICE_RECONNECT_GRACE_MS`
+(60–300 s, `ws/handler.ts`) after their socket closes, so a Wi-Fi blip does not
+eject them mid-sentence. That grace silently outlives a *terminated* app: the
+`ready` snapshot still lists the user in the channel, while `voiceStore` never
+persists `currentVoiceChannelId`, so the relaunched client renders a ghost
+occupant — and the rejoined LiveKit room has no such participant.
+
+The client therefore reconciles on connect. `utils/voiceSessionValidation`
+decides *when*:
+
+- `shouldProbeVoiceSession(voiceStates, myUserId, session)` — true when the
+  server lists me in a channel while the local session is idle
+  (`isLocalVoiceSessionIdle`: no channel, no DM call, not connected).
+- The client sends `voice_session_probe`; the server answers
+  `voice_session_state { inVoice, channelId }`.
+- `shouldMirrorStaleLeave(state, myUserId)` — on `inVoice: false` the client
+  removes the ghost immediately instead of waiting for the broadcast that
+  follows, so the sidebar never paints it (both paths are idempotent).
+
+Ownership is decided by the socket, not by liveness of the LiveKit room:
+`ConnectionManager.isVoiceSessionLive` requires a registered `voiceWs` that is
+still among the user's open connections. A second tab that is *not* in voice can
+therefore probe without stealing the seat the first tab is using — a live owner
+always wins and the probe becomes a no-op. `releaseStaleVoiceSession` is what
+actually drops the seat: it cancels the pending grace timer, leaves the room,
+forgets the voice socket and clears the status flags, then
+`handleVoiceSessionProbe` broadcasts the usual `leave` update. Only then does the
+user disappear for everyone else, so the grace window is never interpreted as
+"still connected" by anyone else's client either.
+
+Closing the window is an explicit end of session, not a reconnect: the
+`pagehide` listener in `hooks/useWebSocket.ts` sends `voice_leave` when
+`shouldLeaveVoiceOnUnload` reports an open channel, DM call or LiveKit
+connection. Hiding the desktop window to the tray does not unload the page, so a
+minimized app keeps its call.
+
 ### Microphone pre-arm (iOS user-gesture discipline)
 
 `utils/voice.joinVoiceChannel` fires `AudioContext.resume()` and `AudioManager.setInputDevice(inputDeviceId)` (which ends in `getUserMedia({audio:…})`) **synchronously inside** the click handler, before the `connectFn(channelId)` call. iOS Safari only surfaces the microphone permission prompt when `getUserMedia` is invoked from inside an active user-gesture; the original flow only acquired the mic in `useLiveKit`'s `syncMic` effect, which fires AFTER `room.connect()` resolves (token fetch + WS handshake) — many awaits past the gesture window. iOS PWA standalone is especially strict and would silently never surface the prompt; the user would see "Waiting for others to join…" indefinitely until they locked/unlocked the device (which iOS treats as a fresh activation).

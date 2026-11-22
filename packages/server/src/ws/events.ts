@@ -158,6 +158,9 @@ export function handleClientEvent(
     case 'voice_leave':
       handleVoiceLeave(userId);
       break;
+    case 'voice_session_probe':
+      handleVoiceSessionProbe(userId);
+      break;
     case 'dm_message_create':
       handleDmMessageCreate(event, userId);
       break;
@@ -821,6 +824,44 @@ function handleVoiceLeave(userId: string): void {
     broadcastRoomLeave(left.roomId, left.room, userId);
   }
   connectionManager.clearVoiceUserStatus(userId);
+}
+
+/**
+ * Answer "am I still in a voice room?" and drop the membership when the answer
+ * is "only on paper".
+ *
+ * A client that was quit, crashed or reloaded while in voice leaves a room
+ * membership behind until the reconnect grace expires. That grace exists for
+ * network handovers, but a *newly connected* client that never resumed the
+ * LiveKit session can never revive it — so the first thing it does after
+ * `ready` is probe. When no live socket owns the session the membership is
+ * stale by definition and is removed here, which stops every other client from
+ * rendering a ghost participant.
+ *
+ * A live session (the same user in another tab, or a client that resumed)
+ * always wins: the probe only reports it and never mutates state.
+ */
+function handleVoiceSessionProbe(userId: string): void {
+  const live = connectionManager.isVoiceSessionLive(userId);
+  const room = connectionManager.getUserRoom(userId);
+
+  if (live) {
+    connectionManager.sendToUser(userId, {
+      type: 'voice_session_state',
+      inVoice: true,
+      channelId: room?.roomId ?? null,
+    });
+    return;
+  }
+
+  const released = connectionManager.releaseStaleVoiceSession(userId);
+  if (released) broadcastRoomLeave(released.roomId, released.room, userId);
+
+  connectionManager.sendToUser(userId, {
+    type: 'voice_session_state',
+    inVoice: false,
+    channelId: released?.roomId ?? room?.roomId ?? null,
+  });
 }
 
 function handleVoiceStatus(event: Record<string, unknown>, userId: string, ws: WebSocket): void {

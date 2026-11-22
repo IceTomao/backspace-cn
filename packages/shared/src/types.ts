@@ -413,6 +413,11 @@ export type ClientEvent =
   | { type: 'presence_update'; status: 'online' | 'idle' | 'dnd' }
   | { type: 'voice_join'; channelId: string }
   | { type: 'voice_leave' }
+  // Asks the server whether it still considers this user to be in a voice
+  // room. A freshly started client uses it to clear a membership that was left
+  // behind by a socket that closed (quit, crash, reload) before the reconnect
+  // grace expired.
+  | { type: 'voice_session_probe' }
   | { type: 'dm_message_create'; dmChannelId: string; content?: string; attachments?: string[]; replyToId?: string }
   | { type: 'dm_typing_start'; dmChannelId: string }
   | { type: 'dm_message_edit'; messageId: string; content: string }
@@ -443,6 +448,10 @@ export type ServerEvent =
   | { type: 'typing'; channelId: string; userId: string; username: string }
   | { type: 'presence_update'; userId: string; status: string; activities?: Activity[] }
   | { type: 'voice_state_update'; channelId: string; userId: string; action: 'join' | 'leave'; channelElapsedSeconds?: number }
+  // Reply to `voice_session_probe`. `inVoice` is true only while another live
+  // socket owns the session (another tab, or this one after a successful
+  // resume); `channelId` is the membership that was found, stale or not.
+  | { type: 'voice_session_state'; inVoice: boolean; channelId: string | null }
   | { type: 'member_joined'; spaceId: string; member: MemberWithUser }
   | { type: 'member_left'; spaceId: string; userId: string }
   | { type: 'dm_message_created'; message: DmMessageWithUser }
