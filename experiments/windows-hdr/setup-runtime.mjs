@@ -27,12 +27,32 @@ const ASSET_HOSTS = new Set(['release-assets.githubusercontent.com', 'objects.gi
 const archive = path.join(root, runtime.file);
 function length(file) { try { return statSync(file).size; } catch { return 0; } }
 async function checksum(file) { const hash = createHash('sha256'); for await (const chunk of createReadStream(file)) hash.update(chunk); return hash.digest('hex'); }
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+// The redirect to the asset CDN is an unauthenticated GitHub API call, so a
+// runner that shares an egress IP can be throttled for a few seconds. That is
+// transient and cheap to retry, unlike re-downloading the archive.
+async function resolveAssetUrl(attempts = 5) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const response = await fetch(asset, { headers: { Accept: 'application/octet-stream' }, redirect: 'manual', signal: AbortSignal.timeout(30000) });
+      const url = response.headers.get('location');
+      const location = url ? new URL(url) : null;
+      if (!location && (response.status === 403 || response.status === 429 || response.status >= 500)) {
+        throw new Error(`Release asset redirect throttled (HTTP ${response.status})`);
+      }
+      if (!location || location.protocol !== 'https:' || !ASSET_HOSTS.has(location.hostname)) throw new Error(`Unexpected release asset redirect: ${url ?? response.status}`);
+      return url;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await sleep(1000 * attempt);
+    }
+  }
+  throw lastError;
+}
 async function main() {
   if (length(archive) !== size || await checksum(archive) !== sha256) {
-    const response = await fetch(asset, { headers: { Accept: 'application/octet-stream' }, redirect: 'manual', signal: AbortSignal.timeout(30000) });
-    const url = response.headers.get('location');
-    const location = url ? new URL(url) : null;
-    if (!location || location.protocol !== 'https:' || !ASSET_HOSTS.has(location.hostname)) throw new Error(`Unexpected release asset redirect: ${url ?? response.status}`);
+    const url = await resolveAssetUrl();
     const count = 32, step = Math.ceil(size / count);
     await Promise.all(Array.from({ length: count }, async (_, index) => {
       const file = path.join(root, `${name}-chunk-${index}`), start = index * step, end = Math.min(size - 1, start + step - 1);
@@ -42,7 +62,11 @@ async function main() {
           const part = await fetch(url, { headers: { Range: `bytes=${start + offset}-${end}` }, signal: AbortSignal.timeout(30000) });
           if (part.status !== 206 || part.headers.get('content-range') !== `bytes ${start + offset}-${end}/${size}`) throw new Error('Invalid release range response');
           await pipeline(Readable.fromWeb(part.body), createWriteStream(file, { flags: 'a' }));
-        } catch (error) { if (attempt === 4) throw error; }
+        } catch (error) {
+          if (attempt === 4) throw error;
+          // Back off instead of spending every attempt against the same throttle.
+          await sleep(500 * (attempt + 1));
+        }
       }
       if (length(file) !== end - start + 1) throw new Error(`Incomplete runtime chunk ${index}`);
     }));
