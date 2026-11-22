@@ -1704,11 +1704,13 @@ export function useWebSocket() {
 
   // Closing the window ends the call immediately instead of leaving the other
   // participants with a ghost avatar until the server's reconnect grace runs
-  // out. `pagehide` is the reliable unload hook (it also fires when the page
-  // enters the back/forward cache); hiding the desktop window to the tray does
-  // not unload anything, so a minimized app keeps its call.
+  // out. `pagehide` is the reliable unload hook; hiding the desktop window to
+  // the tray does not unload anything, so a minimized app keeps its call. A page
+  // restored from the back/forward cache is *not* closed — its LiveKit room and
+  // sockets survive — so that visit keeps the call as well.
   useEffect(() => {
-    const leaveOnUnload = () => {
+    const leaveOnUnload = (event: PageTransitionEvent) => {
+      if (event.persisted) return;
       const state = useVoiceStore.getState();
       const inVoice = shouldLeaveVoiceOnUnload({
         currentVoiceChannelId: state.currentVoiceChannelId,
