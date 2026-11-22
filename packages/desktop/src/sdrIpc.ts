@@ -78,6 +78,13 @@ export function registerSdrNative(
    * dialog.
    */
   const contents = window && !window.isDestroyed() ? window.webContents : null;
+  /**
+   * `webContents.isDestroyed()` is the authoritative check, but test doubles and
+   * a partially torn-down instance may not expose it; a missing method is
+   * treated as "still attached" and `detach` contains any throw.
+   */
+  const contentsDestroyed = (target: { isDestroyed?: () => boolean }): boolean =>
+    typeof target.isDestroyed === 'function' && target.isDestroyed();
   const detach = (label: string, detachListener: () => void) => {
     try {
       detachListener();
@@ -246,10 +253,10 @@ export function registerSdrNative(
     ipc.removeHandler('sdr-native-request');
     app.off('before-quit', cancel);
     detach('navigation listener removal failed', () => {
-      if (contents && !contents.isDestroyed()) contents.off('did-start-navigation', navigation);
+      if (contents && !contentsDestroyed(contents)) contents.off('did-start-navigation', navigation);
     });
     detach('crash listener removal failed', () => {
-      if (contents && !contents.isDestroyed()) contents.off('render-process-gone', cancel);
+      if (contents && !contentsDestroyed(contents)) contents.off('render-process-gone', cancel);
     });
     detach('window listener removal failed', () => {
       if (window && !window.isDestroyed()) window.off('closed', cancel);

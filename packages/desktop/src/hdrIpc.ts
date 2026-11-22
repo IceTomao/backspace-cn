@@ -81,6 +81,14 @@ export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow |
    * dialog.
    */
   const contents = window && !window.isDestroyed() ? window.webContents : null;
+  /**
+   * `webContents.isDestroyed()` is the authoritative check, but Electron test
+   * doubles and a partially torn-down instance may not expose it. A missing
+   * method is treated as "still attached" so the detach is attempted and
+   * `detach` contains any throw.
+   */
+  const contentsDestroyed = (target: { isDestroyed?: () => boolean }): boolean =>
+    typeof target.isDestroyed === 'function' && target.isDestroyed();
   const detach = (label: string, detachListener: () => void) => {
     try {
       detachListener();
@@ -177,10 +185,10 @@ export function registerHdrNative(ipc: IpcMain, getWindow: () => BrowserWindow |
     ipc.removeHandler('hdr-native-request');
     app.off('before-quit', cancel);
     detach('navigation listener removal failed', () => {
-      if (contents && !contents.isDestroyed()) contents.off('did-start-navigation', navigation);
+      if (contents && !contentsDestroyed(contents)) contents.off('did-start-navigation', navigation);
     });
     detach('crash listener removal failed', () => {
-      if (contents && !contents.isDestroyed()) contents.off('render-process-gone', cancel);
+      if (contents && !contentsDestroyed(contents)) contents.off('render-process-gone', cancel);
     });
     detach('window listener removal failed', () => {
       if (window && !window.isDestroyed()) window.off('closed', cancel);
