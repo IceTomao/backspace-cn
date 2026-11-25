@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Embed } from '@backspace/shared';
+import { MediaPrivacyItem } from '../MediaPrivacy';
 
 interface GenericEmbedProps {
   embed: Embed;
@@ -41,14 +42,16 @@ export function GenericEmbed({ embed }: GenericEmbedProps) {
         )}
       </div>
       {embed.image && (
-        <div data-embed-thumbnail className="w-[80px] h-[80px] m-3 flex-shrink-0">
-          <img
-            src={embed.image}
-            alt=""
-            className="w-full h-full object-cover rounded-[4px]"
-            referrerPolicy="no-referrer"
-          />
-        </div>
+        <MediaPrivacyItem item={`embed:${embed.id}`} compact>
+          <div data-embed-thumbnail className="w-[80px] h-[80px] m-3 flex-shrink-0">
+            <img
+              src={embed.image}
+              alt=""
+              className="w-full h-full object-cover rounded-[4px]"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+        </MediaPrivacyItem>
       )}
     </div>
   );

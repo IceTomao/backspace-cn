@@ -183,6 +183,7 @@
   "category_not_found": "找不到该类别。",
   "channel_name_required": "输入频道名称",
   "channel_name_length": "频道名称的长度必须为{{min}}至{{max}}个字符。",
+  "channel_media_privacy_mask_invalid": "媒体隐私遮罩仅适用于文字频道，且必须为布尔值。",
   "channel_type_invalid": "频道可以是文本频道，也可以是语音频道。",
   "category_not_in_space": "该类别不属于此社区。",
   "channel_not_in_space": "该频道不属于此社区。",

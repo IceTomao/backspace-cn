@@ -1416,6 +1416,7 @@ function buildReadyPayload(userId: string): {
             topic: ch.topic,
             position: ch.position ?? 0,
             categoryId: ch.categoryId ?? null,
+            mediaPrivacyMask: ch.mediaPrivacyMask,
             isPrivate: privateChannelIds.has(ch.id),
             createdAt: ch.createdAt,
             lastMessageId: lastMsgMap.get(ch.id) ?? null,

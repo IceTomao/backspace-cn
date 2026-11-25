@@ -50,6 +50,10 @@
     "settings": {
       "title": "Channel Settings",
       "channelLabel": "Channel",
+      "mediaPrivacy": {
+        "label": "Media privacy mask",
+        "description": "Hide images, videos, and other media in this channel by default. Click to reveal them. Stickers are unaffected."
+      },
       "private": {
         "label": "Private Channel",
         "description": "Only selected members and roles will be able to view this channel.",

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { serverUrl } from '../../platform/android';
 import { MentionBadge } from './MentionBadge';
 import { EmojiText } from '../ui/EmojiText';
+import { mediaItemKey, useMediaCovered } from './MediaPrivacy';
 
 const GIF_URL_REGEX = /^https:\/\/(?:media\.tenor\.com|static\.klipy\.com)\/.+$/;
 
@@ -19,6 +20,7 @@ export interface ReplyPreviewData {
   kind: ReplyPreviewKind;
   text?: string;
   thumbnailUrl?: string;
+  thumbnailItem?: string;
   attachmentCount: number;
 }
 
@@ -40,13 +42,14 @@ export function getReplyPreviewData(message: MessageWithUser): ReplyPreviewData 
   const content = message.content?.trim() ?? '';
   const attachments = message.attachments ?? [];
   const embeds = message.embeds ?? [];
-  const imageAttachment = attachments.find((attachment) => attachment.mimetype.startsWith('image/'));
+  const imageAttachment = attachments.find((attachment) =>
+    attachmentMimeType(attachment.mimetype, attachment.originalName, attachment.filename).startsWith('image/'));
   const attachmentThumbnail = imageAttachment
     ? attachmentUrl(imageAttachment.thumbnailFilename ?? imageAttachment.filename)
     : undefined;
 
   if (GIF_URL_REGEX.test(content)) {
-    return { kind: 'gif', thumbnailUrl: content, attachmentCount: attachments.length };
+    return { kind: 'gif', thumbnailUrl: content, thumbnailItem: `gif:${content}`, attachmentCount: attachments.length };
   }
 
   const isSingleUrl = /^https?:\/\/\S+$/.test(content);
@@ -57,6 +60,7 @@ export function getReplyPreviewData(message: MessageWithUser): ReplyPreviewData 
       kind: isImage ? 'image' : 'link',
       text: matchingEmbed.title ?? undefined,
       thumbnailUrl: isImage ? (matchingEmbed.image ?? matchingEmbed.url) : matchingEmbed.image ?? undefined,
+      thumbnailItem: `embed:${matchingEmbed.id}`,
       attachmentCount: attachments.length,
     };
   }
@@ -66,6 +70,7 @@ export function getReplyPreviewData(message: MessageWithUser): ReplyPreviewData 
       kind: 'text',
       text: content,
       thumbnailUrl: attachmentThumbnail,
+      thumbnailItem: imageAttachment ? `attachment:${imageAttachment.id}` : undefined,
       attachmentCount: attachments.length,
     };
   }
@@ -79,6 +84,7 @@ export function getReplyPreviewData(message: MessageWithUser): ReplyPreviewData 
       thumbnailUrl: kind === 'image'
         ? attachmentUrl(firstAttachment.thumbnailFilename ?? firstAttachment.filename)
         : undefined,
+      thumbnailItem: `attachment:${firstAttachment.id}`,
       attachmentCount: attachments.length,
     };
   }
@@ -90,6 +96,7 @@ export function getReplyPreviewData(message: MessageWithUser): ReplyPreviewData 
       kind: isImage ? 'image' : 'link',
       text: firstEmbed.title ?? undefined,
       thumbnailUrl: isImage ? (firstEmbed.image ?? firstEmbed.url) : firstEmbed.image ?? undefined,
+      thumbnailItem: `embed:${firstEmbed.id}`,
       attachmentCount: 0,
     };
   }
@@ -108,6 +115,8 @@ const ICONS: Partial<Record<ReplyPreviewKind, typeof File>> = {
 export function ReplyPreview({ message }: { message: MessageWithUser }) {
   const { t } = useTranslation('chat');
   const preview = getReplyPreviewData(message);
+  const covered = useMediaCovered(preview.thumbnailItem ? mediaItemKey(message.id, preview.thumbnailItem) : undefined);
+  const thumbnailUrl = covered ? undefined : preview.thumbnailUrl;
   const fallback = preview.kind === 'unavailable'
     ? t('reply.unavailable')
     : t(`reply.${preview.kind}`);
@@ -119,21 +128,21 @@ export function ReplyPreview({ message }: { message: MessageWithUser }) {
 
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      {preview.thumbnailUrl && (
+      {thumbnailUrl && (
         <img
-          src={preview.thumbnailUrl}
+          src={thumbnailUrl}
           alt=""
           className="h-6 w-6 shrink-0 rounded object-cover"
           loading="lazy"
         />
       )}
-      {!preview.thumbnailUrl && preview.kind === 'gif' && (
+      {!thumbnailUrl && preview.kind === 'gif' && (
         <span className="shrink-0 text-[10px] font-semibold" aria-hidden="true">GIF</span>
       )}
-      {!preview.thumbnailUrl && Icon && (
+      {!thumbnailUrl && Icon && (
         <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       )}
-      {preview.kind === 'text' && preview.attachmentCount > 0 && !preview.thumbnailUrl && (
+      {preview.kind === 'text' && preview.attachmentCount > 0 && !thumbnailUrl && (
         <Paperclip className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       )}
       <span className="truncate">{renderInlineWithMentions(text)}</span>

@@ -1,5 +1,5 @@
 import { serverUrl } from '../../platform/android';
-import React from 'react';
+import React, { useContext } from 'react';
 import { attachmentMimeType } from '@backspace/shared/src/media';
 import { VideoAttachment } from './VideoAttachment';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +8,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { useTransferStore } from '../../stores/transferStore';
 import { Tooltip } from '../ui/Tooltip';
 import { useFormatters } from '../../i18n/formatters';
+import { MediaPrivacyChannel, MediaPrivacyItem } from './MediaPrivacy';
 
 interface AttachmentRendererProps {
   attachment: Attachment;
@@ -24,9 +25,23 @@ export function attUrlOf(filename: string): string {
 }
 
 export function AttachmentRenderer({ attachment }: AttachmentRendererProps) {
+  const mimetype = attachmentMimeType(attachment.mimetype, attachment.originalName, attachment.filename);
+  if (!/^(image|video|audio)\//.test(mimetype)) {
+    return <AttachmentContent attachment={attachment} mimetype={mimetype} />;
+  }
+  return (
+    <MediaPrivacyItem item={`attachment:${attachment.id}`}>
+      <AttachmentContent attachment={attachment} mimetype={mimetype} />
+    </MediaPrivacyItem>
+  );
+}
+
+function AttachmentContent({ attachment, mimetype }: AttachmentRendererProps & { mimetype: string }) {
   const { t } = useTranslation(['chat']);
   const { formatBytes } = useFormatters();
   const openImagePreview = useUIStore((s) => s.openImagePreview);
+  const channelId = useContext(MediaPrivacyChannel);
+  const previewImage = (url: string) => channelId ? openImagePreview(url, channelId) : openImagePreview(url);
   const isMobile = useUIStore((s) => s.isMobile);
   const startDownload = useTransferStore((s) => s.startDownload);
 
@@ -34,7 +49,6 @@ export function AttachmentRenderer({ attachment }: AttachmentRendererProps) {
 
   const thumbUrl = attachment.thumbnailFilename ? attUrlOf(attachment.thumbnailFilename) : null;
   const { originalName, size } = attachment;
-  const mimetype = attachmentMimeType(attachment.mimetype, originalName, attachment.filename);
 
   // Federation status — build tooltip text
   const federationTooltip = (() => {
@@ -106,15 +120,15 @@ export function AttachmentRenderer({ attachment }: AttachmentRendererProps) {
             draggable={false}
             className={`w-full h-full max-w-[400px] max-h-[300px] object-contain hover:brightness-95 transition-all ${isMobile ? 'cursor-pointer' : 'cursor-zoom-in'}`}
             onClick={() => {
-              if (isMobile) openImagePreview(attUrl);
+              if (isMobile) previewImage(attUrl);
             }}
             onDoubleClick={() => {
-              if (!isMobile) openImagePreview(attUrl);
+              if (!isMobile) previewImage(attUrl);
             }}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' && event.key !== ' ') return;
               event.preventDefault();
-              openImagePreview(attUrl);
+              previewImage(attUrl);
             }}
             loading="lazy"
           />

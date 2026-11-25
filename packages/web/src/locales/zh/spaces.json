@@ -50,6 +50,10 @@
     "settings": {
       "title": "频道设置",
       "channelLabel": "频道",
+      "mediaPrivacy": {
+        "label": "媒体隐私遮罩",
+        "description": "默认遮盖频道中的图片、视频等媒体，点击后查看。表情包不受影响。"
+      },
       "private": {
         "label": "非公开频道",
         "description": "只有选定的成员和角色才能查看此频道。",

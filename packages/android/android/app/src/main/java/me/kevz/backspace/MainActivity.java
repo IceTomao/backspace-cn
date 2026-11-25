@@ -4,6 +4,10 @@ import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.view.View;
+import android.view.ViewGroup;
+import android.webkit.WebView;
+import android.widget.FrameLayout;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -14,6 +18,11 @@ import com.getcapacitor.BridgeActivity;
 import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
+    private View mediaPrivacyCover;
+    private boolean mediaPrivacyReady;
+    private boolean resumed;
+    private long mediaPrivacyGeneration;
+
     @Override public void onCreate(Bundle state) {
         registerPlugin(BackspaceNativePlugin.class);
         super.onCreate(state);
@@ -51,6 +60,7 @@ public class MainActivity extends BridgeActivity {
     private void applyTheme() {
         boolean dark = BackspaceRuntime.get(this).settings().optBoolean("dark");
         int color = Color.parseColor(dark ? "#0b0b10" : "#ffffff");
+        if (mediaPrivacyCover != null) mediaPrivacyCover.setBackgroundColor(color);
         bridge.getWebView().setBackgroundColor(color);
         getWindow().getDecorView().setBackgroundColor(color);
         var controller = WindowCompat.getInsetsController(getWindow(), bridge.getWebView());
@@ -69,10 +79,37 @@ public class MainActivity extends BridgeActivity {
     }
     @Override public void onResume() {
         super.onResume();
-        BackspaceRuntime.get(this).notifyWebVisibility(true);
+        resumed = true;
+        BackspaceRuntime.get(this).notifyWebVisibility(true, mediaPrivacyGeneration);
+    }
+    @Override public void onPause() {
+        resumed = false;
+        mediaPrivacyGeneration++;
+        if (mediaPrivacyReady && mediaPrivacyCover == null) {
+            mediaPrivacyCover = new View(this);
+            mediaPrivacyCover.setClickable(true);
+            addContentView(mediaPrivacyCover,
+                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            applyTheme();
+        }
+        BackspaceRuntime.get(this).notifyWebVisibility(false, mediaPrivacyGeneration);
+        super.onPause();
+    }
+    public long getMediaPrivacyGeneration() { return mediaPrivacyGeneration; }
+    public boolean isMediaPrivacyResumed() { return resumed; }
+    public void mediaPrivacyFrameReady(long generation) {
+        if (!resumed || generation != mediaPrivacyGeneration) return;
+        mediaPrivacyReady = true;
+        if (mediaPrivacyCover == null) return;
+        bridge.getWebView().postVisualStateCallback(generation, new WebView.VisualStateCallback() {
+            @Override public void onComplete(long requestId) {
+                if (!resumed || requestId != mediaPrivacyGeneration || mediaPrivacyCover == null) return;
+                ((ViewGroup) mediaPrivacyCover.getParent()).removeView(mediaPrivacyCover);
+                mediaPrivacyCover = null;
+            }
+        });
     }
     @Override public void onStop() {
-        BackspaceRuntime.get(this).notifyWebVisibility(false);
         BackspaceRuntime.get(this).activityStopped();
         super.onStop();
     }

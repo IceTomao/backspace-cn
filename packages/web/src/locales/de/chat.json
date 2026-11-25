@@ -13,6 +13,11 @@
       "confirmDelete": "Löschen bestätigen"
     }
   },
+  "mediaPrivacy": {
+    "reveal": "Medium anzeigen",
+    "showAll": "Alle Medien anzeigen",
+    "restore": "Medien wieder verdecken"
+  },
   "typing": {
     "one": "{{name}} schreibt…",
     "two": "{{first}} und {{second}} schreiben…",

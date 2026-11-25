@@ -13,6 +13,11 @@
       "confirmDelete": "Подтвердить удаление"
     }
   },
+  "mediaPrivacy": {
+    "reveal": "Показать медиа",
+    "showAll": "Показать все медиа",
+    "restore": "Снова скрыть медиа"
+  },
   "typing": {
     "one": "{{name}} печатает…",
     "two": "{{first}} и {{second}} печатают…",

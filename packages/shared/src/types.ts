@@ -201,6 +201,7 @@ export interface Channel {
   topic: string | null;
   position: number;
   categoryId: string | null;
+  mediaPrivacyMask?: boolean;
   isPrivate?: boolean;
   createdAt: number;
   lastMessageId?: string | null;
@@ -571,6 +572,7 @@ export interface UpdateChannelRequest {
   topic?: string;
   position?: number;
   categoryId?: string | null;
+  mediaPrivacyMask?: boolean;
 }
 
 export interface UpdateSpaceRequest {

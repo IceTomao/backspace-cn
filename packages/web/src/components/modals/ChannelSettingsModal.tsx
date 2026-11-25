@@ -4,6 +4,7 @@ import { Modal } from '../ui/Modal';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useUIStore } from '../../stores/uiStore';
 import { useSpaceStore, getApiForOrigin } from '../../stores/spaceStore';
+import { refreshMediaPrivacy } from '../../stores/mediaPrivacyStore';
 import { PermissionBits, permissionsToString, stringToPermissions, hasPermissionBit } from '../../utils/permissions';
 import { Toggle } from '../ui/Toggle';
 import { PermissionsEditor } from '../ui/PermissionsEditor';
@@ -44,6 +45,9 @@ function OverviewTab({
   error,
   canManageChannels,
   onTogglePrivate,
+  mediaPrivacyMask,
+  isSavingMediaPrivacy,
+  onToggleMediaPrivacy,
   onRenameChannel,
   onDeleteChannel,
 }: {
@@ -56,6 +60,9 @@ function OverviewTab({
   error: string;
   canManageChannels: boolean;
   onTogglePrivate: () => void;
+  mediaPrivacyMask?: boolean;
+  isSavingMediaPrivacy: boolean;
+  onToggleMediaPrivacy: (enabled: boolean) => Promise<void>;
   onRenameChannel: (name: string) => Promise<void>;
   onDeleteChannel: () => void;
 }) {
@@ -140,6 +147,21 @@ function OverviewTab({
         </div>
       )}
 
+      {channelType === 'text' && (
+        <div className="flex items-center justify-between gap-4 border-t border-border-soft pt-2">
+          <div>
+            <div className="text-sm font-medium text-txt-primary">{t('spaces:channel.settings.mediaPrivacy.label')}</div>
+            <div className="mt-0.5 text-xs text-txt-tertiary">{t('spaces:channel.settings.mediaPrivacy.description')}</div>
+          </div>
+          <Toggle
+            enabled={mediaPrivacyMask === true}
+            disabled={!canManageChannels || mediaPrivacyMask === undefined || isSavingMediaPrivacy}
+            ariaLabel={t('spaces:channel.settings.mediaPrivacy.label')}
+            onChange={(enabled) => void onToggleMediaPrivacy(enabled)}
+          />
+        </div>
+      )}
+
       {canManageChannels && (
         <div className="pt-4 border-t border-border-soft">
           <label className="block text-xs font-bold text-accent-rose uppercase mb-2">{t('common:labels.dangerZone')}</label>
@@ -166,6 +188,7 @@ export function ChannelSettingsModal() {
   const channels = useSpaceStore((s) => s.channels);
   const spaces = useSpaceStore((s) => s.spaces);
   const spacePermissions = useSpaceStore((s) => s.spacePermissions);
+  const channelPermissions = useSpaceStore((s) => s.channelPermissions);
 
   const [tab, setTab] = useState<'overview' | 'permissions'>('overview');
   const [isPrivate, setIsPrivate] = useState(false);
@@ -174,6 +197,7 @@ export function ChannelSettingsModal() {
   const [error, setError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSavingMediaPrivacy, setIsSavingMediaPrivacy] = useState(false);
   const setChannels = useSpaceStore((s) => s.setChannels);
 
   const isOpen = activeModal === 'channelSettings';
@@ -181,7 +205,7 @@ export function ChannelSettingsModal() {
   const channel = channels.find(c => c.id === channelId);
 
   const myPerms = currentSpaceId ? spacePermissions.get(currentSpaceId) : undefined;
-  const canManageChannels = myPerms !== undefined && hasPermissionBit(myPerms, PermissionBits.MANAGE_CHANNELS);
+  const canManageChannels = hasPermissionBit(channelId ? channelPermissions.get(channelId) ?? myPerms : myPerms, PermissionBits.MANAGE_CHANNELS);
   const canManageRoles = myPerms !== undefined && hasPermissionBit(myPerms, PermissionBits.MANAGE_ROLES);
 
   // Reset state when modal closes
@@ -293,6 +317,24 @@ export function ChannelSettingsModal() {
 
   const showTabs = canManageRoles;
 
+  const handleToggleMediaPrivacy = async (enabled: boolean) => {
+    if (!canManageChannels || isSavingMediaPrivacy) return;
+    const origin = space?._instanceOrigin ?? '';
+    setError('');
+    setIsSavingMediaPrivacy(true);
+    try {
+      const updated = await getApiForOrigin(origin).channels.update(channelId, { mediaPrivacyMask: enabled });
+      setChannels(useSpaceStore.getState().channels.map((item) => item.id === channelId
+        ? { ...item, mediaPrivacyMask: updated.mediaPrivacyMask }
+        : item));
+      void refreshMediaPrivacy(origin, channelId, updated.mediaPrivacyMask);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setIsSavingMediaPrivacy(false);
+    }
+  };
+
   const tabClass = (target: typeof tab) =>
     `w-full text-left px-2.5 py-1.5 rounded text-sm transition-colors ${
       tab === target ? 'bg-interactive-selected text-txt-primary' : 'text-txt-tertiary hover:text-txt-secondary hover:bg-interactive-hover'
@@ -328,6 +370,9 @@ export function ChannelSettingsModal() {
                   error={error}
                   canManageChannels={canManageChannels}
                   onTogglePrivate={handleToggle}
+                  mediaPrivacyMask={channel.mediaPrivacyMask}
+                  isSavingMediaPrivacy={isSavingMediaPrivacy}
+                  onToggleMediaPrivacy={handleToggleMediaPrivacy}
                   onRenameChannel={handleRenameChannel}
                   onDeleteChannel={() => setShowDeleteConfirm(true)}
                 />
@@ -365,6 +410,9 @@ export function ChannelSettingsModal() {
             error={error}
             canManageChannels={canManageChannels}
             onTogglePrivate={handleToggle}
+            mediaPrivacyMask={channel.mediaPrivacyMask}
+            isSavingMediaPrivacy={isSavingMediaPrivacy}
+            onToggleMediaPrivacy={handleToggleMediaPrivacy}
             onRenameChannel={handleRenameChannel}
             onDeleteChannel={() => setShowDeleteConfirm(true)}
           />

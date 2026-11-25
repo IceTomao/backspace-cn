@@ -210,6 +210,7 @@ export const ERROR_CODES = [
   'channel_name_required',
   'channel_name_length',
   'channel_type_invalid',
+  'channel_media_privacy_mask_invalid',
   'category_not_in_space',
   'channel_not_in_space',
   'position_invalid',

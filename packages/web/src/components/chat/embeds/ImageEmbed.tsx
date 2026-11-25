@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import type { Embed } from '@backspace/shared';
 import { useUIStore } from '../../../stores/uiStore';
+import { MediaPrivacyChannel } from '../MediaPrivacy';
 
 interface ImageEmbedProps {
   embed: Embed;
@@ -8,8 +9,10 @@ interface ImageEmbedProps {
 
 export function ImageEmbed({ embed }: ImageEmbedProps) {
   const openImagePreview = useUIStore((s) => s.openImagePreview);
+  const channelId = useContext(MediaPrivacyChannel);
   const isMobile = useUIStore((s) => s.isMobile);
   const imageUrl = embed.image ?? embed.url;
+  const previewImage = () => channelId ? openImagePreview(imageUrl, channelId) : openImagePreview(imageUrl);
   const { width, height } = embed;
 
   return (
@@ -28,15 +31,15 @@ export function ImageEmbed({ embed }: ImageEmbedProps) {
           loading="lazy"
           referrerPolicy="no-referrer"
           onClick={() => {
-            if (isMobile) openImagePreview(imageUrl);
+            if (isMobile) previewImage();
           }}
           onDoubleClick={() => {
-            if (!isMobile) openImagePreview(imageUrl);
+            if (!isMobile) previewImage();
           }}
           onKeyDown={(event) => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
-            openImagePreview(imageUrl);
+            previewImage();
           }}
         />
       </div>

@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Highlight, themes } from 'prism-react-renderer';
 import type { Components } from 'react-markdown';
 import { MentionBadge } from './MentionBadge';
+import { MediaPrivacyItem } from './MediaPrivacy';
 import { remarkEmojiShortcodes } from '../../utils/emojiShortcodes';
 
 // ─── Remark Plugin: Tag Bare Fenced Blocks ─────────────────────────────────
@@ -187,17 +188,19 @@ function buildComponents(): Components {
     hr: () => <hr className="border-border-soft my-2" />,
 
     // Images (in markdown content — not attachments)
-    img: ({ src, alt }) => (
-      <div className="mt-1 max-w-[400px]">
-        <img
-          src={src}
-          alt={alt ?? ''}
-          className="max-w-full max-h-[300px] rounded-md"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          crossOrigin="anonymous"
-        />
-      </div>
+    img: ({ src, alt, node }) => (
+      <MediaPrivacyItem item={`markdown:${node?.position?.start.offset ?? 0}:${src}`}>
+        <span className="mt-1 block max-w-[400px]">
+          <img
+            src={src}
+            alt={alt ?? ''}
+            className="max-w-full max-h-[300px] rounded-md"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            crossOrigin="anonymous"
+          />
+        </span>
+      </MediaPrivacyItem>
     ),
 
     // Tables (GFM)

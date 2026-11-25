@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Attachment } from '@backspace/shared';
 import { AttachmentRenderer } from './AttachmentRenderer';
+import { MediaPrivacyButton, MediaPrivacyChannel, MediaPrivacyMessage } from './MediaPrivacy';
+import { useMediaPrivacyStore } from '../../stores/mediaPrivacyStore';
 
 const native = vi.hoisted(() => ({ android: false, call: vi.fn(), download: vi.fn() }));
 vi.mock('../../platform/android', () => ({
@@ -32,6 +34,42 @@ it('offers playback for legacy generic MP4 and a false server hint without prelo
   expect(video.src).toContain('/api/uploads/clip.mp4');
   expect(video).toHaveAttribute('preload', 'none'); expect(video).toHaveAttribute('playsinline');
   expect(video).toHaveAttribute('controls'); expect(video).not.toHaveAttribute('autoplay');
+});
+
+it('mounts media only after reveal and clears every reveal when restoring the masks', () => {
+  const visit = { origin: '', spaceId: 'space', userId: 'user', channelId: 'channel' };
+  const renderChannel = (includeNew = false) => (
+    <MediaPrivacyChannel.Provider value={visit.channelId}>
+      <MediaPrivacyButton channelId={visit.channelId} />
+      <MediaPrivacyMessage.Provider value="historical">
+        <AttachmentRenderer attachment={attachment} />
+        <AttachmentRenderer attachment={{ ...attachment, id: 'gif', filename: 'ordinary.gif', originalName: 'ordinary.gif', mimetype: 'image/gif', thumbnailFilename: undefined }} />
+      </MediaPrivacyMessage.Provider>
+      {includeNew && <MediaPrivacyMessage.Provider value="new"><AttachmentRenderer attachment={attachment} /></MediaPrivacyMessage.Provider>}
+    </MediaPrivacyChannel.Provider>
+  );
+
+  useMediaPrivacyStore.setState({ visit, enabled: null });
+  const { container, rerender } = render(renderChannel());
+  expect(container.querySelector('img, video')).toBeNull();
+  expect(screen.getAllByRole('button', { name: 'Reveal media' })[0]).toBeDisabled();
+
+  act(() => useMediaPrivacyStore.setState({ enabled: true }));
+  fireEvent.click(screen.getAllByRole('button', { name: 'Reveal media' })[0]!);
+  expect(container.querySelectorAll('img')).toHaveLength(1);
+  expect(container.querySelector('video')).toBeNull();
+  expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+  rerender(renderChannel(true));
+  expect(screen.getAllByRole('button', { name: 'Reveal media' })).toHaveLength(2);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show all media' }));
+  expect(container.querySelectorAll('img')).toHaveLength(3);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Play video: Camera.MP4' })[0]!);
+  expect(container.querySelector('video')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Restore media masks' }));
+  expect(container.querySelector('img, video')).toBeNull();
+  expect(screen.getAllByRole('button', { name: 'Reveal media' })).toHaveLength(3);
+  useMediaPrivacyStore.setState({ visit: null, enabled: null });
 });
 it('distinguishes network failures and lets the viewer retry or download the original', () => {
   const { container } = render(<AttachmentRenderer attachment={attachment} />);

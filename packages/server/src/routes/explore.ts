@@ -150,6 +150,7 @@ function buildFullSpace(spaceId: string, forUserId: string): SpaceWithChannelsAn
         topic: ch.topic,
         position: ch.position ?? 0,
         categoryId: ch.categoryId ?? null,
+        mediaPrivacyMask: ch.mediaPrivacyMask,
         createdAt: ch.createdAt,
         myPermissions: permissionsToString(chPerms),
       });

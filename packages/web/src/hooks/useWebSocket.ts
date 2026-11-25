@@ -4,6 +4,7 @@ import React, { useEffect, useRef } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { useSpaceStore, getChannelOrigin, getMyUserIdForOrigin, setMyUserIdForOrigin, resolveDmChannelId } from '../stores/spaceStore';
 import { useChatStore } from '../stores/chatStore';
+import { invalidateMediaPrivacy, refreshMediaPrivacy } from '../stores/mediaPrivacyStore';
 import { useVoiceStore } from '../stores/voiceStore';
 import { useSocialStore } from '../stores/socialStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -117,6 +118,7 @@ function attachNativeTransport(): void {
       }
     }),
     onAndroid<{ origin: string; connected: boolean }>('socketStatus', ({ origin, connected }) => {
+      if (!connected) invalidateMediaPrivacy(origin);
       if (connected) nativeConnected.add(origin); else nativeConnected.delete(origin);
       if (!origin) connectionListeners.forEach(listener => listener(connected));
       if (origin) void import('../stores/instanceStore').then(({ useInstanceStore }) =>
@@ -236,6 +238,7 @@ function handleEvent(origin: string, event: ServerEvent): void {
 
   switch (event.type) {
     case 'ready':
+      void refreshMediaPrivacy(origin);
       // Register this user's ID for cross-instance self-identification
       registerSelfId(event.user.id);
 
@@ -1321,6 +1324,7 @@ function handleEvent(origin: string, event: ServerEvent): void {
     }
 
     case 'channel_updated': {
+      void refreshMediaPrivacy(origin, event.channel.id, event.channel.mediaPrivacyMask);
       const { currentSpaceId: curSpaceId2, channels: curChannels2, setChannels: setChannels2, channelPermissions: chPermsMap2 } = useSpaceStore.getState();
       if (event.spaceId === curSpaceId2) {
         const exists = curChannels2.some(c => c.id === event.channel.id);
@@ -1340,6 +1344,7 @@ function handleEvent(origin: string, event: ServerEvent): void {
     }
 
     case 'channel_deleted': {
+      if (event.channelId === useChatStore.getState().currentChannelId) invalidateMediaPrivacy(origin);
       const { currentSpaceId: curSpaceId3, channels: curChannels3, setChannels: setChannels3, channelPermissions: chPermsMap3, channelToSpaceMap: ctsMap3, channelOriginMap: coMap3 } = useSpaceStore.getState();
       if (event.spaceId === curSpaceId3) {
         setChannels3(curChannels3.filter(c => c.id !== event.channelId));
@@ -1541,6 +1546,7 @@ function connectToOrigin(origin: string, token: string): void {
   };
 
   ws.onclose = () => {
+    invalidateMediaPrivacy(origin);
     conn.ws = null;
     stopHeartbeat(conn);
     // Mark remote instance as disconnected in instanceStore

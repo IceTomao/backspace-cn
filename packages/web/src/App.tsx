@@ -11,6 +11,7 @@ import { useAuthStore } from './stores/authStore';
 import { isElectron } from './platform/platform';
 import { isAndroid } from './platform/android';
 import { AndroidLifecycle } from './components/android/AndroidLifecycle';
+import { useMediaPrivacyVisibility } from './hooks/useMediaPrivacyLifecycle';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -33,6 +34,7 @@ function AuthRedirect({ children }: { children: React.ReactNode }) {
 }
 
 export function App() {
+  useMediaPrivacyVisibility();
   // Boot-completion ping — disarms the main-process boot timer.
   // MUST be first hook on the unconditional render path. Single fire on
   // first commit; main owns "armed once" gating so duplicate calls (e.g.

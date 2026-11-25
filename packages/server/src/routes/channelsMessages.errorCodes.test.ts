@@ -13,6 +13,7 @@ import {
   permissionsToString,
 } from '@backspace/shared/src/permissions.js';
 import { MAX_MESSAGE_LENGTH } from '@backspace/shared';
+import { connectionManager } from '../ws/handler.js';
 
 setWorkerId(3);
 
@@ -122,12 +123,12 @@ function seedSpace(spaceId: string, ownerId: string, memberIds: string[]): void 
   }
 }
 
-function seedChannel(channelId: string, spaceId: string): void {
+function seedChannel(channelId: string, spaceId: string, type: 'text' | 'voice' = 'text'): void {
   testDb.insert(schema.channels).values({
     id: channelId,
     spaceId,
     name: channelId,
-    type: 'text',
+    type,
     position: 0,
     categoryId: null,
     createdAt: NOW,
@@ -249,6 +250,45 @@ describe('channel and message routes send error codes', () => {
   });
 
   describe('channels and categories', () => {
+    it('defaults to uncovered and persists and broadcasts the text channel setting', async () => {
+      const list = () => app.inject({ method: 'GET', url: `/api/spaces/${SPACE}/channels` });
+      const update = (mediaPrivacyMask: boolean) => app.inject({
+        method: 'PATCH', url: `/api/channels/${GENERAL}`, payload: { mediaPrivacyMask },
+      });
+      expect((await list()).json()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: GENERAL, mediaPrivacyMask: false }),
+      ]));
+      expect((await update(true)).statusCode).toBe(403);
+
+      currentUserId = 'owner';
+      expect((await update(true)).json()).toMatchObject({ id: GENERAL, mediaPrivacyMask: true });
+      expect(connectionManager.sendToChannel).toHaveBeenCalledWith(SPACE, GENERAL, {
+        type: 'channel_updated',
+        spaceId: SPACE,
+        channel: expect.objectContaining({ id: GENERAL, mediaPrivacyMask: true }),
+      });
+      expect(sqlite.prepare('SELECT media_privacy_mask FROM channels WHERE id = ?').get(GENERAL))
+        .toEqual({ media_privacy_mask: 1 });
+      currentUserId = 'member';
+      expect((await list()).json()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: GENERAL, mediaPrivacyMask: true }),
+      ]));
+      currentUserId = 'owner';
+      expect((await update(false)).json()).toMatchObject({ mediaPrivacyMask: false });
+    });
+
+    it('rejects non-boolean values and voice channel updates', async () => {
+      currentUserId = 'owner';
+      seedChannel('voice-room', SPACE, 'voice');
+      for (const [id, value] of [[GENERAL, 'true'], [GENERAL, null], ['voice-room', true]]) {
+        const response = await app.inject({
+          method: 'PATCH', url: `/api/channels/${id}`, payload: { mediaPrivacyMask: value },
+        });
+        expect(response.statusCode).toBe(400);
+        expect(response.json().code).toBe('channel_media_privacy_mask_invalid');
+      }
+    });
+
     it('unknown space → space_not_found', async () => {
       const res = await app.inject({ method: 'POST', url: '/api/spaces/nope/channels', payload: { name: 'x' } });
       expect(res.statusCode).toBe(404);

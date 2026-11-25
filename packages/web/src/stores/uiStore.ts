@@ -48,6 +48,7 @@ interface UIState {
   isMobile: boolean;
   showDms: boolean;
   imagePreviewUrl: string | null;
+  imagePreviewChannelId: string | null;
   mobileSearchOpen: boolean;
   userProfilePopout: {
     user: User | null;
@@ -64,7 +65,7 @@ interface UIState {
   closeModal: () => void;
   setIsMobile: (isMobile: boolean) => void;
   setShowDms: (show: boolean) => void;
-  openImagePreview: (url: string) => void;
+  openImagePreview: (url: string, channelId?: string | null) => void;
   closeImagePreview: () => void;
   setMobileSearchOpen: (open: boolean) => void;
   openUserProfile: (user: User, anchor: AnchorRect, placement?: Placement) => void;
@@ -108,6 +109,7 @@ export const useUIStore = create<UIState>()(
       isMobile: false,
       showDms: false,
       imagePreviewUrl: null,
+      imagePreviewChannelId: null,
       mobileSearchOpen: false,
       userProfilePopout: {
         user: null,
@@ -151,8 +153,10 @@ export const useUIStore = create<UIState>()(
 
       setShowDms: (show) => set({ showDms: show }),
 
-      openImagePreview: (url) => set({ activeModal: 'imagePreview', imagePreviewUrl: url }),
-      closeImagePreview: () => set({ activeModal: null, imagePreviewUrl: null }),
+      openImagePreview: (url, channelId) => set({
+        activeModal: 'imagePreview', imagePreviewUrl: url, imagePreviewChannelId: channelId ?? null,
+      }),
+      closeImagePreview: () => set({ activeModal: null, imagePreviewUrl: null, imagePreviewChannelId: null }),
       setMobileSearchOpen: (open) => set({ mobileSearchOpen: open }),
 
       openUserProfile: (user, anchor, placement = 'right') => {

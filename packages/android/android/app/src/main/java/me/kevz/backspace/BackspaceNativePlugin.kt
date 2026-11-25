@@ -153,6 +153,14 @@ class BackspaceNativePlugin : Plugin() {
                     "sync" -> { runtime.sync(data.optJSONObject("cursors") ?: JSONObject()); JSONObject() }
                     "resync" -> { runtime.resynchronize(data.optString("origin")); JSONObject() }
                     "webVisibility" -> { runtime.setWebVisible(data.optBoolean("visible"), data.optJSONObject("cursors") ?: JSONObject()); JSONObject() }
+                    "mediaPrivacyFrameState" -> {
+                        val main = activity as MainActivity
+                        JSONObject().put("visible", main.isMediaPrivacyResumed).put("generation", main.mediaPrivacyGeneration)
+                    }
+                    "mediaPrivacyFrameReady" -> {
+                        (activity as MainActivity).mediaPrivacyFrameReady(data.getLong("generation"))
+                        JSONObject()
+                    }
                     "ackEvents" -> {
                         data.optJSONObject("cursors")?.let { cursors -> cursors.keys().forEach { runtime.acknowledge(it, cursors.getLong(it)) } }
                         JSONObject()

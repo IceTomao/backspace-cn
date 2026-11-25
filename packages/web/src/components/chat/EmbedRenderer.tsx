@@ -4,12 +4,24 @@ import { GenericEmbed } from './embeds/GenericEmbed';
 import { VideoEmbed } from './embeds/VideoEmbed';
 import { ImageEmbed } from './embeds/ImageEmbed';
 import { RichEmbed } from './embeds/RichEmbed';
+import { MediaPrivacyItem } from './MediaPrivacy';
 
 interface EmbedRendererProps {
   embed: Embed;
 }
 
 export function EmbedRenderer({ embed }: EmbedRendererProps) {
+  if (embed.embedType === 'generic') {
+    return <GenericEmbed embed={embed} />;
+  }
+  return (
+    <MediaPrivacyItem item={`embed:${embed.id}`}>
+      <EmbedContent embed={embed} />
+    </MediaPrivacyItem>
+  );
+}
+
+function EmbedContent({ embed }: EmbedRendererProps) {
   switch (embed.embedType) {
     case 'video':
       // i18n-check: allow-literal (switch/case punctuation between JSX returns, not text)

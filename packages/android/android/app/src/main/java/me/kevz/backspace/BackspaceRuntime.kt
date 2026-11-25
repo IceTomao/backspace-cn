@@ -111,10 +111,11 @@ class BackspaceRuntime internal constructor(
             sync(cursors)
         }
     }
-    fun notifyWebVisibility(value: Boolean) {
+    @JvmOverloads
+    fun notifyWebVisibility(value: Boolean, generation: Long? = null) {
         webVisible = value
         if (!value) lastWebVisibilityCursors = null
-        emit?.invoke("webVisibility", JSONObject().put("visible", value))
+        emit?.invoke("webVisibility", JSONObject().put("visible", value).put("generation", generation))
     }
     private fun canEmitWeb() = foreground && webVisible
     private fun emitWeb(name: String, value: JSONObject) { if (canEmitWeb()) emit?.invoke(name, value) }

@@ -9,6 +9,7 @@ import { MainContent } from './MainContent';
 import { RightPanel } from './RightPanel';
 import { MobileShell } from './MobileShell';
 import { ImagePreview } from '../chat/ImagePreview';
+import { useMediaPrivacyLifecycle } from '../../hooks/useMediaPrivacyLifecycle';
 import { CreateSpaceModal } from '../modals/CreateSpace';
 import { JoinSpaceModal } from '../modals/JoinSpace';
 import { CreateChannelModal } from '../modals/CreateChannel';
@@ -224,6 +225,7 @@ export function AppLayout() {
   }, []);
 
   const { user, isLoading } = useAuth();
+  useMediaPrivacyLifecycle(user?.id, spaceId, channelId);
   const showBootSkeleton = useDelayedLoading(isLoading);
   const setCurrentSpace = useSpaceStore((s) => s.setCurrentSpace);
   const loadSpaceDetail = useSpaceStore((s) => s.loadSpaceDetail);

@@ -13,6 +13,11 @@
       "confirmDelete": "Confirm delete"
     }
   },
+  "mediaPrivacy": {
+    "reveal": "Reveal media",
+    "showAll": "Show all media",
+    "restore": "Restore media masks"
+  },
   "typing": {
     "one": "{{name}} is typing…",
     "two": "{{first}} and {{second}} are typing…",

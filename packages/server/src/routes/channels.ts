@@ -25,6 +25,7 @@ function rowToChannel(row: typeof schema.channels.$inferSelect): Channel {
     topic: row.topic,
     position: row.position ?? 0,
     categoryId: row.categoryId ?? null,
+    mediaPrivacyMask: row.mediaPrivacyMask,
     createdAt: row.createdAt,
   };
 }
@@ -271,7 +272,7 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
     preHandler: authenticate,
   }, async (request, reply) => {
     const { id } = request.params;
-    const { name, topic, position, categoryId } = request.body;
+    const { name, topic, position, categoryId, mediaPrivacyMask } = request.body;
     const db = getDb();
 
     const channel = db.select().from(schema.channels).where(eq(schema.channels.id, id)).get();
@@ -285,6 +286,13 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const updates: Partial<typeof schema.channels.$inferInsert> = {};
+
+    if (mediaPrivacyMask !== undefined) {
+      if (typeof mediaPrivacyMask !== 'boolean' || channel.type !== 'text') {
+        return sendError(reply, 400, 'channel_media_privacy_mask_invalid');
+      }
+      updates.mediaPrivacyMask = mediaPrivacyMask;
+    }
 
     if (name !== undefined) {
       const trimmedName = name.trim().toLowerCase().replace(/\s+/g, '-');

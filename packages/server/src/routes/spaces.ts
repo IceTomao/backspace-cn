@@ -53,6 +53,7 @@ function rowToChannel(row: typeof schema.channels.$inferSelect): Channel {
     topic: row.topic,
     position: row.position ?? 0,
     categoryId: row.categoryId ?? null,
+    mediaPrivacyMask: row.mediaPrivacyMask,
     createdAt: row.createdAt,
   };
 }

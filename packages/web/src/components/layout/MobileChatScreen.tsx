@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search } from 'lucide-react';
+import { Search, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useUIStore } from '../../stores/uiStore';
 import { useChatStore } from '../../stores/chatStore';
 import { useSpaceStore } from '../../stores/spaceStore';
 import { useAuthStore } from '../../stores/authStore';
 import { MessageList } from '../chat/MessageList';
+import { MediaPrivacyButton, MediaPrivacyChannel } from '../chat/MediaPrivacy';
 import { MessageInput } from '../chat/MessageInput';
 import { SearchPopover } from '../chat/SearchPopover';
 import { TransferIndicator } from './TransferIndicator';
@@ -14,6 +15,7 @@ import { formatDmHeaderName, formatDmInputLabel, isDeletedPartnerDm } from '../.
 import { DmDeletedNotice } from '../chat/DmDeletedNotice';
 import { useCanonicalUserView } from '../../utils/userViewLookup';
 import type { User } from '@backspace/shared';
+import { hasPermissionBit, PermissionBits } from '../../utils/permissions';
 
 const FALLBACK_USER = { id: '', username: '', createdAt: 0, isAdmin: false, replicatedInstances: [] } as unknown as User;
 
@@ -22,7 +24,7 @@ interface MobileChatScreenProps {
 }
 
 export function MobileChatScreen({ params }: MobileChatScreenProps) {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation(['common', 'spaces']);
   const popMobileScreen = useUIStore((s) => s.popMobileScreen);
   const pushMobileScreen = useUIStore((s) => s.pushMobileScreen);
   const searchOpen = useUIStore((s) => s.mobileSearchOpen);
@@ -37,8 +39,12 @@ export function MobileChatScreen({ params }: MobileChatScreenProps) {
   const loadMessages = useChatStore((s) => s.loadMessages);
   const setCurrentChannel = useChatStore((s) => s.setCurrentChannel);
   const channels = useSpaceStore((s) => s.channels);
+  const channelPermissions = useSpaceStore((s) => channelId ? s.channelPermissions.get(channelId) : undefined);
+  const openModal = useUIStore((s) => s.openModal);
   const dmChannels = useSpaceStore((s) => s.dmChannels);
   const authUser = useAuthStore((s) => s.user);
+  const channel = isDm ? undefined : channels.find(c => c.id === channelId && c.spaceId === spaceId);
+  const textChannelId = !isDm && channel?.type !== 'voice' ? channelId ?? null : null;
 
   useEffect(() => {
     if (!channelId) return;
@@ -86,8 +92,7 @@ export function MobileChatScreen({ params }: MobileChatScreenProps) {
       channelName = '私信';
     }
   } else if (!isDm && channelId) {
-    const ch = channels.find(c => c.id === channelId);
-    channelName = ch?.name || 'channel';
+    channelName = channel?.name || 'channel';
   }
 
   return (
@@ -104,6 +109,15 @@ export function MobileChatScreen({ params }: MobileChatScreenProps) {
             {isDm ? channelName : `# ${channelName}`}
           </h1>
         </div>
+        {textChannelId && <MediaPrivacyButton channelId={textChannelId} />}
+        {channel?.type === 'text' && hasPermissionBit(channelPermissions, PermissionBits.MANAGE_CHANNELS) && (
+          <button
+            type="button"
+            onClick={() => openModal('channelSettings', { channelId })}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-txt-secondary hover:text-txt-primary"
+            aria-label={t('spaces:channels.settings')}
+          ><Settings className="h-5 w-5" aria-hidden="true" /></button>
+        )}
         <button
           ref={searchButtonRef}
           type="button"
@@ -148,10 +162,12 @@ export function MobileChatScreen({ params }: MobileChatScreenProps) {
           TypingIndicator is rendered inside MessageInput itself (anchored
           `absolute bottom-full` to the bubble), so we don't render it here. */}
       <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
-        {channelId && <MessageList channelId={channelId} jumpToMessageId={jumpToMessageId} onJumpComplete={() => setJumpToMessageId(null)} />}
-        {channelId && (dmPartnerDeleted
-          ? <DmDeletedNotice />
-          : <MessageInput channelId={channelId} channelName={channelName} placeholder={inputPlaceholder} />)}
+        <MediaPrivacyChannel.Provider value={textChannelId}>
+          {channelId && <MessageList channelId={channelId} jumpToMessageId={jumpToMessageId} onJumpComplete={() => setJumpToMessageId(null)} />}
+          {channelId && (dmPartnerDeleted
+            ? <DmDeletedNotice />
+            : <MessageInput channelId={channelId} channelName={channelName} placeholder={inputPlaceholder} />)}
+        </MediaPrivacyChannel.Provider>
       </div>
       {channelId && <SearchPopover
         open={searchOpen}

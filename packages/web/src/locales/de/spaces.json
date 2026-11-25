@@ -50,6 +50,10 @@
     "settings": {
       "title": "Kanaleinstellungen",
       "channelLabel": "Kanal",
+      "mediaPrivacy": {
+        "label": "Sichtschutz für Medien",
+        "description": "Bilder, Videos und andere Medien in diesem Kanal werden standardmäßig verdeckt. Zum Anzeigen anklicken. Sticker bleiben sichtbar."
+      },
       "private": {
         "label": "Privater Kanal",
         "description": "Nur ausgewählte Mitglieder und Rollen können diesen Kanal sehen.",

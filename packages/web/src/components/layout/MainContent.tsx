@@ -6,6 +6,7 @@ import { useChatStore } from '../../stores/chatStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useAuthStore } from '../../stores/authStore';
 import { MessageList } from '../chat/MessageList';
+import { MediaPrivacyButton, MediaPrivacyChannel } from '../chat/MediaPrivacy';
 import { MessageInput } from '../chat/MessageInput';
 import { VoiceGrid } from '../voice/VoiceGrid';
 import { VoiceControlBar } from '../voice/VoiceControlBar';
@@ -577,11 +578,14 @@ export function MainContent() {
           </button>
           <TransferIndicator />
           <div className="w-[1px] h-5 bg-border-soft mx-1" />
+          <MediaPrivacyButton channelId={currentChannelId} />
           <MemberListToggleButton />
         </div>
       </div>
-      <MessageList channelId={currentChannelId} jumpToMessageId={jumpToMessageId} onJumpComplete={() => setJumpToMessageId(null)} />
-      <MessageInput channelId={currentChannelId} channelName={channel.name} />
+      <MediaPrivacyChannel.Provider value={currentChannelId}>
+        <MessageList channelId={currentChannelId} jumpToMessageId={jumpToMessageId} onJumpComplete={() => setJumpToMessageId(null)} />
+        <MessageInput channelId={currentChannelId} channelName={channel.name} />
+      </MediaPrivacyChannel.Provider>
       <SearchPopover
         open={searchOpen}
         onClose={() => setSearchOpen(false)}

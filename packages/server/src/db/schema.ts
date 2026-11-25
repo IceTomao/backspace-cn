@@ -73,6 +73,7 @@ export const channels = sqliteTable('channels', {
   topic: text('topic'),
   position: integer('position').default(0),
   categoryId: text('category_id'),
+  mediaPrivacyMask: integer('media_privacy_mask', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
 }, (table) => ({
   spaceIdx: index('idx_channels_space_id').on(table.spaceId),

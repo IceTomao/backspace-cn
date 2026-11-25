@@ -17,6 +17,7 @@ import { useSpaceStore } from '../../stores/spaceStore';
 import { useUIStore } from '../../stores/uiStore';
 import { AttachmentRenderer, attUrlOf } from './AttachmentRenderer';
 import { ReplyPreview } from './ReplyPreview';
+import { MediaPrivacyItem, MediaPrivacyMessage } from './MediaPrivacy';
 import { AttachmentProgress } from './AttachmentProgress';
 import { EmbedRenderer } from './EmbedRenderer';
 import { Username } from '../ui/Username';
@@ -529,14 +530,16 @@ export function Message({ message, isCompact, isFirstInGroup, previousMessageId,
         ) : (
           <div className="flex flex-col gap-1">
             {isGifOnly ? (
-              <div className="mt-1 max-w-[400px]">
-                <img
-                  src={message.content!.trim()}
-                  alt={t('chat:message.gifAlt')}
-                  className="max-w-full max-h-[300px] rounded-lg"
-                  loading="lazy"
-                />
-              </div>
+              <MediaPrivacyItem item={`gif:${message.content!.trim()}`}>
+                <div className="mt-1 max-w-[400px]">
+                  <img
+                    src={message.content!.trim()}
+                    alt={t('chat:message.gifAlt')}
+                    className="max-w-full max-h-[300px] rounded-lg"
+                    loading="lazy"
+                  />
+                </div>
+              </MediaPrivacyItem>
             ) : imageEmbedSourceUrl ? (
               <>
                 {/* URL text suppressed — embeds render the image */}
@@ -786,8 +789,10 @@ export function Message({ message, isCompact, isFirstInGroup, previousMessageId,
   );
 
   return (
-    <div data-context-menu onContextMenu={handleContextMenu}>
-      {content}
-    </div>
+    <MediaPrivacyMessage.Provider value={message.id}>
+      <div data-context-menu onContextMenu={handleContextMenu}>
+        {content}
+      </div>
+    </MediaPrivacyMessage.Provider>
   );
 }
