@@ -120,25 +120,29 @@ export function buildVoiceModMenuItems(targetUserId: string, channelId: string):
  * order they appear. Shared so the voice grid, the channel member list and the
  * mobile member list cannot drift apart.
  *
- * `includeStreamAudio` is for the screen-share tile, where the same person's
- * picture and their screen-share audio are what the menu is about: one slider
- * drives both gains instead of stacking a second "stream volume" slider that
- * would compete with this one for the same mental model.
+ * Voice volume and screen-share audio are separate gains, because they are
+ * separate sounds: ducking someone's microphone must not duck the music they
+ * are sharing, and a quiet voice next to a loud game should be fixable on both
+ * sides. The share gain is only offered while that person is actually sharing,
+ * so a menu for a plain voice participant stays one slider long.
  */
-export function buildParticipantAudioMenuItems(
-  targetUserId: string,
-  options: { includeStreamAudio?: boolean } = {},
-): ContextMenuItem[] {
+export function buildParticipantAudioMenuItems(targetUserId: string): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
     {
       key: 'volume',
       type: 'custom',
-      render: () => React.createElement(VolumeSliderItem, {
-        userId: targetUserId,
-        includeStreamAudio: options.includeStreamAudio,
-      }),
+      render: () => React.createElement(VolumeSliderItem, { userId: targetUserId }),
     },
   ];
+
+  const sharesAudio = isScreenSharingParticipant(targetUserId);
+  if (sharesAudio) {
+    items.push({
+      key: 'stream-volume',
+      type: 'custom',
+      render: () => React.createElement(StreamVolumeSliderItem, { userId: targetUserId }),
+    });
+  }
 
   // The Android app plays remote audio through the native voice bridge, not
   // through Web Audio, so an equalizer here would be a slider that does
@@ -155,37 +159,58 @@ export function buildParticipantAudioMenuItems(
 }
 
 /**
- * Volume slider for a voice participant, used as a `custom` context menu item.
- * Must be a component (not a plain function) because it subscribes to store state.
+ * Whether the menu for `userId` should offer the screen-share gain.
  *
- * With `includeStreamAudio` the control writes the participant volume and the
- * screen-share volume together: on a stream tile both tracks come from the same
- * person, so a slider that only moved the microphone would look broken while
- * they are sharing.
+ * Read straight from the store instead of taking a prop: the voice grid, the
+ * channel member list and the mobile member list all open the same menu, and
+ * only the store knows that the person was still sharing when the menu opened.
+ * Android is excluded because the native bridge publishes no screen audio at
+ * all, so the slider could not affect anything there.
  */
-export function VolumeSliderItem({ userId, includeStreamAudio = false }: { userId: string; includeStreamAudio?: boolean }) {
-  const { t } = useTranslation(['voice', 'common']);
+function isScreenSharingParticipant(userId: string): boolean {
+  if (isAndroid()) return false;
+  return useVoiceStore.getState().participants.some(
+    (participant) => participant.userId === userId && participant.isScreenSharing,
+  );
+}
+
+/**
+ * One slider row: label, track, value. Both volume items use it so the two
+ * sliders that can now appear in the same menu line up to the pixel.
+ */
+function VolumeRow({ label, value, onChange }: { label: string; value: number; onChange: (next: number) => void }) {
   const f = useFormatters();
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-14 shrink-0 truncate text-[11px] text-txt-tertiary" title={label}>
+        {label}
+      </span>
+      <input
+        type="range"
+        min="0"
+        max="200"
+        value={value}
+        aria-label={label}
+        onChange={(event) => onChange(parseInt(event.target.value, 10))}
+        className="h-1 min-w-0 flex-1 accent-accent-primary"
+      />
+      <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-txt-secondary">
+        {f.formatPercent(value)}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Voice volume for one participant, used as a `custom` context menu item.
+ * Must be a component (not a plain function) because it subscribes to store
+ * state.
+ */
+export function VolumeSliderItem({ userId }: { userId: string }) {
+  const { t } = useTranslation(['voice', 'common']);
   const volume = useVoiceStore((s) => s.participantVolumes.get(userId) ?? 100);
   const setParticipantVolume = useVoiceStore((s) => s.setParticipantVolume);
   const resetParticipantVolume = useVoiceStore((s) => s.resetParticipantVolume);
-  const setStreamVolume = useVoiceStore((s) => s.setStreamVolume);
-  const clearStreamVolume = useVoiceStore((s) => s.clearStreamVolume);
-
-  // The stream-tile menu exposes one slider for the participant and moves the
-  // screen-share gain with it only while the user is actually dragging. Merely
-  // opening the menu must not overwrite a stream gain the user tuned earlier,
-  // so there is deliberately no reconciling effect here.
-
-  const applyVolume = (next: number) => {
-    setParticipantVolume(userId, next);
-    if (includeStreamAudio) setStreamVolume(userId, next);
-  };
-
-  const resetVolume = () => {
-    resetParticipantVolume(userId);
-    if (includeStreamAudio) clearStreamVolume(userId);
-  };
 
   return (
     <div className="p-3 w-[280px]">
@@ -195,40 +220,57 @@ export function VolumeSliderItem({ userId, includeStreamAudio = false }: { userI
         </div>
         <button
           type="button"
-          onClick={resetVolume}
+          onClick={() => resetParticipantVolume(userId)}
           disabled={volume === 100}
           className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors disabled:opacity-40 disabled:hover:text-txt-tertiary"
         >
           {t('voice:participantMenu.volumeReset')}
         </button>
       </div>
-      {/* Same geometry as the equalizer rows below (label / slider / value on
-          one line, w-14 + flex-1 + w-12) so both sliders share left and right
-          edges instead of the volume bar starting at a different x. */}
-      <div className="flex items-center gap-2">
-        <span
-          className="w-14 shrink-0 truncate text-[11px] text-txt-tertiary"
-          title={t('voice:participantMenu.volumeRow')}
+      <VolumeRow
+        label={t('voice:participantMenu.volumeRow')}
+        value={volume}
+        onChange={(next) => setParticipantVolume(userId, next)}
+      />
+    </div>
+  );
+}
+
+/**
+ * Screen-share audio gain for one participant. Separate from the voice slider
+ * above: the microphone and the screen audio are two different sounds, and
+ * people routinely want the shared music quieter than the voice.
+ *
+ * Cleared, not set to 100, on reset — the store keeps an entry per user and an
+ * absent entry means "untouched", which is what lets a later share start at
+ * unity instead of a value someone dialled in for a previous one.
+ */
+export function StreamVolumeSliderItem({ userId }: { userId: string }) {
+  const { t } = useTranslation(['voice', 'common']);
+  const volume = useVoiceStore((s) => s.streamVolumes.get(userId) ?? 100);
+  const setStreamVolume = useVoiceStore((s) => s.setStreamVolume);
+  const clearStreamVolume = useVoiceStore((s) => s.clearStreamVolume);
+
+  return (
+    <div className="p-3 w-[280px]">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="text-xs text-txt-tertiary font-medium uppercase tracking-wider">
+          {t('voice:participantMenu.streamVolume')}
+        </div>
+        <button
+          type="button"
+          onClick={() => clearStreamVolume(userId)}
+          disabled={volume === 100}
+          className="text-[11px] text-txt-tertiary hover:text-txt-primary transition-colors disabled:opacity-40 disabled:hover:text-txt-tertiary"
         >
-          {t('voice:participantMenu.volumeRow')}
-        </span>
-        <input
-          type="range"
-          min="0"
-          max="200"
-          value={volume}
-          onChange={(e) => applyVolume(parseInt(e.target.value))}
-          className="h-1 min-w-0 flex-1 accent-accent-primary"
-        />
-        <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-txt-secondary">
-          {f.formatPercent(volume)}
-        </span>
+          {t('voice:participantMenu.volumeReset')}
+        </button>
       </div>
-      {includeStreamAudio && (
-        <p className="mt-2 text-[11px] leading-tight text-txt-tertiary">
-          {t('voice:participantMenu.userVolumeHint')}
-        </p>
-      )}
+      <VolumeRow
+        label={t('voice:participantMenu.streamVolumeRow')}
+        value={volume}
+        onChange={(next) => setStreamVolume(userId, next)}
+      />
     </div>
   );
 }

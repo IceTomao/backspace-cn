@@ -427,10 +427,10 @@ export function StreamTile({ tile, large, stats }: StreamTileProps) {
 
         items.push({ key: 'vol-sep', type: 'separator' });
 
-        // User volume + sound shaping. The shared menu builder is used with
-        // `includeStreamAudio` so the single slider also moves this user's
-        // screen-share gain; two competing volume sliders would be a bug.
-        items.push(...buildParticipantAudioMenuItems(userId, { includeStreamAudio: true }));
+        // Voice volume, plus the screen-share gain the shared builder adds for
+        // whoever is currently sharing — which, in this menu, is by definition
+        // the person whose stream is on the tile.
+        items.push(...buildParticipantAudioMenuItems(userId));
 
         items.push({ key: 'attenuation-sep', type: 'separator' });
 

@@ -31,7 +31,8 @@
     "stopWatchingCamera": "停止监视摄像头",
     "muteUser": "将用户静音",
     "userVolume": "用户音量",
-    "userVolumeHint": "同时调节该用户的语音和屏幕共享声音",
+    "streamVolume": "屏幕共享音量",
+    "streamVolumeRow": "共享",
     "volumeRow": "音量",
     "volumeReset": "重置为 100%",
     "eq": {

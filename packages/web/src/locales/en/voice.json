@@ -31,7 +31,8 @@
     "stopWatchingCamera": "Stop Watching Camera",
     "muteUser": "Mute User",
     "userVolume": "User Volume",
-    "userVolumeHint": "Controls this user's voice and screen-share audio",
+    "streamVolume": "Screen Share Volume",
+    "streamVolumeRow": "Share",
     "volumeRow": "Volume",
     "volumeReset": "Reset to 100%",
     "eq": {

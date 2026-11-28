@@ -31,7 +31,8 @@
     "stopWatchingCamera": "Kamera nicht mehr ansehen",
     "muteUser": "Nutzer stummschalten",
     "userVolume": "Nutzerlautstärke",
-    "userVolumeHint": "Regelt Stimme und Bildschirmfreigabe-Ton dieses Nutzers",
+    "streamVolume": "Freigabe-Ton",
+    "streamVolumeRow": "Freigabe",
     "volumeRow": "Lautstärke",
     "volumeReset": "Auf 100 % zurücksetzen",
     "eq": {

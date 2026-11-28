@@ -31,7 +31,8 @@
     "stopWatchingCamera": "Не смотреть камеру",
     "muteUser": "Заглушить пользователя",
     "userVolume": "Громкость пользователя",
-    "userVolumeHint": "Регулирует голос и звук демонстрации экрана этого пользователя",
+    "streamVolume": "Звук демонстрации",
+    "streamVolumeRow": "Экран",
     "volumeRow": "Громкость",
     "volumeReset": "Сбросить до 100 %",
     "eq": {
